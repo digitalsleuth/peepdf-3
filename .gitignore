@@ -1,0 +1,3 @@
+build*
+*.egg_info
+__pycache__
