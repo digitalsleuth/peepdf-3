@@ -3182,13 +3182,13 @@ class PDFConsole(cmd.Cmd):
         
         if version is not None:
             print(f'\rVersion {version}:')
-        print(f'{newLine}Start (d)\t\tEnd (d)\t\tSize (d)\t\tType and Id\r')
-        print(f'{"-" * 15}{" " * 7}{"-" * 15}{" " * 7}{"-" * 16}{" " * 5}{"-" * 34}\r')
+        print(f'{newLine}Start (d)\tEnd (d)\t\tSize (d)\tType and Id\r')
+        print(f'{"-" * 9}\t{"-" * 9}\t{"-" * 9}\t{"-" * 20}\r')
         for i in range(len(offsetsArray)):
             offsets = offsetsArray[i]
             if i == 0 and "header" in offsets:
                 offset, size = offsets["header"]
-                offsetsOutput += f'{offset:08d}\t\t\t\t\t\t\tHeader{newLine}'
+                offsetsOutput += f'{offset:08d}\t\t\t\t\tHeader{newLine}'
             elif version is None:
                 offsetsOutput += f'{newLine}Version {str(i)}: {newLine * 2}'
             if "objects" in offsets:
@@ -3219,7 +3219,7 @@ class PDFConsole(cmd.Cmd):
                 )
             if offsets["eof"] is not None:
                 offset, size = offsets["eof"]
-                offsetsOutput += f'{offset:08d}\t\t\t\t\t\t\tEOF{newLine}'
+                offsetsOutput += f'{offset:08d}\t\t\t\t\tEOF{newLine}'
         self.log_output("offsets " + argv, offsetsOutput)
 
     def help_offsets(self):
