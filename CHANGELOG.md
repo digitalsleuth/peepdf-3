@@ -1,4 +1,16 @@
 -----------------------------------------------
+peepdf 1.0.2, 2023-09-06
+-----------------------------------------------
+
+	* New features:
+		- Updated for Python 3
+	
+	* Fixes:
+		- Code cleanup
+		- Fixed issues with interactive console not loading
+		- Fixed bug where bytes offset was not logging output
+
+-----------------------------------------------
 peepdf 0.3 r235, 2014-06-09
 -----------------------------------------------
 

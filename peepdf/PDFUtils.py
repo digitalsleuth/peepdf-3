@@ -295,11 +295,11 @@ def getBytesFromFile(filename, offset, numBytes):
         bytesFile = open(filename, "rb")
         bytesFile.seek(offset)
         if offset + numBytes > fileSize:
-            bytes = bytesFile.read()
+            byteVal = bytesFile.read()
         else:
-            bytes = bytesFile.read(numBytes)
+            byteVal = bytesFile.read(numBytes)
         bytesFile.close()
-        return (0, bytes)
+        return (0, byteVal)
     else:
         return (-1, "File does not exist")
 

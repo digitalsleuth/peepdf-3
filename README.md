@@ -1,4 +1,6 @@
-peepdf is a **Python tool to explore PDF files** in order to find out if the file can be harmful or not. The aim of this tool is to provide all the necessary components that
+# peepdf-3 - peepdf for Python 3
+
+peepdf-3 is a **Python 3 tool to explore PDF files** in order to find out if the file can be harmful or not. The aim of this tool is to provide all the necessary components that
 a security researcher could need in a PDF analysis without using 3 or 4 tools to make
 all the tasks. With peepdf it's possible to see all the objects in the document showing
 the suspicious elements, supports all the most used filters and encodings, it can parse different versions of a file, object streams and encrypted files. With the installation
@@ -67,7 +69,6 @@ The main functionalities of peepdf are the following:
 **Included in:**
 
   * [REMnux](http://zeltser.com/remnux/)
-  * [BackTrack 5](https://www.backtrack-linux.com/forensics-auditor/)
   * [Kali Linux](http://www.kali.org/)
 
 **You are free to contribute with feedback, bugs, patches, etc. Any help is welcome. Also, if you really enjoy using peepdf, you think it is worth it and you feel really generous today you can donate some bucks to the project ;) Thanks!**

@@ -197,7 +197,7 @@ class PDFConsole(cmd.Cmd):
             message = "[!] Error: You must open a file!"
             self.log_output("bytes " + argv, message)
             return False
-        bytes = ""
+        byteVal = ""
         args = self.parseArgs(argv)
         if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
@@ -212,12 +212,12 @@ class PDFConsole(cmd.Cmd):
                 message = "[!] Error: The file does not exist"
                 self.log_output("bytes " + argv, message)
                 return False
-            bytes = ret[1]
+            byteVal = ret[1]
             if numArgs == 2:
-                self.log_output("bytes " + argv, bytes, [bytes], bytesOutput=True)
+                self.log_output("bytes " + argv, byteVal, [byteVal], bytesOutput=True)
             else:
                 outputFile = args[2]
-                open(outputFile, "wb").write(bytes)
+                open(outputFile, "wb").write(byteVal)
         else:
             self.help_bytes()
 
@@ -461,12 +461,12 @@ class PDFConsole(cmd.Cmd):
             self.log_output("decode " + argv, message)
             return False
         if len(args) > 2:
-            type = args[0]
+            srcType = args[0]
             iniFilterArgs = 2
-            if type not in validTypes:
+            if srcType not in validTypes:
                 self.help_decode()
                 return False
-            if type in ["variable", "file", "string"]:
+            if srcType in ["variable", "file", "string"]:
                 src = args[1]
             else:
                 if self.pdfFile is None:
@@ -486,34 +486,34 @@ class PDFConsole(cmd.Cmd):
                 offset = int(args[1])
                 size = int(args[2])
             for i in range(iniFilterArgs, len(args)):
-                filter = args[i].lower()
-                if filter not in filter2RealFilterDict.keys():
+                fileFilter = args[i].lower()
+                if fileFilter not in filter2RealFilterDict.keys():
                     self.help_decode()
                     return False
-                if filter in notImplementedFilters:
-                    message = f'[!] Error: Filter {filter} not implemented yet!'
+                if fileFilter in notImplementedFilters:
+                    message = f'[!] Error: Filter {fileFilter} not implemented yet!'
                     self.log_output("decode " + argv, message)
                     return False
-                filters.append(filter)
+                filters.append(fileFilter)
         else:
             self.help_decode()
             return False
 
-        if type == "variable":
+        if srcType == "variable":
             if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("decode " + argv, message)
                 return False
             else:
                 decodedContent = self.variables[src][0]
-        elif type == "file":
+        elif srcType == "file":
             if not os.path.exists(src):
                 message = "[!] Error: The file does not exist"
                 self.log_output("decode " + argv, message)
                 return False
             else:
                 decodedContent = open(src, "rb").read()
-        elif type == "string":
+        elif srcType == "string":
             decodedContent = src
         else:
             ret = getBytesFromFile(self.pdfFile.getPath(), offset, size)
@@ -526,8 +526,8 @@ class PDFConsole(cmd.Cmd):
             message = "[!] Error: The content is empty"
             self.log_output("decode " + argv, message)
             return False
-        for filter in filters:
-            realFilter = filter2RealFilterDict[filter]
+        for fileFilter in filters:
+            realFilter = filter2RealFilterDict[fileFilter]
             if realFilter == "base64":
                 try:
                     decodedContent = b64decode(decodedContent)
@@ -962,12 +962,12 @@ class PDFConsole(cmd.Cmd):
             self.log_output("encode " + argv, message)
             return False
         if len(args) > 2:
-            type = args[0]
+            srcType = args[0]
             iniFilterArgs = 2
-            if type not in validTypes:
+            if srcType not in validTypes:
                 self.help_encode()
                 return False
-            if type in ["variable", "file", "string"]:
+            if srcType in ["variable", "file", "string"]:
                 src = args[1]
             else:
                 if self.pdfFile is None:
@@ -987,34 +987,34 @@ class PDFConsole(cmd.Cmd):
                 offset = int(args[1])
                 size = int(args[1])
             for i in range(iniFilterArgs, len(args)):
-                filter = args[i].lower()
-                if filter not in filter2RealFilterDict.keys():
+                fileFilter = args[i].lower()
+                if fileFilter not in filter2RealFilterDict.keys():
                     self.help_encode()
                     return False
-                if filter in notImplementedFilters:
-                    message = f'[!] Error: Filter "{filter}" not implemented yet'
+                if fileFilter in notImplementedFilters:
+                    message = f'[!] Error: Filter "{fileFilter}" not implemented yet'
                     self.log_output("encode " + argv, message)
                     return False
-                filters.append(filter)
+                filters.append(fileFilter)
         else:
             self.help_encode()
             return False
 
-        if type == "variable":
+        if srcType == "variable":
             if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("encode " + argv, message)
                 return False
             else:
                 encodedContent = self.variables[src][0]
-        elif type == "file":
+        elif srcType == "file":
             if not os.path.exists(src):
                 message = "[!] Error: The file does not exist"
                 self.log_output("encode " + argv, message)
                 return False
             else:
                 encodedContent = open(src, "rb").read()
-        elif type == "string":
+        elif srcType == "string":
             encodedContent = src
         else:
             ret = getBytesFromFile(self.pdfFile.getPath(), offset, size)
@@ -1027,8 +1027,8 @@ class PDFConsole(cmd.Cmd):
             message = "[!] Error: The content is empty"
             self.log_output("encode " + argv, message)
             return False
-        for filter in filters:
-            realFilter = filter2RealFilterDict[filter]
+        for fileFilter in filters:
+            realFilter = filter2RealFilterDict[fileFilter]
             if realFilter == "base64":
                 encodedContent = b64encode(encodedContent)
             else:
@@ -1526,32 +1526,32 @@ class PDFConsole(cmd.Cmd):
             self.help_hash()
             return False
 
-        type = args[0]
-        if type not in validTypes:
+        srcType = args[0]
+        if srcType not in validTypes:
             self.help_hash()
             return False
-        if type == "variable":
+        if srcType == "variable":
             if not srcName in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("hash " + argv, message)
                 return False
             else:
                 content = self.variables[srcName][0]
-        elif type == "file":
+        elif srcType == "file":
             if not os.path.exists(srcName):
                 message = "[!] Error: The file does not exist"
                 self.log_output("hash " + argv, message)
                 return False
             else:
                 content = open(srcName, "rb").read()
-        elif type == "string":
+        elif srcType == "string":
             content = srcName
         else:
             if self.pdfFile is None:
                 message = "[!] Error: You must open a file"
                 self.log_output("hash " + argv, message)
                 return False
-            if type == "raw":
+            if srcType == "raw":
                 if not offset.isdigit() or not size.isdigit():
                     self.help_hash()
                     return False
@@ -1579,16 +1579,16 @@ class PDFConsole(cmd.Cmd):
                     message = "[!] Error: Object not found"
                     self.log_output("hash " + argv, message)
                     return False
-                if type == "stream" or type == "rawstream":
+                if srcType == "stream" or srcType == "rawstream":
                     if object.getType() != "stream":
                         message = "[!] Error: The object doesn't contain any stream"
                         self.log_output("hash " + argv, message)
                         return False
-                    if type == "stream":
+                    if srcType == "stream":
                         content = object.getStream()
                     else:
                         content = object.getRawStream()
-                elif type == "object":
+                elif srcType == "object":
                     content = object.getValue()
                 else:
                     content = object.getRawValue()
@@ -2010,12 +2010,12 @@ class PDFConsole(cmd.Cmd):
         else:
             self.help_js_analyse()
             return False
-        type = args[0]
+        srcType = args[0]
         src = args[1]
-        if type not in validTypes:
+        if srcType not in validTypes:
             self.help_js_analyse()
             return False
-        if type == "variable":
+        if srcType == "variable":
             if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_analyse " + argv, message)
@@ -2035,7 +2035,7 @@ class PDFConsole(cmd.Cmd):
                         print(
                             f'[!] Warning: The object may not contain Javascript code... {newLine}'
                         )
-        elif type == "file":
+        elif srcType == "file":
             if not os.path.exists(src):
                 message = "[!] Error: The file does not exist"
                 self.log_output("js_analyse " + argv, message)
@@ -2057,7 +2057,7 @@ class PDFConsole(cmd.Cmd):
                         print(
                             f'[!] Warning: The object may not contain Javascript code... {newLine}'
                         )
-        elif type == "object":
+        elif srcType == "object":
             if self.pdfFile is None:
                 message = "[!] Error: You must open a file"
                 self.log_output("js_analyse " + argv, message)
@@ -2133,8 +2133,8 @@ class PDFConsole(cmd.Cmd):
                 jsanalyseOutput += f'{js}{newLine * 2}{"=" * 66}{newLine}'
         if unescapedBytes != []:
             jsanalyseOutput += f'{newLine * 2}Unescaped bytes: {newLine * 2}'
-            for bytes in unescapedBytes:
-                jsanalyseOutput += f'{self.printBytes(bytes)}{newLine * 2}'
+            for byteVal in unescapedBytes:
+                jsanalyseOutput += f'{self.printBytes(byteVal)}{newLine * 2}'
         if urlsFound != []:
             jsanalyseOutput += f'{newLine * 2}URLs in shellcode: {newLine * 2}'
             for url in urlsFound:
@@ -2157,7 +2157,6 @@ class PDFConsole(cmd.Cmd):
 
     def do_js_beautify(self, argv):
         content = ""
-        bytes = ""
         validTypes = ["variable", "file", "object", "string"]
         args = self.parseArgs(argv)
         if args is None:
@@ -2171,12 +2170,12 @@ class PDFConsole(cmd.Cmd):
         else:
             self.help_js_beautify()
             return False
-        type = args[0]
+        srcType = args[0]
         src = args[1]
-        if type not in validTypes:
+        if srcType not in validTypes:
             self.help_js_beautify()
             return False
-        if type == "variable":
+        if srcType == "variable":
             if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_beautify " + argv, message)
@@ -2196,7 +2195,7 @@ class PDFConsole(cmd.Cmd):
                         print(
                             f'[!] Warning: the object may not contain Javascript code... {newLine}'
                         )
-        elif type == "file":
+        elif srcType == "file":
             if not os.path.exists(src):
                 message = "[!] Error: The file does not exist"
                 self.log_output("js_beautify " + argv, message)
@@ -2218,7 +2217,7 @@ class PDFConsole(cmd.Cmd):
                         print(
                             f'[!] Warning: the object may not contain Javascript code... {newLine}'
                         )
-        elif type == "string":
+        elif srcType == "string":
             content = src
         else:
             if self.pdfFile is None:
@@ -2255,7 +2254,7 @@ class PDFConsole(cmd.Cmd):
                     objectType = object.getType()
                     if objectType == "stream":
                         content = object.getStream()
-                    elif type == "dictionary" or type == "array":
+                    elif srcType == "dictionary" or srcType == "array":
                         element = object.getElementByName("/JS")
                         if element is not None:
                             content = element.getValue()
@@ -2263,7 +2262,7 @@ class PDFConsole(cmd.Cmd):
                             message = "[!] Error: Target not found"
                             self.log_output("js_beautify " + argv, message)
                             return False
-                    elif type == "string" or type == "hexstring":
+                    elif srcType == "string" or srcType == "hexstring":
                         content = object.getValue()
                     else:
                         message = "[!] Error: Target not found"
@@ -2370,12 +2369,12 @@ class PDFConsole(cmd.Cmd):
         else:
             self.help_js_eval()
             return False
-        type = args[0]
+        srcType = args[0]
         src = args[1]
-        if type not in validTypes:
+        if srcType not in validTypes:
             self.help_js_eval()
             return False
-        if type == "variable":
+        if srcType == "variable":
             if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_eval " + argv, message)
@@ -2395,7 +2394,7 @@ class PDFConsole(cmd.Cmd):
                         print(
                             f'[!] Warning: the object may not contain Javascript code... {newLine}'
                         )
-        elif type == "file":
+        elif srcType == "file":
             if not os.path.exists(src):
                 message = "[!] Error: The file does not exist"
                 self.log_output("js_eval " + argv, message)
@@ -2417,7 +2416,7 @@ class PDFConsole(cmd.Cmd):
                         print(
                             f'[!] Warning: the object may not contain Javascript code... {newLine}'
                         )
-        elif type == "object":
+        elif srcType == "object":
             if self.pdfFile is None:
                 message = "[!] Error: You must open a file"
                 self.log_output("js_eval " + argv, message)
@@ -2452,7 +2451,7 @@ class PDFConsole(cmd.Cmd):
                     objectType = object.getType()
                     if objectType == "stream":
                         content = object.getStream()
-                    elif type == "dictionary" or type == "array":
+                    elif srcType == "dictionary" or srcType == "array":
                         element = object.getElementByName("/JS")
                         if element is not None:
                             content = element.getValue()
@@ -2460,7 +2459,7 @@ class PDFConsole(cmd.Cmd):
                             message = "[!] Error: Target not found"
                             self.log_output("js_eval " + argv, message)
                             return False
-                    elif type == "string" or type == "hexstring":
+                    elif srcType == "string" or srcType == "hexstring":
                         content = object.getValue()
                     else:
                         message = "[!] Error: Target not found"
@@ -2510,7 +2509,6 @@ class PDFConsole(cmd.Cmd):
 
     def do_js_jjdecode(self, argv):
         content = ""
-        bytes = ""
         validTypes = ["variable", "file", "object", "string"]
         args = self.parseArgs(argv)
         if args is None:
@@ -2524,12 +2522,12 @@ class PDFConsole(cmd.Cmd):
         else:
             self.help_js_jjdecode()
             return False
-        type = args[0]
+        srcType = args[0]
         src = args[1]
-        if type not in validTypes:
+        if srcType not in validTypes:
             self.help_js_jjdecode()
             return False
-        if type == "variable":
+        if srcType == "variable":
             if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_jjdecode " + argv, message)
@@ -2549,7 +2547,7 @@ class PDFConsole(cmd.Cmd):
                         print(
                             f'[!] Warning: the object may not contain Javascript code... {newLine}'
                         )
-        elif type == "file":
+        elif srcType == "file":
             if not os.path.exists(src):
                 message = "[!] Error: The file does not exist"
                 self.log_output("js_jjdecode " + argv, message)
@@ -2571,7 +2569,7 @@ class PDFConsole(cmd.Cmd):
                         print(
                             f'[!] Warning: the object may not contain Javascript code... {newLine}'
                         )
-        elif type == "string":
+        elif srcType == "string":
             content = src
         else:
             if self.pdfFile is None:
@@ -2608,7 +2606,7 @@ class PDFConsole(cmd.Cmd):
                     objectType = object.getType()
                     if objectType == "stream":
                         content = object.getStream()
-                    elif type == "dictionary" or type == "array":
+                    elif srcType == "dictionary" or srcType == "array":
                         element = object.getElementByName("/JS")
                         if element is not None:
                             content = element.getValue()
@@ -2616,7 +2614,7 @@ class PDFConsole(cmd.Cmd):
                             message = "[!] Error: Target not found"
                             self.log_output("js_jjdecode " + argv, message)
                             return False
-                    elif type == "string" or type == "hexstring":
+                    elif srcType == "string" or srcType == "hexstring":
                         content = object.getValue()
                     else:
                         message = "[!] Error: Target not found"
@@ -2671,19 +2669,19 @@ class PDFConsole(cmd.Cmd):
         if len(args) != 2:
             self.help_js_join()
             return False
-        type = args[0]
+        srcType = args[0]
         src = args[1]
-        if type not in validTypes:
+        if srcType not in validTypes:
             self.help_js_join()
             return False
-        if type == "variable":
+        if srcType == "variable":
             if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_join " + argv, message)
                 return False
             else:
                 content = self.variables[src][0]
-        elif type == "file":
+        elif srcType == "file":
             if not os.path.exists(src):
                 message = "[!] Error: The file does not exist"
                 self.log_output("js_join " + argv, message)
@@ -2718,7 +2716,7 @@ class PDFConsole(cmd.Cmd):
     def do_js_unescape(self, argv):
         content = ""
         unescapedOutput = ""
-        bytes = ""
+        byteVal = ""
         reUnicodeChars = "([%\]u[0-9a-f]{4})+"
         reHexChars = "(%[0-9a-f]{2})+"
         validTypes = ["variable", "file", "string"]
@@ -2730,19 +2728,19 @@ class PDFConsole(cmd.Cmd):
         if len(args) != 2:
             self.help_js_unescape()
             return False
-        type = args[0]
+        srcType = args[0]
         src = args[1]
-        if type not in validTypes:
+        if srcType not in validTypes:
             self.help_js_unescape()
             return False
-        if type == "variable":
+        if srcType == "variable":
             if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_unescape " + argv, message)
                 return False
             else:
                 content = self.variables[src][0]
-        elif type == "file":
+        elif srcType == "file":
             if not os.path.exists(src):
                 message = "[!] Error: The file does not exist"
                 self.log_output("js_unescape " + argv, message)
@@ -2761,7 +2759,7 @@ class PDFConsole(cmd.Cmd):
         ret = unescape(content)
         if ret[0] != -1:
             unescapedBytes = ret[1]
-            bytes = ret[1]
+            byteVal = ret[1]
             urlsFound = re.findall("https?://.*$", unescapedBytes, re.DOTALL)
             if unescapedBytes != "":
                 unescapedOutput += (
@@ -2777,7 +2775,7 @@ class PDFConsole(cmd.Cmd):
             self.log_output("js_unescape " + argv, message)
             return False
         self.log_output(
-            "js_unescape " + argv, unescapedOutput, [bytes], bytesOutput=True
+            "js_unescape " + argv, unescapedOutput, [byteVal], bytesOutput=True
         )
 
     def help_js_unescape(self):
@@ -3491,9 +3489,9 @@ class PDFConsole(cmd.Cmd):
         if numArgs != 3 and numArgs != 4:
             self.help_replace()
             return False
-        type = args[0]
+        srcType = args[0]
         if numArgs == 3:
-            if type != "all":
+            if srcType != "all":
                 self.help_replace()
                 return False
             if self.pdfFile is None:
@@ -3511,13 +3509,13 @@ class PDFConsole(cmd.Cmd):
             else:
                 message = "[+] The string has been replaced correctly"
         elif numArgs == 4:
-            if type != "variable" and type != "file":
+            if srcType != "variable" and srcType != "file":
                 self.help_replace()
                 return False
             src = args[1]
             string1 = args[2]
             string2 = args[3]
-            if type == "file":
+            if srcType == "file":
                 if not os.path.exists(src):
                     message = "[!] Error: The file does not exist"
                     self.log_output("replace " + argv, message)
@@ -3674,7 +3672,7 @@ class PDFConsole(cmd.Cmd):
         maxSteps = 10000000
         verboseMode = False
         validTypes = ["variable", "file", "raw"]
-        bytes = ""
+        byteVal = ""
         src = ""
         offset = 0
         size = 0
@@ -3688,17 +3686,17 @@ class PDFConsole(cmd.Cmd):
             return False
         if args[0] == "-v":
             verboseMode = True
-            type = args[1]
+            srcType = args[1]
             if len(args) == 2:
                 self.help_sctest()
                 return False
         else:
-            type = args[0]
-        if type not in validTypes:
+            srcType = args[0]
+        if srcType not in validTypes:
             self.help_sctest()
             return False
 
-        if type == "raw":
+        if srcType == "raw":
             if self.pdfFile is None:
                 message = "[!] Error: You must open a file"
                 self.log_output("sctest " + argv, message)
@@ -3735,37 +3733,37 @@ class PDFConsole(cmd.Cmd):
                     return False
                 src = args[1]
 
-        if type == "variable":
+        if srcType == "variable":
             if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("sctest " + argv, message)
                 return False
             else:
-                bytes = self.variables[src][0]
-        elif type == "file":
+                byteVal = self.variables[src][0]
+        elif srcType == "file":
             if not os.path.exists(src):
                 message = "[!] Error: The file does not exist"
                 self.log_output("sctest " + argv, message)
                 return False
             else:
-                bytes = open(src, "rb").read()
+                byteVal = open(src, "rb").read()
         else:
             ret = getBytesFromFile(self.pdfFile.getPath(), offset, size)
             if ret[0] == -1:
                 message = "[!] Error: The file does not exist"
                 self.log_output("sctest " + argv, message)
                 return False
-            bytes = ret[1]
+            byteVal = ret[1]
 
         if verboseMode:
             emu = pylibemu.Emulator()
         else:
             emu = pylibemu.Emulator(outputBuffer)
         try:
-            shellcodeOffset = emu.shellcode_getpc_test(bytes)
+            shellcodeOffset = emu.shellcode_getpc_test(byteVal)
             if shellcodeOffset < 0:
                 shellcodeOffset = 0
-            emu.prepare(bytes, shellcodeOffset)
+            emu.prepare(byteVal, shellcodeOffset)
             emu.test(maxSteps)
         except:
             message = "[!] Error: Shellcode emulation failed"
@@ -4103,18 +4101,18 @@ class PDFConsole(cmd.Cmd):
                 self.help_vtcheck()
                 return False
 
-            type = args[0]
-            if type not in validTypes:
+            srcType = args[0]
+            if srcType not in validTypes:
                 self.help_vtcheck()
                 return False
-            if type == "variable":
+            if srcType == "variable":
                 if not srcName in self.variables:
                     message = "[!] Error: The variable does not exist"
                     self.log_output("vtcheck " + argv, message)
                     return False
                 else:
                     content = self.variables[srcName][0]
-            elif type == "file":
+            elif srcType == "file":
                 if not os.path.exists(srcName):
                     message = "[!] Error: The file does not exist"
                     self.log_output("vtcheck " + argv, message)
@@ -4126,7 +4124,7 @@ class PDFConsole(cmd.Cmd):
                     message = "[!] Error: You must open a file"
                     self.log_output("vtcheck " + argv, message)
                     return False
-                if type == "raw":
+                if srcType == "raw":
                     if not offset.isdigit() or not size.isdigit():
                         self.help_vtcheck()
                         return False
@@ -4156,18 +4154,18 @@ class PDFConsole(cmd.Cmd):
                         message = "[!] Error: Object not found"
                         self.log_output("vtcheck " + argv, message)
                         return False
-                    if type == "stream" or type == "rawstream":
+                    if srcType == "stream" or srcType == "rawstream":
                         if object.getType() != "stream":
                             message = (
                                 "[!] Error: The object doesn't contain any stream"
                             )
                             self.log_output("vtcheck " + argv, message)
                             return False
-                        if type == "stream":
+                        if srcType == "stream":
                             content = object.getStream()
                         else:
                             content = object.getRawStream()
-                    elif type == "object":
+                    elif srcType == "object":
                         content = object.getValue()
                     else:
                         content = object.getRawValue()
@@ -4262,19 +4260,19 @@ class PDFConsole(cmd.Cmd):
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("xor " + argv, message)
             return False
-
+        srcType = args[0]
         if len(args) == 2:
-            if args[0] in ["stream", "rawstream"]:
+            if srcType in ["stream", "rawstream"]:
                 id = args[1]
                 version = None
-            elif args[0] in ["file", "variable"]:
+            elif srcType in ["file", "variable"]:
                 srcName = args[1]
             else:
                 self.help_xor()
                 return False
             key = None
         elif len(args) == 3:
-            if args[0] in ["stream", "rawstream"]:
+            if srcType in ["stream", "rawstream"]:
                 id = args[1]
                 if args[2].find("0x") != -1 or args[2].find("\\x") != -1:
                     version = None
@@ -4282,10 +4280,10 @@ class PDFConsole(cmd.Cmd):
                 else:
                     version = args[2]
                     key = None
-            elif args[0] in ["file", "variable"]:
+            elif srcType in ["file", "variable"]:
                 srcName = args[1]
                 key = args[2]
-            elif args[0] == "raw":
+            elif srcType == "raw":
                 offset = args[1]
                 size = args[2]
                 key = None
@@ -4293,10 +4291,10 @@ class PDFConsole(cmd.Cmd):
                 self.help_xor()
                 return False
         elif len(args) == 4:
-            if args[0] in ["stream", "rawstream"]:
+            if srcType in ["stream", "rawstream"]:
                 id = args[1]
                 version = args[2]
-            elif args[0] == "raw":
+            elif srcType == "raw":
                 offset = args[1]
                 size = args[2]
             else:
@@ -4307,8 +4305,7 @@ class PDFConsole(cmd.Cmd):
             self.help_xor()
             return False
 
-        type = args[0]
-        if type not in validTypes:
+        if srcType not in validTypes:
             self.help_xor()
             return False
         if key is not None:
@@ -4320,14 +4317,14 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("xor " + argv, message)
                 return False
             key = chr(int(key, 16))
-        if type == "variable":
+        if srcType == "variable":
             if not srcName in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("xor " + argv, message)
                 return False
             else:
                 content = self.variables[srcName][0]
-        elif type == "file":
+        elif srcType == "file":
             if not os.path.exists(srcName):
                 message = "[!] Error: The file does not exist"
                 self.log_output("xor " + argv, message)
@@ -4339,7 +4336,7 @@ class PDFConsole(cmd.Cmd):
                 message = "[!] Error: You must open a file"
                 self.log_output("xor " + argv, message)
                 return False
-            if type == "raw":
+            if srcType == "raw":
                 if not offset.isdigit() or not size.isdigit():
                     self.help_xor()
                     return False
@@ -4371,7 +4368,7 @@ class PDFConsole(cmd.Cmd):
                     message = "[!] Error: The object doesn't contain any stream"
                     self.log_output("xor " + argv, message)
                     return False
-                if type == "stream":
+                if srcType == "stream":
                     content = object.getStream()
                 else:
                     content = object.getRawStream()
@@ -4412,24 +4409,25 @@ class PDFConsole(cmd.Cmd):
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("xor_search " + argv, message)
             return False
-        if len(args) > 0 and args[0] == "-i":
+        srcType = args[0]
+        if len(args) > 0 and srcType == "-i":
             caseSensitive = False
             args = args[1:]
         if len(args) == 3:
-            if args[0] in ["stream", "rawstream"]:
+            if srcType in ["stream", "rawstream"]:
                 id = args[1]
                 version = None
-            elif args[0] in ["file", "variable"]:
+            elif srcType in ["file", "variable"]:
                 srcName = args[1]
             else:
                 self.help_xor_search()
                 return False
             string = args[2]
         elif len(args) == 4:
-            if args[0] in ["stream", "rawstream"]:
+            if srcType in ["stream", "rawstream"]:
                 id = args[1]
                 version = args[2]
-            elif args[0] == "raw":
+            elif srcType == "raw":
                 offset = args[1]
                 size = args[2]
             else:
@@ -4440,18 +4438,17 @@ class PDFConsole(cmd.Cmd):
             self.help_xor_search()
             return False
 
-        type = args[0]
-        if type not in validTypes:
+        if srcType not in validTypes:
             self.help_xor_search()
             return False
-        if type == "variable":
+        if srcType == "variable":
             if not srcName in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("xor_search " + argv, message)
                 return False
             else:
                 content = self.variables[srcName][0]
-        elif type == "file":
+        elif srcType == "file":
             if not os.path.exists(srcName):
                 message = "[!] Error: The file does not exist"
                 self.log_output("xor_search " + argv, message)
@@ -4463,7 +4460,7 @@ class PDFConsole(cmd.Cmd):
                 message = "[!] Error: You must open a file"
                 self.log_output("xor_search " + argv, message)
                 return False
-            if type == "raw":
+            if srcType == "raw":
                 if not offset.isdigit() or not size.isdigit():
                     self.help_xor_search()
                     return False
@@ -4495,7 +4492,7 @@ class PDFConsole(cmd.Cmd):
                     message = "[!] Error: The object doesn't contain any stream"
                     self.log_output("xor_search " + argv, message)
                     return False
-                if type == "stream":
+                if srcType == "stream":
                     content = object.getStream()
                 else:
                     content = object.getRawStream()
@@ -4737,6 +4734,8 @@ class PDFConsole(cmd.Cmd):
         @param printOutput: Boolean to specify if the output will be written to the console or not. Default value: True.
         @param bytesOutput: Boolean to specify if we want to print raw bytes or not. Default value: False.
         """
+        if isinstance(output, bytes):
+            output = output.decode('latin-1')
         errorIndex = output.find("[!] Error")
         if errorIndex != -1:
             output = (
@@ -4759,32 +4758,32 @@ class PDFConsole(cmd.Cmd):
             if bytesToSave is None:
                 bytesToSave = [niceOutput]
             for i in range(len(bytesToSave)):
-                bytes = bytesToSave[i]
+                byteVal = bytesToSave[i]
                 if (
                     self.redirect == FILE_WRITE or self.redirect == FILE_ADD
                 ) and self.outputFileName is not None:
                     if i == 0:
                         outFile = str(self.outputFileName)
                     else:
-                        outFile = "%s_%d" % (str(self.outputFileName), i)
+                        outFile = f"{str(self.outputFileName)}_{i}"
                     if self.redirect == FILE_WRITE:
-                        open(outFile, "wb").write(bytes)
+                        open(outFile, "wb").write(byteVal)
                     elif self.redirect == FILE_ADD:
-                        open(outFile, "ab").write(bytes)
+                        open(outFile, "ab").write(byteVal)
                 elif (
                     self.redirect == VAR_WRITE or self.redirect == VAR_ADD
                 ) and self.outputVarName is not None:
                     if i == 0:
                         varName = self.outputVarName
                     else:
-                        varName = "%s_%d" % (self.outputVarName, i)
+                        varName = f"{self.outputVarName}_{i}"
                     if self.redirect == VAR_WRITE:
-                        self.variables[varName] = [bytes, bytes]
+                        self.variables[varName] = [byteVal, byteVal]
                     elif self.redirect == VAR_ADD:
                         if varName in self.variables:
-                            self.variables[varName][0] += bytes
+                            self.variables[varName][0] += byteVal
                         else:
-                            self.variables[varName] = [bytes, bytes]
+                            self.variables[varName] = [byteVal, byteVal]
         elif printOutput:
             if niceOutput:
                 niceOutput = f'{newLine}{niceOutput}{newLine}'
@@ -5100,7 +5099,7 @@ class PDFConsole(cmd.Cmd):
         """
         return argsArray
 
-    def printBytes(self, bytes):
+    def printBytes(self, byteVal):
         """
         Given a byte string shows the hexadecimal and ascii output in a nice way
 
@@ -5109,16 +5108,16 @@ class PDFConsole(cmd.Cmd):
         """
         output = ""
         row = 16
-        if bytes != "":
+        if byteVal != "":
             i = None
             hexChain = ""
             strings = ""
-            for i in range(0, len(bytes)):
-                if ord(bytes[i]) > 31 and ord(bytes[i]) < 128:
-                    strings += bytes[i]
+            for i in range(0, len(byteVal)):
+                if ord(byteVal[i]) > 31 and ord(byteVal[i]) < 128:
+                    strings += byteVal[i]
                 else:
                     strings += "."
-                hexChars = hex(ord(bytes[i]))
+                hexChars = hex(ord(byteVal[i]))
                 hexChars = hexChars[2:]
                 if len(hexChars) == 1:
                     hexChars = "0" + hexChars
@@ -5136,7 +5135,7 @@ class PDFConsole(cmd.Cmd):
 
     def printResult(self, result):
         """
-        Given an string returns a mixed hexadecimal-ascci output if there are many non printable characters or the same string in other case
+        Given an string returns a mixed hexadecimal-ascii output if there are many non printable characters or the same string in other case
 
         @param result: A string
         @return: A mixed hexadecimal-ascii output if there are many non printable characters or the input string in other case

@@ -106,10 +106,10 @@ def getLocalFilesInfo(filesList):
     return localFilesInfo
 
 
-def getPeepXML(statsDict, version, revision):
+def getPeepXML(statsDict, version):
     root = etree.Element(
         "peepdf_analysis",
-        version=f'{version} r{revision}',
+        version=f'{version}',
         url="http://peepdf.eternal-todo.com - https://github.com/digitalsleuth/peepdf-3",
         author="Jose Miguel Esparza and Corey Forman",
     )
@@ -277,13 +277,12 @@ def getPeepXML(statsDict, version, revision):
     return etree.tostring(root, pretty_print=True)
 
 
-def getPeepJSON(statsDict, version, revision):
+def getPeepJSON(statsDict, version):
     # peepdf info
     peepdfDict = {
         "version": version,
-        "revision": revision,
-        "author": "Jose Miguel Esparza",
-        "url": "http://peepdf.eternal-todo.com",
+        "author": "Jose Miguel Esparza and Corey Forman",
+        "url": "http://peepdf.eternal-todo.com - https://github.com/digitalsleuth/peepdf-3",
     }
     # Basic info
     basicDict = {}
@@ -405,9 +404,8 @@ def getPeepJSON(statsDict, version, revision):
 
 def main():
     global COLORIZED_OUTPUT
-    version = "1.0.0"
-    revision = "1"
-    versionHeader = "Version: peepdf " + version + " r" + revision
+    version = "1.0.2"
+    versionHeader = f"Version: peepdf {version}"
     author = "Jose Miguel Esparza and Corey Forman"
     email = "peepdf AT eternal-todo.com"
     url = "http://peepdf.eternal-todo.com"
@@ -540,14 +538,14 @@ def main():
             if len(args) == 1:
                 fileName = args[0]
                 if not os.path.exists(fileName):
-                    sys.exit(f'Error: The file "{fileName}" does not exist!')
+                    sys.exit(f'[!] Error: The file "{fileName}" does not exist!')
             elif len(args) > 1 or (len(args) == 0 and not options.isInteractive):
                 sys.exit(argsParser.print_help())
 
             if options.scriptFile is not None:
                 if not os.path.exists(options.scriptFile):
                     sys.exit(
-                        f'Error: The script file "{options.scriptFile}" does not exist!'
+                        f'[!] Error: The script file "{options.scriptFile}" does not exist!'
                     )
 
             if fileName is not None:
@@ -586,22 +584,22 @@ def main():
 
             if options.xmlOutput:
                 try:
-                    xml = getPeepXML(statsDict, version, revision)
+                    xml = getPeepXML(statsDict, version)
                     xml = xml.decode('latin-1')
                     sys.stdout.write(xml)  ## Check this output and format better
                 except:
                     errorMessage = (
-                        "*** Error: Exception while generating the XML file!!"
+                        "[!] Error: Exception while generating the XML file!!"
                     )
                     traceback.print_exc(file=open(errorsFile, "a"))
                     raise Exception("PeepException", "Send me an email ;)")
             elif options.jsonOutput and not options.commands:
                 try:
-                    jsonReport = getPeepJSON(statsDict, version, revision)
+                    jsonReport = getPeepJSON(statsDict, version)
                     sys.stdout.write(jsonReport)
                 except:
                     errorMessage = (
-                        "*** Error: Exception while generating the JSON report!!"
+                        "[!] Error: Exception while generating the JSON report!!"
                     )
                     traceback.print_exc(file=open(errorsFile, "a"))
                     raise Exception("PeepException", "Send me an email ;)")
@@ -624,7 +622,7 @@ def main():
                         console.cmdloop()
                     except:
                         errorMessage = (
-                            "*** Error: Exception not handled using the batch mode!!"
+                            "[!] Error: Exception not handled using the batch mode!!"
                         )
                         scriptFileObject.close()
                         traceback.print_exc(file=open(errorsFile, "a"))
@@ -637,7 +635,7 @@ def main():
                         for command in options.commands:
                             console.onecmd(command)
                     except:
-                        errorMessage = "*** Error: Exception not handled using the batch commands!!"
+                        errorMessage = "[!] Error: Exception not handled using the batch commands!!"
                         traceback.print_exc(file=open(errorsFile, "a"))
                         raise Exception("PeepException", "Send me an email ;)")
                 else:
@@ -868,7 +866,7 @@ def main():
                             except KeyboardInterrupt as e:
                                 sys.exit()
                             except:
-                                errorMessage = "*** Error: Exception not handled using the interactive console!! Please, report it to the author!!"
+                                errorMessage = "[!] Error: Exception not handled using the interactive console!! Please, report it to the author!!"
                                 print(
                                     f"{errorColor}{errorMessage}{resetColor}{newLine}"
                                 )
@@ -879,7 +877,7 @@ def main():
         else:
             excName = excReason = None
         if excName is None or excName != "PeepException":
-            errorMessage = "*** Error: Exception not handled!!"
+            errorMessage = "[!] Error: Exception not handled!!"
             traceback.print_exc(file=open(errorsFile, "a"))
         print(f"{errorColor}{errorMessage}{resetColor}{newLine}")
     finally:
