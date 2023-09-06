@@ -2073,7 +2073,7 @@ class PDFConsole(cmd.Cmd):
                         content = object.getStream()
                     elif objectType == "dictionary" or objectType == "array":
                         element = object.getElementByName("/JS")
-                        if element is not None:
+                        if element:
                             content = element.getValue()
                         else:
                             message = "[!] Error: Target not found"
