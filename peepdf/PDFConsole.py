@@ -312,14 +312,12 @@ class PDFConsole(cmd.Cmd):
         message = ""
         validCreateTypes = ["pdf", "object_stream"]
         args = self.parseArgs(argv)
-        if args is None:
+        if not args:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("create " + argv, message)
-            return False
-        numArgs = len(args)
-        if numArgs == 0:
             self.help_create()
             return False
+        numArgs = len(args)
         elementType = args[0]
         if elementType not in validCreateTypes:
             self.help_create()
@@ -436,13 +434,13 @@ class PDFConsole(cmd.Cmd):
             self.log_output("create " + argv, message)
 
     def help_create(self):
-        print(f"{newLine}Usage: create pdf simple|(open_action_js [$js_file])")
+        print(f"Usage: create pdf simple|(open_action_js [$js_file])")
         print(
-            f"{newLine}Creates a new simple PDF file or one with Javascript code to be executed when "
+            f"Creates a new simple PDF file or one with Javascript code to be executed when "
             f"opening the file. It's possible to specify the file where the Javascript code is "
             f"stored or do it manually.{newLine * 2}"
         )
-        print(f"Usage: create object_stream [$version] {newLine}")
+        print(f"Usage: create object_stream [$version]")
         print(
             f"Creates an object stream choosing the objects to be compressed. {newLine}"
         )
@@ -456,9 +454,10 @@ class PDFConsole(cmd.Cmd):
         notImplementedFilters = ["ccittfax" "ccf", "jbig2", "dct", "jpx"]
         filters = []
         args = self.parseArgs(argv)
-        if args is None:
+        if not args:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("decode " + argv, message)
+            self.help_decode()
             return False
         if len(args) > 2:
             srcType = args[0]
@@ -571,9 +570,10 @@ class PDFConsole(cmd.Cmd):
             self.log_output("decrypt " + argv, message)
             return False
         args = self.parseArgs(argv)
-        if args is None:
+        if not args:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("decrypt " + argv, message)
+            self.help_decrypt()
             return False
         numArgs = len(args)
         if numArgs == 1:
@@ -590,7 +590,7 @@ class PDFConsole(cmd.Cmd):
 
     def help_decrypt(self):
         print(f'{newLine}Usage: decrypt $password')
-        print(f'{newLine}Decrypts the file with the specified password {newLine}')
+        print(f'Decrypts the file with the specified password {newLine}')
 
     def do_embed(self, argv):
         fileType = "application#2Fpdf"
@@ -603,9 +603,10 @@ class PDFConsole(cmd.Cmd):
             self.log_output("embed " + argv, message)
             return False
         args = self.parseArgs(argv)
-        if args is None:
+        if not args:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("embed " + argv, message)
+            self.help_embed()
             return False
         numArgs = len(args)
         if numArgs == 1:
@@ -930,13 +931,9 @@ class PDFConsole(cmd.Cmd):
 
     def help_embed(self):
         print(f"{newLine}Usage: embed [-x] $filename [$file_type]")
-        print(
-            f'{newLine}Embeds the specified file in the actual PDF file. The default type is "application/pdf". {newLine}'
-        )
+        print(f'Embeds the specified file in the actual PDF file. Default type is "application/pdf". {newLine}')
         print("Options:")
-        print(
-            f"\t-x: The file is executed when the actual PDF file is opened {newLine}"
-        )
+        print(f"\t-x: The file is executed when the actual PDF file is opened {newLine}")
 
     def do_encode(self, argv):
         encodedContent = ""
@@ -957,9 +954,10 @@ class PDFConsole(cmd.Cmd):
         ]
         filters = []
         args = self.parseArgs(argv)
-        if args is None:
+        if not args:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("encode " + argv, message)
+            self.help_encode()
             return False
         if len(args) > 2:
             srcType = args[0]
@@ -1153,9 +1151,7 @@ class PDFConsole(cmd.Cmd):
 
     def help_encode_strings(self):
         print(f"{newLine}Usage: encode_strings [$object_id|trailer [$version]]")
-        print(
-            f"{newLine}Encodes the strings and names included in the file, object or trailer {newLine}"
-        )
+        print(f"Encodes the strings and names included in the file, object or trailer {newLine}")
 
     def do_encrypt(self, argv):
         if self.pdfFile is None:
@@ -1184,9 +1180,7 @@ class PDFConsole(cmd.Cmd):
 
     def help_encrypt(self):
         print(f"{newLine}Usage: encrypt [$password]")
-        print(
-            f"{newLine}Encrypts the file with the default or specified password {newLine}"
-        )
+        print(f"Encrypts the file with the default or specified password {newLine}")
 
     def do_errors(self, argv):
         if self.pdfFile is None:
@@ -1274,16 +1268,14 @@ class PDFConsole(cmd.Cmd):
 
     def help_errors(self):
         print(f"{newLine}Usage: errors [$object_id|xref|trailer [$version]]")
-        print(
-            f"{newLine}Shows the errors of the file or object (object_id, xref, trailer) {newLine}"
-        )
+        print(f"Shows the errors of the file or object (object_id, xref, trailer) {newLine}")
 
     def do_exit(self, argv):
         return True
 
     def help_exit(self):
         print(f"{newLine}Usage: exit")
-        print(f"{newLine}Exits from the console {newLine}")
+        print(f"Exits from the console {newLine}")
 
     def do_extract(self, argv):
         validTypes = ["uri", "js"]
@@ -1293,9 +1285,10 @@ class PDFConsole(cmd.Cmd):
             self.log_output("extract " + argv, message)
             return False
         args = self.parseArgs(argv)
-        if args is None:
+        if not args:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("extract " + argv, message)
+            self.help_extract()
             return False
         if len(args) == 1:
             version = None
@@ -1337,9 +1330,7 @@ class PDFConsole(cmd.Cmd):
 
     def help_extract(self):
         print(f"{newLine}Usage: extract uri|js [$version]")
-        print(
-            f"{newLine}Extracts all the given type elements of the specified version after being decoded and decrypted (if necessary) {newLine}"
-        )
+        print(f"Extracts all the given type elements of the specified version after being decoded and decrypted (if necessary) {newLine}")
 
     def do_filters(self, argv):
         if self.pdfFile is None:
@@ -1363,14 +1354,12 @@ class PDFConsole(cmd.Cmd):
         iniFilterArgs = 1
         filters = []
         args = self.parseArgs(argv)
-        if args is None:
+        if not args:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("filters " + argv, message)
-            return False
-        if len(args) == 0:
             self.help_filters()
             return False
-        elif len(args) == 1:
+        if len(args) == 1:
             version = None
         else:
             if args[1].isdigit():
@@ -1468,12 +1457,8 @@ class PDFConsole(cmd.Cmd):
         self.log_output("filters " + argv, message + value, [value], bytesOutput=True)
 
     def help_filters(self):
-        print(
-            f"{newLine}Usage: filters $object_id [$version] [$filter1 [$filter2 ...]]"
-        )
-        print(
-            f"{newLine}Shows the filters found in the stream object or set the filters in the object (first filter is used first). The valid values for filters are the following:"
-        )
+        print(f"{newLine}Usage: filters $object_id [$version] [$filter1 [$filter2 ...]]")
+        print(f"Shows the filters found in the stream object or set the filters in the object (first filter is used first). The valid values for filters are the following:")
         print("\tnone: No filters")
         print("\tasciihex,ahx: /ASCIIHexDecode")
         print("\tascii85,a85: /ASCII85Decode (Not implemented)")
@@ -1501,8 +1486,8 @@ class PDFConsole(cmd.Cmd):
         if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("hash " + argv, message)
+            self.help_hash()
             return False
-
         if len(args) == 2:
             if args[0] in ["object", "rawobject", "stream", "rawstream"]:
                 id = args[1]
@@ -1600,22 +1585,16 @@ class PDFConsole(cmd.Cmd):
         self.log_output("hash " + argv, output)
 
     def help_hash(self):
-        print(
-            f"{newLine}Usage: hash object|rawobject|stream|rawstream $object_id [$version]"
-        )
+        print(f"{newLine}Usage: hash object|rawobject|stream|rawstream $object_id [$version]")
         print("Usage: hash raw $offset $num_bytes")
         print("Usage: hash file $file_name")
         print("Usage: hash variable $var_name")
         print("Usage: hash string $my_string")
-        print(
-            f"{newLine}Generates the hash (MD5/SHA1/SHA256) of the specified source: raw bytes of the file, objects and streams, and the content of files or variables {newLine}"
-        )
+        print(f"Generates the hash (MD5/SHA1/SHA256) of the specified source: raw bytes of the file, objects and streams, and the content of files or variables {newLine}")
 
     def help_help(self):
         print(f"{newLine}Usage: help [$command]")
-        print(
-            f"{newLine}Shows the available commands or the usage of the specified command {newLine}"
-        )
+        print(f"Shows the available commands or the usage of the specified command {newLine}")
 
     def do_info(self, argv):
         if self.pdfFile is None:
@@ -4256,9 +4235,10 @@ class PDFConsole(cmd.Cmd):
         outputBytes = ""
         validTypes = ["variable", "file", "raw", "stream", "rawstream"]
         args = self.parseArgs(argv)
-        if args is None:
+        if not args:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("xor " + argv, message)
+            self.help_xor()
             return False
         srcType = args[0]
         if len(args) == 2:
@@ -4389,7 +4369,7 @@ class PDFConsole(cmd.Cmd):
         self.log_output("xor " + argv, output, [output], bytesOutput=True)
 
     def help_xor(self):
-        print(f'{newLine}Usage: xor stream|rawstream $object_id [$version] [$key]')
+        print(f'Usage: xor stream|rawstream $object_id [$version] [$key]')
         print("Usage: xor raw $offset $num_bytes $key")
         print("Usage: xor file $file_name $key")
         print("Usage: xor variable $var_name $key")
@@ -4405,9 +4385,10 @@ class PDFConsole(cmd.Cmd):
         caseSensitive = True
         validTypes = ["variable", "file", "raw", "stream", "rawstream"]
         args = self.parseArgs(argv)
-        if args is None:
+        if not args:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("xor_search " + argv, message)
+            self.help_xor_search()
             return False
         srcType = args[0]
         if len(args) > 0 and srcType == "-i":
@@ -4538,7 +4519,7 @@ class PDFConsole(cmd.Cmd):
         self.log_output("xor_search " + argv, message)
 
     def help_xor_search(self):
-        print(f'{newLine}Usage: xor_search [-i] stream|rawstream $object_id [$version] $string_to_search')
+        print(f'Usage: xor_search [-i] stream|rawstream $object_id [$version] $string_to_search')
         print("Usage: xor_search [-i] raw $offset $num_bytes $string_to_search")
         print("Usage: xor_search [-i] file $file_name $string_to_search")
         print("Usage: xor_search [-i] variable $var_name $string_to_search")

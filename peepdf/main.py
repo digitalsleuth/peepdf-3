@@ -44,6 +44,7 @@ except ModuleNotFoundError:
     from PDFUtils import vtcheck
 
 VT_KEY = "fc90df3f5ac749a94a94cb8bf87e05a681a2eb001aef34b6a0084b8c22c97a64"
+VERSION = "1.0.4"
 
 try:
     import STPyV8 as PyV8
@@ -106,10 +107,10 @@ def getLocalFilesInfo(filesList):
     return localFilesInfo
 
 
-def getPeepXML(statsDict, version):
+def getPeepXML(statsDict):
     root = etree.Element(
         "peepdf_analysis",
-        version=f'{version}',
+        version=f'{VERSION}',
         url="http://peepdf.eternal-todo.com - https://github.com/digitalsleuth/peepdf-3",
         author="Jose Miguel Esparza and Corey Forman",
     )
@@ -277,10 +278,10 @@ def getPeepXML(statsDict, version):
     return etree.tostring(root, pretty_print=True)
 
 
-def getPeepJSON(statsDict, version):
+def getPeepJSON(statsDict):
     # peepdf info
     peepdfDict = {
-        "version": version,
+        "version": VERSION,
         "author": "Jose Miguel Esparza and Corey Forman",
         "url": "http://peepdf.eternal-todo.com - https://github.com/digitalsleuth/peepdf-3",
     }
@@ -404,8 +405,7 @@ def getPeepJSON(statsDict, version):
 
 def main():
     global COLORIZED_OUTPUT
-    version = "1.0.3"
-    versionHeader = f"Version: peepdf {version}"
+    versionHeader = f"Version: peepdf {VERSION}"
     author = "Jose Miguel Esparza and Corey Forman"
     email = "peepdf AT eternal-todo.com"
     url = "http://peepdf.eternal-todo.com"
