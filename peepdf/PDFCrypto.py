@@ -106,8 +106,7 @@ def computeEncryptionKey(
     except:
         return (
             -1,
-            "ComputeEncryptionKey error: %s %s"
-            % (str(sys.exc_info()[0]), str(sys.exc_info()[1])),
+            f"ComputeEncryptionKey error: {str(sys.exc_info()[0])} {str(sys.exc_info()[1])}"
         )
 
 
@@ -140,8 +139,7 @@ def computeObjectKey(id, generationNum, encryptionKey, keyLengthBytes, algorithm
     except:
         return (
             -1,
-            "ComputeObjectKey error: %s %s"
-            % (str(sys.exc_info()[0]), str(sys.exc_info()[1])),
+            f"ComputeObjectKey error: {str(sys.exc_info()[0])} {str(sys.exc_info()[1])}"
         )
 
 
@@ -188,8 +186,7 @@ def computeOwnerPass(ownerPassString, userPassString, keyLength=128, revision=3)
     except:
         return (
             -1,
-            "ComputeOwnerPass error: %s %s"
-            % (str(sys.exc_info()[0]), str(sys.exc_info()[1])),
+            f"ComputeOwnerPass error: {str(sys.exc_info()[0])} {str(sys.exc_info()[1])}"
         )
 
 
@@ -255,13 +252,12 @@ def computeUserPass(
                 counter += 1
         else:
             # This should not be possible or the PDF specification does not say anything about it
-            return (-1, "ComputeUserPass error: revision number is < 2 (%d)" % revision)
+            return (-1, f"ComputeUserPass error: revision number is < 2 ({revision})")
         return (0, userPass)
     except:
         return (
             -1,
-            "ComputeUserPass error: %s %s"
-            % (str(sys.exc_info()[0]), str(sys.exc_info()[1])),
+            f"ComputeUserPass error: {str(sys.exc_info()[0])} {str(sys.exc_info()[1])}"
         )
 
 

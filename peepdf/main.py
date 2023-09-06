@@ -404,7 +404,7 @@ def getPeepJSON(statsDict, version):
 
 def main():
     global COLORIZED_OUTPUT
-    version = "1.0.2"
+    version = "1.0.3"
     versionHeader = f"Version: peepdf {version}"
     author = "Jose Miguel Esparza and Corey Forman"
     email = "peepdf AT eternal-todo.com"

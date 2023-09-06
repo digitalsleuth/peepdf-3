@@ -1593,9 +1593,9 @@ class PDFConsole(cmd.Cmd):
                 else:
                     content = object.getRawValue()
         content = str(content)
-        md5Hash = hashlib.md5(content).hexdigest()
-        sha1Hash = hashlib.sha1(content).hexdigest()
-        sha256Hash = hashlib.sha256(content).hexdigest()
+        md5Hash = hashlib.md5(content.encode()).hexdigest()
+        sha1Hash = hashlib.sha1(content.encode()).hexdigest()
+        sha256Hash = hashlib.sha256(content.encode()).hexdigest()
         output = f"MD5: {md5Hash}{newLine}SHA1: {sha1Hash}{newLine}SHA256: {sha256Hash}{newLine}"
         self.log_output("hash " + argv, output)
 
@@ -4170,7 +4170,7 @@ class PDFConsole(cmd.Cmd):
                     else:
                         content = object.getRawValue()
             content = str(content)
-            md5Hash = hashlib.md5(content).hexdigest()
+            md5Hash = hashlib.md5(content.encode()).hexdigest()
         # Checks the MD5 on VirusTotal
         ret = vtcheck(md5Hash, self.variables["vt_key"][0])
         if ret[0] == -1:
