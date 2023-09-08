@@ -1,4 +1,4 @@
-#
+
 #    peepdf is a tool to analyse and modify PDF files
 #    http://peepdf.eternal-todo.com
 #    By Jose Miguel Esparza <jesparza AT eternal-todo.com>
@@ -261,8 +261,8 @@ class PDFObject:
         """
         stats = {}
         stats["Object"] = self.type
-        stats["MD5"] = hashlib.md5(self.value).hexdigest()
-        stats["SHA1"] = hashlib.sha1(self.value).hexdigest()
+        stats["MD5"] = hashlib.md5(self.value.encode()).hexdigest()
+        stats["SHA1"] = hashlib.sha1(self.value.encode()).hexdigest()
         if self.isCompressed():
             stats["Compressed in"] = str(self.compressedIn)
         else:
@@ -4861,6 +4861,9 @@ class PDFTrailer:
     def getCatalogId(self):
         return self.catalogId
 
+    def getTrailerId(self):
+        return self.id
+
     def getDictEntry(self, name):
         if self.dict.hasElement(name):
             return self.dict.getElementByName(name)
@@ -4922,6 +4925,7 @@ class PDFTrailer:
             and self.id != " "
         ):
             stats["ID"] = self.id
+            print("status ID getStats ", stats["ID"]) ##TESTING
         else:
             stats["ID"] = None
         if self.dict.hasElement("/Encrypt"):
@@ -6662,6 +6666,7 @@ class PDFFile:
         stats["Comments"] = str(len(self.comments))
         stats["Errors"] = self.errors
         stats["Versions"] = []
+        stats["IDs"] = "\n"
         for version in range(self.updates + 1):
             statsVersion = {}
             catalogId = None
@@ -6670,6 +6675,9 @@ class PDFFile:
             if trailer is not None:
                 catalogId = trailer.getCatalogId()
                 infoId = trailer.getInfoId()
+                trailerId = trailer.getTrailerId()
+            if trailerId is not None and streamTrailer is None:
+                stats["IDs"] += f'Version {version}: {trailerId}{newLine}'
             if catalogId is None and streamTrailer is not None:
                 catalogId = streamTrailer.getCatalogId()
             if infoId is None and streamTrailer is not None:

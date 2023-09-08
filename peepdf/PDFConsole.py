@@ -1618,7 +1618,8 @@ class PDFConsole(cmd.Cmd):
                 f'{beforeStaticLabel}MD5: {self.resetColor}{statsDict["MD5"]}{newLine}'
                 f'{beforeStaticLabel}SHA1: {self.resetColor}{statsDict["SHA1"]}{newLine}'
                 f'{beforeStaticLabel}SHA256: {self.resetColor}{statsDict["SHA256"]}{newLine}'
-                f'{beforeStaticLabel}Size: {self.resetColor}{statsDict["Size"]} bytes{newLine}'                
+                f'{beforeStaticLabel}Size: {self.resetColor}{statsDict["Size"]} bytes{newLine}'
+                f'{beforeStaticLabel}IDs: {self.resetColor}{statsDict["IDs"]}{newLine}'
             )
             if statsDict["Detection"] != []:
                 detectionReportInfo = ""
@@ -1698,24 +1699,24 @@ class PDFConsole(cmd.Cmd):
                 )
                 if statsVersion["Xref Streams"] is not None:
                     stats += (
-                        f'{newLine}{beforeStaticLabel}\t\tXref streams ('
+                        f'{newLine}{beforeStaticLabel}\tXref streams ('
                         f'{statsVersion["Xref Streams"][0]}): {self.resetColor}'
                         f'{str(statsVersion["Xref Streams"][1])}'
                     )
                 if statsVersion["Object Streams"] is not None:
                     stats += (
-                        f'{newLine}{beforeStaticLabel}\t\tObject streams ('
+                        f'{newLine}{beforeStaticLabel}\tObject streams ('
                         f'{statsVersion["Object Streams"][0]}): {self.resetColor}'
                         f'{str(statsVersion["Object Streams"][1])}'
                     )
                 if int(statsVersion["Streams"][0]) > 0:
                     stats += (
-                        f'{newLine}{beforeStaticLabel}\t\tEncoded ({statsVersion["Encoded"][0]}): '
+                        f'{newLine}{beforeStaticLabel}\tEncoded ({statsVersion["Encoded"][0]}): '
                         f'{self.resetColor}{str(statsVersion["Encoded"][1])}'
                     )
                     if statsVersion["Decoding Errors"] is not None:
                         stats += (
-                            f'{newLine}{beforeStaticLabel}\t\tDecoding errors ('
+                            f'{newLine}{beforeStaticLabel}\tDecoding errors ('
                             f'{statsVersion["Decoding Errors"][0]}): '
                             f'{self.resetColor}{str(statsVersion["Decoding Errors"][1])}'
                         )

@@ -44,7 +44,7 @@ except ModuleNotFoundError:
     from PDFUtils import vtcheck
 
 VT_KEY = "fc90df3f5ac749a94a94cb8bf87e05a681a2eb001aef34b6a0084b8c22c97a64"
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 
 try:
     import STPyV8 as PyV8
@@ -584,7 +584,7 @@ def main():
 
             if options.xmlOutput:
                 try:
-                    xml = getPeepXML(statsDict, version)
+                    xml = getPeepXML(statsDict)
                     xml = xml.decode('latin-1')
                     sys.stdout.write(xml)  ## Check this output and format better
                 except:
@@ -673,6 +673,7 @@ def main():
                         stats += f'{beforeStaticLabel}SHA1: {resetColor}{statsDict["SHA1"]}{newLine}'
                         stats += f'{beforeStaticLabel}SHA256: {resetColor}{statsDict["SHA256"]}{newLine}'
                         stats += f'{beforeStaticLabel}Size: {resetColor}{statsDict["Size"]} bytes{newLine}'
+                        stats += f'{beforeStaticLabel}IDs: {resetColor}{statsDict["IDs"]}{newLine}'
                         if options.checkOnVT:
                             if statsDict["Detection"] != []:
                                 detectionReportInfo = ""
@@ -749,25 +750,25 @@ def main():
                             )
                             if statsVersion["Xref Streams"] is not None:
                                 stats += (
-                                    f"{newLine}{beforeStaticLabel}\t\tXref streams "
+                                    f"{newLine}{beforeStaticLabel}\tXref streams "
                                     f'({statsVersion["Xref Streams"][0]}): '
                                     f'{resetColor}{str(statsVersion["Xref Streams"][1])}'
                                 )
                             if statsVersion["Object Streams"] is not None:
                                 stats += (
-                                    f"{newLine}{beforeStaticLabel}\t\tObject streams "
+                                    f"{newLine}{beforeStaticLabel}\tObject streams "
                                     f'({statsVersion["Object Streams"][0]}): '
                                     f'{resetColor}{str(statsVersion["Object Streams"][1])}'
                                 )
                             if int(statsVersion["Streams"][0]) > 0:
                                 stats += (
-                                    f"{newLine}{beforeStaticLabel}\t\tEncoded "
+                                    f"{newLine}{beforeStaticLabel}\tEncoded "
                                     f'({statsVersion["Encoded"][0]}): '
                                     f'{resetColor}{str(statsVersion["Encoded"][1])}'
                                 )
                                 if statsVersion["Decoding Errors"] is not None:
                                     stats += (
-                                        f"{newLine}{beforeStaticLabel}\t\tDecoding errors "
+                                        f"{newLine}{beforeStaticLabel}\tDecoding errors "
                                         f'({statsVersion["Decoding Errors"][0]}): '
                                         f'{resetColor}{str(statsVersion["Decoding Errors"][1])}'
                                     )
