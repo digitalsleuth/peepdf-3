@@ -2,7 +2,7 @@
 # peepdf is a tool to analyse and modify PDF files
 #    http://peepdf.eternal-todo.com
 #    By Jose Miguel Esparza <jesparza AT eternal-todo.com>
-#
+#    Updated for Python 3 by Corey Forman (digitalsleuth - https://github.com/digitalsleuth/peepdf-3)
 #    Copyright (C) 2011-2017 Jose Miguel Esparza
 #
 #    This file is part of peepdf.

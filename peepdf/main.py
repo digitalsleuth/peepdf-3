@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
 #
-# peepdf is a tool to analyse and modify PDF files
+#    peepdf is a tool to analyse and modify PDF files
 #    http://peepdf.eternal-todo.com
 #    By Jose Miguel Esparza <jesparza AT eternal-todo.com>
-#
+#    Updated for Python 3 by Corey Forman (digitalsleuth - https://github.com/digitalsleuth/peepdf-3)
 #    Copyright (C) 2011-2017 Jose Miguel Esparza
 #
 #    This file is part of peepdf.
@@ -44,7 +44,7 @@ except ModuleNotFoundError:
     from PDFUtils import vtcheck
 
 VT_KEY = "fc90df3f5ac749a94a94cb8bf87e05a681a2eb001aef34b6a0084b8c22c97a64"
-VERSION = "1.0.6"
+VERSION = "1.0.7"
 
 try:
     import STPyV8 as PyV8
@@ -735,7 +735,7 @@ def main():
                             )
                             if statsVersion["Compressed Objects"] is not None:
                                 stats += (
-                                    f"{beforeStaticLabel}\tCompressed objects  "
+                                    f"{beforeStaticLabel}\tCompressed objects "
                                     f'({statsVersion["Compressed Objects"][0]}): '
                                     f'{resetColor}{str(statsVersion["Compressed Objects"][1])}{newLine}'
                                 )
@@ -751,7 +751,7 @@ def main():
                             if statsVersion["Xref Streams"] is not None:
                                 stats += (
                                     f"{newLine}{beforeStaticLabel}\tXref streams "
-                                    f'({statsVersion["Xref Streams"][0]}): '
+                                    f'({statsVersion["Xref Streams"][0]}): {resetColor}'
                                     f'{resetColor}{str(statsVersion["Xref Streams"][1])}'
                                 )
                             if statsVersion["Object Streams"] is not None:
@@ -851,7 +851,7 @@ def main():
                                 stats += f"{newLine}{beforeStaticLabel}\tFound URLs:{resetColor}{newLine}"
                                 for url in urls:
                                     stats += f"\t\t{url}{newLine}"
-                            stats += newLine * 2
+                            stats += f'{newLine * 2}'
                     if fileName is not None:
                         print(stats)
                     if options.isInteractive:
@@ -859,7 +859,6 @@ def main():
                             from peepdf.PDFConsole import PDFConsole
                         except ModuleNotFoundError:
                             from PDFConsole import PDFConsole
-
                         console = PDFConsole(pdf, VT_KEY, options.avoidColors)
                         while not console.leaving:
                             try:
@@ -867,7 +866,7 @@ def main():
                             except KeyboardInterrupt as e:
                                 sys.exit()
                             except:
-                                errorMessage = "[!] Error: Exception not handled using the interactive console!! Please, report it to the author!!"
+                                errorMessage = "[!] Error: Exception not handled using the interactive console - please report it to the author."
                                 print(
                                     f"{errorColor}{errorMessage}{resetColor}{newLine}"
                                 )
@@ -887,12 +886,8 @@ def main():
                 f"{newLine}Please don't forget to report the errors found:{newLine * 2}"
             )
             message += (
-                f'\t- Send the file "{errorsFile}" to the author '
-                f"(mailto:peepdfREMOVETHIS@eternal-todo.com){newLine}"
-            )
-            message += (
-                f"\t- And/Or creating an issue on the project webpage "
-                f"(https://github.com/jesparza/peepdf/issues){newLine}"
+                f"\t- Create an issue on the project webpage "
+                f"(https://github.com/digitalsleuth/peepdf-3){newLine}"
             )
             message = f"{errorColor}{message}{resetColor}"
             sys.exit(message)

@@ -1,4 +1,12 @@
 -----------------------------------------------
+peepdf 1.0.7, 2023-09-18
+-----------------------------------------------
+
+	* Fixes:
+		- Removed suggestion to contact original author with issues, instead direct user to open issues at github.com/digitalsleuth/peepdf-3/issues
+		- Add updated author information
+
+-----------------------------------------------
 peepdf 1.0.2, 2023-09-06
 -----------------------------------------------
 

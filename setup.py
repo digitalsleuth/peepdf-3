@@ -2,10 +2,10 @@ from setuptools import setup
 
 setup(
     name="peepdf",
-    version="1.0.6",
+    version="1.0.7",
     author="Jose Miguel Esparza, Corey Forman",
     license="GNU GPLv3",
-    url="http://eternal-todo.com",
+    url="https://github.com/digitalsleuth/peepdf-3",
     description= ("The original peepdf, ported to Python 3, and packaged in a setup"),
     install_requires=[
         "jsbeautifier",

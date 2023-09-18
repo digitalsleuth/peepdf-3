@@ -2,7 +2,7 @@
 # peepdf is a tool to analyse and modify PDF files
 #    http://peepdf.eternal-todo.com
 #    By Jose Miguel Esparza <jesparza AT eternal-todo.com>
-#
+#    Updated for Python 3 by Corey Forman (digitalsleuth - https://github.com/digitalsleuth/peepdf-3)
 #    Copyright (C) 2011-2017 Jose Miguel Esparza
 #
 #    This file is part of peepdf.
@@ -1699,9 +1699,9 @@ class PDFConsole(cmd.Cmd):
                 )
                 if statsVersion["Xref Streams"] is not None:
                     stats += (
-                        f'{newLine}{beforeStaticLabel}\tXref streams ('
-                        f'{statsVersion["Xref Streams"][0]}): {self.resetColor}'
-                        f'{str(statsVersion["Xref Streams"][1])}'
+                        f'{newLine}{beforeStaticLabel}\tXref streams '
+                        f'({statsVersion["Xref Streams"][0]}): '
+                        f'{self.resetColor}{str(statsVersion["Xref Streams"][1])}'
                     )
                 if statsVersion["Object Streams"] is not None:
                     stats += (
