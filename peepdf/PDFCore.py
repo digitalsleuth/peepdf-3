@@ -3520,7 +3520,7 @@ class PDFObjectStream(PDFStream):
                     for i in range(0, len(numbers), 2):
                         id = int(numbers[i])
                         offset = int(numbers[i + 1])
-                        ret = PDFParser.readObject(objectsSection[offset:])
+                        ret = PDFParser().readObject(objectsSection[offset:])
                         if ret[0] == -1:
                             if isForceMode:
                                 object = None

@@ -35,7 +35,7 @@ import hashlib
 import traceback
 import json
 from lxml import etree
-from datetime import datetime
+from datetime import datetime as dt
 try:
     from peepdf.PDFCore import PDFParser, vulnsDict
     from peepdf.PDFUtils import vtcheck
@@ -44,7 +44,8 @@ except ModuleNotFoundError:
     from PDFUtils import vtcheck
 
 VT_KEY = "fc90df3f5ac749a94a94cb8bf87e05a681a2eb001aef34b6a0084b8c22c97a64"
-VERSION = "1.0.7"
+VERSION = "1.0.8"
+DTNOW = "%Y%m%d-%H%M%S"
 
 try:
     import STPyV8 as PyV8
@@ -115,7 +116,7 @@ def getPeepXML(statsDict):
         author="Jose Miguel Esparza and Corey Forman",
     )
     analysisDate = etree.SubElement(root, "date")
-    analysisDate.text = datetime.today().strftime("%Y-%m-%d %H:%M")
+    analysisDate.text = dt.today().strftime("%Y-%m-%d %H:%M:%S")
     basicInfo = etree.SubElement(root, "basic")
     fileName = etree.SubElement(basicInfo, "filename")
     fileName.text = statsDict["File"]
@@ -395,7 +396,7 @@ def getPeepJSON(statsDict):
     jsonDict = {
         "peepdf_analysis": {
             "peepdf_info": peepdfDict,
-            "date": datetime.today().strftime("%Y-%m-%d %H:%M"),
+            "date": dt.today().strftime("%Y-%m-%d %H:%M:%S"),
             "basic": basicDict,
             "advanced": advancedInfo,
         }
@@ -407,18 +408,16 @@ def main():
     global COLORIZED_OUTPUT
     versionHeader = f"Version: peepdf {VERSION}"
     author = "Jose Miguel Esparza and Corey Forman"
-    email = "peepdf AT eternal-todo.com"
-    url = "http://peepdf.eternal-todo.com"
-    twitter = "http://twitter.com/EternalTodo"
-    peepTwitter = "http://twitter.com/peepdf"
+    url = "https://github.com/digitalsleuth/peepdf-3"
     newLine = os.linesep
     currentDir = os.getcwd()
     absPeepdfRoot = os.path.dirname(os.path.realpath(sys.argv[0]))
-    errorsFile = os.path.join(currentDir, "peepdf_errors.txt")
+    currentDateTime = dt.now().strftime(DTNOW)
+    errorsFile = os.path.join(currentDir, f"peepdf_errors-{currentDateTime}.txt")
     peepdfHeader = (
-        f"{versionHeader}{newLine * 2}{url}{newLine}{peepTwitter}{newLine}{email}"
+        f"{versionHeader}{newLine * 2}{url}{newLine}"
     )
-    f"{newLine * 2}{author}{newLine}{twitter}{newLine}"
+    f"{newLine * 2}{author}{newLine}"
     argsParser = optparse.OptionParser(
         usage="Usage: peepdf.py [options] PDF_file", description=versionHeader
     )
@@ -592,7 +591,7 @@ def main():
                         "[!] Error: Exception while generating the XML file!!"
                     )
                     traceback.print_exc(file=open(errorsFile, "a"))
-                    raise Exception("PeepException", "Send me an email ;)")
+                    raise Exception("PeepException", "Open an Issue on GitHub")
             elif options.jsonOutput and not options.commands:
                 try:
                     jsonReport = getPeepJSON(statsDict, version)
@@ -602,7 +601,7 @@ def main():
                         "[!] Error: Exception while generating the JSON report!!"
                     )
                     traceback.print_exc(file=open(errorsFile, "a"))
-                    raise Exception("PeepException", "Send me an email ;)")
+                    raise Exception("PeepException", "Open an Issue on GitHub")
             else:
                 if COLORIZED_OUTPUT and not options.avoidColors:
                     try:
@@ -626,7 +625,7 @@ def main():
                         )
                         scriptFileObject.close()
                         traceback.print_exc(file=open(errorsFile, "a"))
-                        raise Exception("PeepException", "Send me an email ;)")
+                        raise Exception("PeepException", "Open an Issue on GitHub")
                 elif options.commands is not None:
                     from peepdf.PDFConsole import PDFConsole
 
@@ -637,7 +636,7 @@ def main():
                     except:
                         errorMessage = "[!] Error: Exception not handled using the batch commands!!"
                         traceback.print_exc(file=open(errorsFile, "a"))
-                        raise Exception("PeepException", "Send me an email ;)")
+                        raise Exception("PeepException", "Open an Issue on GitHub")
                 else:
                     if statsDict is not None:
                         if COLORIZED_OUTPUT and not options.avoidColors:

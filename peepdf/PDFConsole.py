@@ -36,6 +36,7 @@ import jsbeautifier
 import traceback
 from builtins import input
 from base64 import b64encode, b64decode
+from datetime import datetime as dt
 try:
     from peepdf.PDFUtils import *
     from peepdf.PDFCrypto import *
@@ -84,6 +85,7 @@ FILE_WRITE = 1
 FILE_ADD = 2
 VAR_WRITE = 3
 VAR_ADD = 4
+DTFMT = "%Y%m%d-%H%M%S"
 newLine = os.linesep
 errorsFile = "errors.txt"
 filter2RealFilterDict = {
@@ -2473,7 +2475,8 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("js_eval " + argv, evalCode)
         except:
             error = str(sys.exc_info()[1])
-            open("jserror.log", "ab").write(f'{error}{newLine}')
+            errorFile = f"jserror-{dt.now().strftime(DTNOW)}.log"
+            open(errorFile, "ab").write(f'{error}{newLine}')
 
         if error != "":
             self.log_output("js_eval " + argv, "[!] Error: " + error)
