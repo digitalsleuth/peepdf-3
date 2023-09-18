@@ -1,4 +1,6 @@
 build*
 *.egg_info
 __pycache__
-jserror.log
+jserror*
+peepdf_error*
+dist*

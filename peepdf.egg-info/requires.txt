@@ -1,6 +1,0 @@
-jsbeautifier
-colorama
-Pillow
-pythonaes
-pylibemu
-lxml
