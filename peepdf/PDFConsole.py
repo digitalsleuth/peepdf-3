@@ -1692,7 +1692,7 @@ class PDFConsole(cmd.Cmd):
                     )
                 if statsVersion["Errors"] is not None:
                     stats += (
-                        f'{beforeStaticLabel}\t\tErrors ({statsVersion["Errors"][0]}): '
+                        f'{beforeStaticLabel}\tErrors ({statsVersion["Errors"][0]}): '
                         f'{self.resetColor}{str(statsVersion["Errors"][1])}{newLine}'
                     )
                 stats += (

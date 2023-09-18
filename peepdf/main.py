@@ -44,7 +44,7 @@ except ModuleNotFoundError:
     from PDFUtils import vtcheck
 
 VT_KEY = "fc90df3f5ac749a94a94cb8bf87e05a681a2eb001aef34b6a0084b8c22c97a64"
-VERSION = "1.0.8"
+VERSION = "1.0.9"
 DTNOW = "%Y%m%d-%H%M%S"
 
 try:
@@ -740,7 +740,7 @@ def main():
                                 )
                             if statsVersion["Errors"] is not None:
                                 stats += (
-                                    f'{beforeStaticLabel}\t\tErrors ({statsVersion["Errors"][0]}): '
+                                    f'{beforeStaticLabel}\tErrors ({statsVersion["Errors"][0]}): '
                                     f'{resetColor}{str(statsVersion["Errors"][1])}{newLine}'
                                 )
                             stats += (

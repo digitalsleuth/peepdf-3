@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="peepdf",
-    version="1.0.8",
+    version="1.0.9",
     author="Jose Miguel Esparza, Corey Forman",
     license="GNU GPLv3",
     url="https://github.com/digitalsleuth/peepdf-3",
@@ -23,4 +23,5 @@ setup(
     packages=[
         "peepdf",
     ],
+    package_data={'': ['README.md, COPYING']}
 )
