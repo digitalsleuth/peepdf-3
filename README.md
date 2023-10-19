@@ -8,6 +8,10 @@ With peepdf it's possible to see all the objects in the document showing
 the suspicious elements, supports all the most used filters and encodings, it can parse different versions of a file, object streams and encrypted files. With the installation
 of [STPyV8](https://github.com/cloudflare/stpyv8) and [Pylibemu](https://github.com/buffer/pylibemu) it provides **Javascript and shellcode analysis** wrappers too. Apart of this it's able to create new PDF files and to modify/obfuscate existent ones.
 
+![PyPI - Version](https://img.shields.io/pypi/v/peepdf-3)
+
+# Features
+
 The main functionalities of peepdf are the following:
 
 **Analysis:**
@@ -71,6 +75,17 @@ The main functionalities of peepdf are the following:
 **Included in:**
 
   * [REMnux](https://remnux.org)
+
+# Installation
+
+You can install via two methods:
+
+  * From PyPI via pip - `python3 -m pip install peepdf-3`
+  * From GitHub via pip and git - `python3 -m pip install git+https://github.com/digitalsleuth/peepdf-3.git`
+
+# Current Known Limitations
+
+  * Not installable on Windows - because pylibemu is not installable on Windows without libemu - future research to be done
 
 **You are free to contribute with feedback, bugs, patches, etc. Any help is welcome. Also, if you really enjoy using peepdf, you think it is worth it and you feel really generous today you can donate some bucks to the project ;) Thanks!**
 
