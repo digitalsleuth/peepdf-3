@@ -1,4 +1,12 @@
 -----------------------------------------------
+peepdf 2.0.0, 2023-12-06
+-----------------------------------------------
+
+	* Fixes:
+		- Fixed JavaScript detection, whereby if the line contained even one invalid character, the remainder of the line would be ignored
+		- Fixed the incorrect implementation of iterating over .keys(), which subsequently fixed the "filters" option
+
+-----------------------------------------------
 peepdf 1.0.9, 2023-09-18
 -----------------------------------------------
 

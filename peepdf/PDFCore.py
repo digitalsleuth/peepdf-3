@@ -2770,6 +2770,8 @@ class PDFStream(PDFDictionary):
         ret = self.decode()
         if ret[0] == -1:
             errorMessage = ret[1]
+        if isinstance(self.decodedStream, bytes):
+            self.decodedStream = self.decodedStream.decode('latin-1')
         refs = re.findall("(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream)
         if refs != []:
             self.references += refs
