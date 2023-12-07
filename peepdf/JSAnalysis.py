@@ -163,7 +163,7 @@ def getVarContent(jsCode, varContent):
     varContent = varContent.replace(" ", "")
     parts = varContent.split("+")
     for part in parts:
-        if re.match("[\"'].*?[\"']", part, re.DOTALL):
+        if re.match('["\'].*?["\']', part, re.DOTALL):
             clearBytes += part[1:-1]
         else:
             part = escapeString(part)
@@ -214,12 +214,9 @@ def isJavascript(content):
     if re.findall(reJSscript, content, re.DOTALL | re.IGNORECASE):
         return True
 
-    for char in content:
-        if (ord(char) < 32 and char not in ["\n", "\r", "\t", "\f", "\x00"]) or ord(
-            char
-        ) >= 127:
-            return False
-
+    contentAlphaNumeric = any(any(char.isalnum() and char.isascii() for char in item) for item in content)
+    if not contentAlphaNumeric:
+        return False
     for string in jsStrings:
         cont = content.count(string)
         results += cont
@@ -228,6 +225,9 @@ def isJavascript(content):
         elif cont == 0 and string in keyStrings:
             return False
 
+    stringsFoundAlphaNumeric = any(any(char.isalnum() and char.isascii() for char in item) for item in stringsFound)
+    if not stringsFoundAlphaNumeric:
+        return False
     numDistinctStringsFound = len(stringsFound)
     ratio = (results * 100.0) / length
     if (results > limit and numDistinctStringsFound >= minDistinctStringsFound) or (
@@ -247,7 +247,7 @@ def searchObfuscatedFunctions(jsCode, function):
     @return: List with obfuscated functions information [functionName,functionCall,containsReturns]
     """
     obfuscatedFunctionsInfo = []
-    if jsCode != None:
+    if jsCode is not None:
         match = re.findall(
             "\W(" + function + "\s{0,5}?\((.*?)\)\s{0,5}?;)", jsCode, re.DOTALL
         )
@@ -321,5 +321,5 @@ def unescape(escapedBytes, unicode=True):
         else:
             unescapedBytes = escapedBytes
     except:
-        return (-1, "Error while unescaping the bytes")
+        return (-1, "[!] Error while unescaping the bytes")
     return (0, unescapedBytes)

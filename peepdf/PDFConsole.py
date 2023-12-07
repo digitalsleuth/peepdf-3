@@ -488,7 +488,7 @@ class PDFConsole(cmd.Cmd):
                 size = int(args[2])
             for i in range(iniFilterArgs, len(args)):
                 fileFilter = args[i].lower()
-                if fileFilter not in filter2RealFilterDict.keys():
+                if fileFilter not in list(filter2RealFilterDict.keys()):
                     self.help_decode()
                     return False
                 if fileFilter in notImplementedFilters:
@@ -988,7 +988,7 @@ class PDFConsole(cmd.Cmd):
                 size = int(args[1])
             for i in range(iniFilterArgs, len(args)):
                 fileFilter = args[i].lower()
-                if fileFilter not in filter2RealFilterDict.keys():
+                if fileFilter not in list(filter2RealFilterDict.keys()):
                     self.help_encode()
                     return False
                 if fileFilter in notImplementedFilters:
@@ -1369,7 +1369,7 @@ class PDFConsole(cmd.Cmd):
                 iniFilterArgs = 2
             else:
                 version = None
-            validFilters = filter2RealFilterDict.keys() + ["none"]
+            validFilters = list(filter2RealFilterDict.keys()) + ["none"]
             validFilters.remove("b64")
             validFilters.remove("base64")
             for i in range(iniFilterArgs, len(args)):
@@ -2746,10 +2746,10 @@ class PDFConsole(cmd.Cmd):
             urlsFound = re.findall("https?://.*$", unescapedBytes, re.DOTALL)
             if unescapedBytes != "":
                 unescapedOutput += (
-                    f'{newLine}Unescaped bytes: {newLine * 2}{self.printBytes(unescapedBytes)}'
+                    f'{newLine}Unescaped bytes:{newLine * 2}{self.printBytes(unescapedBytes)}'
                 )
             if urlsFound != []:
-                unescapedOutput += f'{newLine * 2}URLs in shellcode: {newLine}'
+                unescapedOutput += f'{newLine * 2}URLs in shellcode:{newLine}'
                 for url in urlsFound:
                     unescapedOutput += f'\t{url}'
                 unescapedOutput += f'{newLine}'
@@ -2797,7 +2797,7 @@ class PDFConsole(cmd.Cmd):
             return False
         if len(args) == 1:
             varName = args[0]
-            if varName in context.locals.keys():
+            if varName in list(context.locals.keys()):
                 varContent = context.locals[varName]
                 try:
                     self.log_output("js_vars " + argv, str(varContent))
@@ -2828,7 +2828,7 @@ class PDFConsole(cmd.Cmd):
                 "valueOf",
                 "watch",
             ]
-            varArray = context.locals.keys()
+            varArray = list(context.locals.keys())
             for fixedVar in fixedVars:
                 varArray.remove(fixedVar)
             self.log_output("js_vars " + argv, str(varArray))
@@ -3847,7 +3847,7 @@ class PDFConsole(cmd.Cmd):
             self.help_set()
             return False
         if numArgs == 0:
-            vars = self.variables.keys()
+            vars = list(self.variables.keys())
             for var in vars:
                 varContent = self.printResult(str(self.variables[var][0]))
                 if varContent == str(self.variables[var][0]):
@@ -4514,7 +4514,7 @@ class PDFConsole(cmd.Cmd):
                 # outputBytes += xored + newLine
                 # outputBytes += '[/' + hex(i) + '] {newLine}*2
         if found:
-            keys = successfullKeys.keys()
+            keys = list(successfullKeys.keys())
             message = f'Pattern found with the following keys: {str(keys)}{newLine * 2}'
             for key in keys:
                 message += f'Offsets for key "{str(key)}": {str(successfullKeys[key])}{newLine}'
