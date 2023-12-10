@@ -30,18 +30,23 @@
 import sys
 import os
 import optparse
-import urllib
+import argparse
+import requests
 import hashlib
 import traceback
 import json
+import pathlib
 from lxml import etree
 from datetime import datetime as dt
+
 try:
-    from peepdf.PDFCore import PDFParser, vulnsDict
+    from peepdf.PDFCore import PDFParser
     from peepdf.PDFUtils import vtcheck
+    from peepdf.PDFVulns import *
 except ModuleNotFoundError:
-    from PDFCore import PDFParser, vulnsDict
+    from PDFCore import PDFParser
     from PDFUtils import vtcheck
+    from PDFVulns import *
 
 VT_KEY = "fc90df3f5ac749a94a94cb8bf87e05a681a2eb001aef34b6a0084b8c22c97a64"
 VERSION = "2.0.0"
@@ -74,38 +79,6 @@ try:
     PIL_MODULE = True
 except:
     PIL_MODULE = False
-
-
-def getRepPaths(url, path=""):
-    paths = []
-    try:
-        browsingPage = urllib.request.urlopen(url + path).read()
-    except:
-        sys.exit(
-            f'[!] Connection error while getting browsing page {url}{path}'
-        )
-    browsingPageObject = json.loads(browsingPage)
-    for file in browsingPageObject:
-        if file["type"] == "file":
-            paths.append(file["path"])
-        elif file["type"] == "dir":
-            dirPaths = getRepPaths(url, file["path"])
-            paths += dirPaths
-    return paths
-
-
-def getLocalFilesInfo(filesList):
-    localFilesInfo = {}
-    print("[-] Getting local files information...")
-    for path in filesList:
-        absPeepdfRoot = os.path.dirname(os.path.realpath(sys.argv[0]))
-        absFilePath = os.path.join(absPeepdfRoot, path)
-        if os.path.exists(absFilePath):
-            content = open(absFilePath, "rb").read()
-            shaHash = hashlib.sha256(content).hexdigest()
-            localFilesInfo[path] = [shaHash, absFilePath]
-    print("[+] Done")
-    return localFilesInfo
 
 
 def getPeepXML(statsDict):
@@ -418,10 +391,14 @@ def main():
         f"{versionHeader}{newLine * 2}{url}{newLine}"
     )
     f"{newLine * 2}{author}{newLine}"
-    argsParser = optparse.OptionParser(
-        usage="Usage: peepdf.py [options] PDF_file", description=versionHeader
+    argsParser = argparse.ArgumentParser(
+        usage="peepdf [options] pdf", description=versionHeader
     )
-    argsParser.add_option(
+    argsParser.add_argument(
+        "pdf",
+        help="PDF File",
+    )
+    argsParser.add_argument(
         "-i",
         "--interactive",
         action="store_true",
@@ -429,15 +406,15 @@ def main():
         default=False,
         help="Sets console mode.",
     )
-    argsParser.add_option(
+    argsParser.add_argument(
         "-s",
         "--load-script",
         action="store",
-        type="string",
+        type=str,
         dest="scriptFile",
         help="Loads the commands stored in the specified file and execute them.",
     )
-    argsParser.add_option(
+    argsParser.add_argument(
         "-c",
         "--check-vt",
         action="store_true",
@@ -445,7 +422,7 @@ def main():
         default=False,
         help="Checks the hash of the PDF file on VirusTotal.",
     )
-    argsParser.add_option(
+    argsParser.add_argument(
         "-f",
         "--force-mode",
         action="store_true",
@@ -453,7 +430,7 @@ def main():
         default=False,
         help="Sets force parsing mode to ignore errors.",
     )
-    argsParser.add_option(
+    argsParser.add_argument(
         "-l",
         "--loose-mode",
         action="store_true",
@@ -461,7 +438,7 @@ def main():
         default=False,
         help="Sets loose parsing mode to catch malformed objects.",
     )
-    argsParser.add_option(
+    argsParser.add_argument(
         "-m",
         "--manual-analysis",
         action="store_true",
@@ -469,7 +446,7 @@ def main():
         default=False,
         help="Avoids automatic Javascript analysis. Useful with eternal loops like heap spraying.",
     )
-    argsParser.add_option(
+    argsParser.add_argument(
         "-g",
         "--grinch-mode",
         action="store_true",
@@ -477,7 +454,7 @@ def main():
         default=False,
         help="Avoids colorized output in the interactive console.",
     )
-    argsParser.add_option(
+    argsParser.add_argument(
         "-v",
         "--version",
         action="store_true",
@@ -485,7 +462,7 @@ def main():
         default=False,
         help="Shows program's version number.",
     )
-    argsParser.add_option(
+    argsParser.add_argument(
         "-x",
         "--xml",
         action="store_true",
@@ -493,7 +470,7 @@ def main():
         default=False,
         help="Shows the document information in XML format.",
     )
-    argsParser.add_option(
+    argsParser.add_argument(
         "-j",
         "--json",
         action="store_true",
@@ -501,16 +478,29 @@ def main():
         default=False,
         help="Shows the document information in JSON format.",
     )
-    argsParser.add_option(
+    argsParser.add_argument(
         "-C",
         "--command",
         action="append",
-        type="string",
+        type=str,
         dest="commands",
         help="Specifies a command from the interactive console to be executed.",
     )
-    (options, args) = argsParser.parse_args()
-
+    argsParser.add_argument(
+        "-o",
+        "--ocr",
+        action="store_true",
+        dest="getText",
+        help="Extract text from the PDF",
+    )
+    argsParser.add_argument(
+       "-u",
+       "--update",
+       dest="update",
+       help="Fetches updates for the Vulnerability List",
+    )
+    args = argsParser.parse_args()
+    numArgs = len(sys.argv) - 1
     stats = ""
     pdf = None
     fileName = None
@@ -519,7 +509,7 @@ def main():
 
     try:
         # Avoid colors in the output
-        if not COLORIZED_OUTPUT or options.avoidColors:
+        if not COLORIZED_OUTPUT or args.avoidColors:
             warningColor = ""
             errorColor = ""
             alertColor = ""
@@ -531,31 +521,70 @@ def main():
             alertColor = Fore.RED
             staticColor = Fore.BLUE
             resetColor = Style.RESET_ALL
-        if options.version:
+        fileName = args.pdf
+        if args.version:
             print(peepdfHeader)
+        if args.update:
+            remoteVersion = ''
+            localVersion = vulnsVersion
+            repoVersionFile = 'https://raw.githubusercontent.com/digitalsleuth/peepdf-3/main/vulns-ver'
+            repoVulnsFile = 'https://raw.githubusercontent.com/digitalsleuth/peepdf-3/main/peepdf/PDFVulns.py'
+            sys.stdout.write('[-] Checking if there are new updates to the Vulnerabilties List')
+            try:
+                remoteVersion = requests.get(repoVersionFile).text
+            except:
+                sys.exit('[!] Error: Connection error while trying to connect with the repository')
+            if remoteVersion == '':
+                sys.exit('[!] Error: Unable to confirm the version number')
+            if localVersion == remoteVersion:
+                sys.stdout.write(f'[-] Current Version: {localVersion}\n[-] Remote Version: {remoteVersion}\n[+] No changes')
+            else:
+                sys.stdout.write(f'[-] Current Version: {localVersion}\n[-] Remote Version: {remoteVersion}\n[+] Update available')
+                sys.stdout.write(f'[-] Fetching the update ...')
+                try:
+                    updateContent = requests.get(repoVulnsFile).text
+                except:
+                    sys.exit('[!] Error: Connection error while trying to fetch the updated PDFVulns.py file')
+                executingPath = pathlib.Path(__file__).parent.resolve()
+                vulnsFile = f'{executingPath}{os.sep}PDFVulns.py'
+                if os.path.exists(vulnsFile):
+                    sys.stdout.write(f'[*] File {vulnsFile} exists, overwriting ...')
+                else:
+                    sys.stdout.write(f'[*] File {vulnsFile} does not exist, creating ...')
+                try:
+                    with open(vulnsFile, 'w') as localVulnsFile:
+                        localVulnsFile.write(updateContent)
+                        localVulnsFile.close()
+                    sys.stdout.write('[+] peepdf Vulnerabilities List updated successfully to {remoteVersion}')
+                except PermissionError:
+                    sys.exit(f'[!] You do not have permissions to write to {vulnsFile}. Try re-running the command with appropriate permissions')
+                
         else:
-            if len(args) == 1:
-                fileName = args[0]
+            if numArgs == 2:
                 if not os.path.exists(fileName):
-                    sys.exit(f'[!] Error: The file "{fileName}" does not exist!')
-            elif len(args) > 1 or (len(args) == 0 and not options.isInteractive):
+                    sys.exit(f'[!] Error: The file "{fileName}" does not exist')
+            elif numArgs > 4 or (numArgs == 0 and not args.isInteractive):
                 sys.exit(argsParser.print_help())
 
-            if options.scriptFile is not None:
-                if not os.path.exists(options.scriptFile):
+            if args.scriptFile is not None:
+                if not os.path.exists(args.scriptFile):
                     sys.exit(
-                        f'[!] Error: The script file "{options.scriptFile}" does not exist!'
+                        f'[!] Error: The script file "{args.scriptFile}" does not exist'
                     )
-
             if fileName is not None:
                 pdfParser = PDFParser()
                 ret, pdf = pdfParser.parse(
                     fileName,
-                    options.isForceMode,
-                    options.isLooseMode,
-                    options.isManualAnalysis,
+                    args.isForceMode,
+                    args.isLooseMode,
+                    args.isManualAnalysis,
                 )
-                if options.checkOnVT:
+                if args.getText:
+                    output = pdfParser.getText(fileName)
+                    sys.stdout.write(f'Text content of: {fileName}{newLine}')
+                    sys.stdout.write(output)
+                    raise SystemExit(0)
+                if args.checkOnVT:
                     # Checks the MD5 on VirusTotal
                     md5Hash = pdf.getMD5()
                     ret = vtcheck(md5Hash, VT_KEY)
@@ -563,99 +592,92 @@ def main():
                         pdf.addError(ret[1])
                     else:
                         vtJsonDict = ret[1]
-                        if "response_code" in vtJsonDict:
-                            if vtJsonDict["response_code"] == 1:
-                                if "positives" and "total" in vtJsonDict:
-                                    pdf.setDetectionRate(
-                                        [vtJsonDict["positives"], vtJsonDict["total"]]
-                                    )
-                                else:
-                                    pdf.addError(
-                                        "Missing elements in the response from VirusTotal!!"
-                                    )
-                                if "permalink" in vtJsonDict:
-                                    pdf.setDetectionReport(vtJsonDict["permalink"])
-                            else:
-                                pdf.setDetectionRate(None)
-                        else:
-                            pdf.addError("Bad response from VirusTotal!!")
+                        maliciousCount = vtJsonDict["data"]["attributes"]["last_analysis_stats"]["malicious"]
+                        totalCount = 0
+                        for result in ("harmless", "suspicious", "malicious", "undetected"):
+                            totalCount += vtJsonDict["data"]["attributes"]["last_analysis_stats"][result]
+                        pdf.setDetectionRate([maliciousCount, totalCount])
+                        if "links" in vtJsonDict["data"]:
+                            pdf.setDetectionReport(vtJsonDict["data"]["links"]["self"])
                 statsDict = pdf.getStats()
 
-            if options.xmlOutput:
+            if args.xmlOutput:
                 try:
                     xml = getPeepXML(statsDict)
                     xml = xml.decode('latin-1')
                     sys.stdout.write(xml)  ## Check this output and format better
                 except:
                     errorMessage = (
-                        "[!] Error: Exception while generating the XML file!!"
+                        "[!] Error: Exception while generating the XML file"
                     )
                     traceback.print_exc(file=open(errorsFile, "a"))
                     raise Exception("PeepException", "Open an Issue on GitHub")
-            elif options.jsonOutput and not options.commands:
+            elif args.jsonOutput and not args.commands:
                 try:
                     jsonReport = getPeepJSON(statsDict, version)
                     sys.stdout.write(jsonReport)
                 except:
                     errorMessage = (
-                        "[!] Error: Exception while generating the JSON report!!"
+                        "[!] Error: Exception while generating the JSON report"
                     )
                     traceback.print_exc(file=open(errorsFile, "a"))
                     raise Exception("PeepException", "Open an Issue on GitHub")
             else:
-                if COLORIZED_OUTPUT and not options.avoidColors:
+                if COLORIZED_OUTPUT and not args.avoidColors:
                     try:
                         init()
                     except:
                         COLORIZED_OUTPUT = False
-                if options.scriptFile is not None:
+                if args.scriptFile is not None:
                     try:
                         from peepdf.PDFConsole import PDFConsole
                     except ModuleNotFoundError:
                         from PDFConsole import PDFConsole
-                    scriptFileObject = open(options.scriptFile, "rb")
+                    scriptFileObject = open(args.scriptFile, "rb")
                     console = PDFConsole(
-                        pdf, VT_KEY, options.avoidColors, stdin=scriptFileObject
+                        pdf, VT_KEY, args.avoidColors, stdin=scriptFileObject
                     )
                     try:
                         console.cmdloop()
                     except:
                         errorMessage = (
-                            "[!] Error: Exception not handled using the batch mode!!"
+                            "[!] Error: Exception not handled using the batch mode"
                         )
                         scriptFileObject.close()
                         traceback.print_exc(file=open(errorsFile, "a"))
                         raise Exception("PeepException", "Open an Issue on GitHub")
-                elif options.commands is not None:
-                    from peepdf.PDFConsole import PDFConsole
-
-                    console = PDFConsole(pdf, VT_KEY, options.avoidColors)
+                elif args.commands is not None:
                     try:
-                        for command in options.commands:
+                        from peepdf.PDFConsole import PDFConsole
+                    except ModuleNotFoundError:
+                        from PDFConsole import PDFConsole
+                    console = PDFConsole(pdf, VT_KEY, args.avoidColors)
+                    try:
+                        for command in args.commands:
                             console.onecmd(command)
                     except:
-                        errorMessage = "[!] Error: Exception not handled using the batch commands!!"
+                        errorMessage = "[!] Error: Exception not handled using the batch commands"
                         traceback.print_exc(file=open(errorsFile, "a"))
                         raise Exception("PeepException", "Open an Issue on GitHub")
                 else:
                     if statsDict is not None:
-                        if COLORIZED_OUTPUT and not options.avoidColors:
+                        if COLORIZED_OUTPUT and not args.avoidColors:
                             beforeStaticLabel = staticColor
                         else:
                             beforeStaticLabel = ""
 
                         if not JS_MODULE:
-                            warningMessage = "Warning: PyV8 is not installed!!"
+                            warningMessage = "[*] Warning: STPyV8 is not installed"
                             stats += (
                                 f"{warningColor}{warningMessage}{resetColor}{newLine}"
                             )
                         if not EMU_MODULE:
-                            warningMessage = "Warning: pylibemu is not installed!!"
+                            warningMessage = "[*] Warning: pylibemu is not installed"
                             stats += (
                                 f"{warningColor}{warningMessage}{resetColor}{newLine}"
                             )
                         if not PIL_MODULE:
-                            warningMessage = "Warning: Python Imaging Library (PIL) is not installed!!"
+                            warningMessage = "[*] Warning: Python Imaging Library (PIL) is not installed"
                             stats += (
                                 f"{warningColor}{warningMessage}{resetColor}{newLine}"
                             )
@@ -666,19 +688,22 @@ def main():
                         if stats != "":
                             stats += newLine
                         statsDict = pdf.getStats()
-
+                        latestVersion = len(statsDict["Versions"]) -1
+                        latestMetadata = pdf.getBasicMetadata(latestVersion)
                         stats += f'{beforeStaticLabel}File: {resetColor}{statsDict["File"]}{newLine}'
+                        if "title" in latestMetadata:
+                            stats += f'{beforeStaticLabel}Title: {resetColor}{latestMetadata["title"]}{newLine}'                        
                         stats += f'{beforeStaticLabel}MD5: {resetColor}{statsDict["MD5"]}{newLine}'
                         stats += f'{beforeStaticLabel}SHA1: {resetColor}{statsDict["SHA1"]}{newLine}'
                         stats += f'{beforeStaticLabel}SHA256: {resetColor}{statsDict["SHA256"]}{newLine}'
                         stats += f'{beforeStaticLabel}Size: {resetColor}{statsDict["Size"]} bytes{newLine}'
                         stats += f'{beforeStaticLabel}IDs: {resetColor}{statsDict["IDs"]}{newLine}'
-                        if options.checkOnVT:
+                        if args.checkOnVT:
                             if statsDict["Detection"] != []:
                                 detectionReportInfo = ""
                                 if statsDict["Detection"] is not None:
                                     detectionColor = ""
-                                    if COLORIZED_OUTPUT and not options.avoidColors:
+                                    if COLORIZED_OUTPUT and not args.avoidColors:
                                         detectionLevel = statsDict["Detection"][0] / (
                                             statsDict["Detection"][1] / 3
                                         )
@@ -699,7 +724,7 @@ def main():
                                     detectionRate = "File not found on VirusTotal"
                                 stats += f"{beforeStaticLabel}Detection: {resetColor}{detectionRate}{newLine}"
                                 stats += detectionReportInfo
-                        stats += f'{beforeStaticLabel}Version: {resetColor}{statsDict["Version"]}{newLine}'
+                        stats += f'{beforeStaticLabel}PDF Format Version: {resetColor}{statsDict["Version"]}{newLine}'
                         stats += f'{beforeStaticLabel}Binary: {resetColor}{statsDict["Binary"]}{newLine}'
                         stats += f'{beforeStaticLabel}Linearized: {resetColor}{statsDict["Linearized"]}{newLine}'
                         stats += f'{beforeStaticLabel}Encrypted: {resetColor}{statsDict["Encrypted"]}'
@@ -777,7 +802,7 @@ def main():
                                     f'({statsVersion["URIs"][0]}): '
                                     f'{resetColor}{str(statsVersion["URIs"][1])}'
                                 )
-                            if COLORIZED_OUTPUT and not options.avoidColors:
+                            if COLORIZED_OUTPUT and not args.avoidColors:
                                 beforeStaticLabel = warningColor
                             if statsVersion["Objects with JS code"] is not None:
                                 stats += (
@@ -795,7 +820,11 @@ def main():
                                 or vulns is not None
                                 or elements is not None
                             ):
-                                stats += f"{newLine}{beforeStaticLabel}\tSuspicious elements:{resetColor}{newLine}"
+                                totalSuspicious = 0
+                                for eachDict in (actions, events, vulns, elements):
+                                    for idx, (k, v) in enumerate(eachDict.items()):
+                                        totalSuspicious += len(v)
+                                stats += f"{newLine}{beforeStaticLabel}\tSuspicious elements ({totalSuspicious}):{resetColor}{newLine}"
                                 if events is not None:
                                     for event in events:
                                         stats += (
@@ -840,10 +869,10 @@ def main():
                                             stats = f"{stats[:-1]}): {resetColor}{str(elements[element])}{newLine}"
                                         else:
                                             stats += (
-                                                f"\t\t{beforeStaticLabel}{element}: "
+                                                f"\t\t{beforeStaticLabel}{element} ({len(elements[element])}): "
                                                 f"{resetColor}{str(elements[element])}{newLine}"
                                             )
-                            if COLORIZED_OUTPUT and not options.avoidColors:
+                            if COLORIZED_OUTPUT and not args.avoidColors:
                                 beforeStaticLabel = staticColor
                             urls = statsVersion["URLs"]
                             if urls is not None:
@@ -852,13 +881,19 @@ def main():
                                     stats += f"\t\t{url}{newLine}"
                             stats += f'{newLine * 2}'
                     if fileName is not None:
-                        print(stats)
-                    if options.isInteractive:
+                        niceOutput = stats.strip(newLine)
+                        niceOutput = niceOutput.replace("\r\n", "\n")
+                        niceOutput = niceOutput.replace("\r", "\n")
+                        niceOutput += newLine
+                        if args.isInteractive:
+                            niceOutput += newLine
+                        sys.stdout.write(niceOutput)
+                    if args.isInteractive:
                         try:
                             from peepdf.PDFConsole import PDFConsole
                         except ModuleNotFoundError:
                             from PDFConsole import PDFConsole
-                        console = PDFConsole(pdf, VT_KEY, options.avoidColors)
+                        console = PDFConsole(pdf, VT_KEY, args.avoidColors)
                         while not console.leaving:
                             try:
                                 console.cmdloop()
@@ -876,7 +911,7 @@ def main():
         else:
             excName = excReason = None
         if excName is None or excName != "PeepException":
-            errorMessage = "[!] Error: Exception not handled!!"
+            errorMessage = "[!] Error: Exception not handled"
             traceback.print_exc(file=open(errorsFile, "a"))
         print(f"{errorColor}{errorMessage}{resetColor}{newLine}")
     finally:

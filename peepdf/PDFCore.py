@@ -26,18 +26,22 @@
 """
 
 import sys, os, re, hashlib, struct
+import pypdf
+
 try:
     from peepdf import aes as AES
     from peepdf.PDFUtils import *
     from peepdf.PDFCrypto import *
     from peepdf.JSAnalysis import *
     from peepdf.PDFFilters import decodeStream, encodeStream
+    from peepdf.PDFVulns import *
 except ModuleNotFoundError:
     import aes as AES
     from PDFUtils import *
     from PDFCrypto import *
     from JSAnalysis import *
     from PDFFilters import decodeStream, encodeStream
+    from PDFVulns import *
 
 MAL_ALL = 1
 MAL_HEAD = 2
@@ -66,40 +70,6 @@ monitorizedElements = [
     ".rawValue",
     "keep.previous",
 ]
-jsVulns = [
-    "mailto",
-    "Collab.collectEmailInfo",
-    "util.printf",
-    "getAnnots",
-    "getIcon",
-    "spell.customDictionaryOpen",
-    "media.newPlayer",
-    "doc.printSeps",
-    "app.removeToolButton",
-]
-singUniqueName = "CoolType.SING.uniqueName"
-bmpVuln = "BMP/RLE heap corruption"
-vulnsDict = {
-    "mailto": ("mailto", ["CVE-2007-5020"]),
-    "Collab.collectEmailInfo": ("Collab.collectEmailInfo", ["CVE-2007-5659"]),
-    "util.printf": ("util.printf", ["CVE-2008-2992"]),
-    "/JBIG2Decode": ("Adobe JBIG2Decode Heap Corruption", ["CVE-2009-0658"]),
-    "getIcon": ("getIcon", ["CVE-2009-0927"]),
-    "getAnnots": ("getAnnots", ["CVE-2009-1492"]),
-    "spell.customDictionaryOpen": ("spell.customDictionaryOpen", ["CVE-2009-1493"]),
-    "media.newPlayer": ("media.newPlayer", ["CVE-2009-4324"]),
-    ".rawValue": ("Adobe Acrobat Bundled LibTIFF Integer Overflow", ["CVE-2010-0188"]),
-    singUniqueName: (singUniqueName, ["CVE-2010-2883"]),
-    "doc.printSeps": ("doc.printSeps", ["CVE-2010-4091"]),
-    "/U3D": ("/U3D", ["CVE-2009-3953", "CVE-2009-3959", "CVE-2011-2462"]),
-    "/PRC": ("/PRC", ["CVE-2011-4369"]),
-    "keep.previous": (
-        "Adobe Reader XFA oneOfChild Un-initialized memory vulnerability",
-        ["CVE-2013-0640"],
-    ),  # https://labs.portcullis.co.uk/blog/cve-2013-0640-adobe-reader-xfa-oneofchild-un-initialized-memory-vulnerability-part-1/
-    bmpVuln: (bmpVuln, ["CVE-2013-2729"]),
-    "app.removeToolButton": ("app.removeToolButton", ["CVE-2013-3346"]),
-}
 jsContexts = {"global": None}
 
 
@@ -1512,6 +1482,8 @@ class PDFDictionary(PDFObject):
     def getStats(self):
         stats = {}
         stats["Object"] = self.type
+        if isinstance(self.value, str):
+            self.value = self.value.encode()
         stats["MD5"] = hashlib.md5(self.value).hexdigest()
         stats["SHA1"] = hashlib.sha1(self.value).hexdigest()
         if self.isCompressed():
@@ -2609,10 +2581,16 @@ class PDFStream(PDFDictionary):
     def getStats(self):
         stats = {}
         stats["Object"] = self.type
+        if isinstance(self.value, str):
+            self.value = self.value.encode()
         stats["MD5"] = hashlib.md5(self.value).hexdigest()
         stats["SHA1"] = hashlib.sha1(self.value).hexdigest()
+        if isinstance(self.decodedStream, str):
+            self.decodedStream = self.decodedStream.encode()        
         stats["Stream MD5"] = hashlib.md5(self.decodedStream).hexdigest()
         stats["Stream SHA1"] = hashlib.sha1(self.decodedStream).hexdigest()
+        if isinstance(self.rawStream, str):
+            self.rawStream = self.rawStream.encode()        
         stats["Raw Stream MD5"] = hashlib.md5(self.rawStream).hexdigest()
         stats["Raw Stream SHA1"] = hashlib.sha1(self.rawStream).hexdigest()
         if self.isCompressed():
@@ -6172,6 +6150,9 @@ class PDFFile:
             creationDate = infoObject.getElementByName("/CreationDate")
             if creationDate is not None and creationDate != []:
                 basicMetadata["creation"] = creationDate.getValue()
+            modificationDate = infoObject.getElementByName("/ModDate")
+            if modificationDate is not None and modificationDate != []:
+                basicMetadata["modification"] = modificationDate.getValue()
             subject = infoObject.getElementByName("/Subject")
             if subject is not None and subject != []:
                 basicMetadata["subject"] = subject.getValue()
@@ -6668,7 +6649,7 @@ class PDFFile:
         stats["Comments"] = str(len(self.comments))
         stats["Errors"] = self.errors
         stats["Versions"] = []
-        stats["IDs"] = "\n"
+        stats["IDs"] = newLine
         for version in range(self.updates + 1):
             statsVersion = {}
             catalogId = None
@@ -6678,8 +6659,8 @@ class PDFFile:
                 catalogId = trailer.getCatalogId()
                 infoId = trailer.getInfoId()
                 trailerId = trailer.getTrailerId()
-            if trailerId is not None and streamTrailer is None:
-                stats["IDs"] += f'Version {version}: {trailerId}{newLine}'
+                if trailerId is not None and streamTrailer is None:
+                    stats["IDs"] += f'\tVersion {version}: {trailerId}{newLine}'
             if catalogId is None and streamTrailer is not None:
                 catalogId = streamTrailer.getCatalogId()
             if infoId is None and streamTrailer is not None:
@@ -7670,7 +7651,7 @@ class PDFParser:
                     else:
                         if not forceMode:
                             sys.exit(
-                                "[!] Error: An error has occurred while parsing an indirect object"
+                                f"[!] Error: An error has occurred while parsing an indirect object: {str(objectHeader)} ({str(ret[1])})"
                             )
                         else:
                             pdfFile.addError(
@@ -8449,6 +8430,20 @@ class PDFParser:
             lines.append(content)
         return lines
 
+    def getText(self, fileName):
+        output = ""
+        
+        import logging
+        logger = logging.getLogger("pypdf")
+        logger.setLevel(logging.ERROR)
+        reader = pypdf.PdfReader(fileName)
+        numPages = len(reader.pages)
+        if numPages > 200:
+            sys.stdout.write(f"[*] Warning: This may take some time, as this file is {numPages} pages long.")
+        for page in reader.pages:
+            output += f'{page.extract_text()}{newLine}'
+        return output
+    
     def readObject(self, content, objectType=None, forceMode=False, looseMode=False):
         """
         Method to parse the raw body of the PDF file and obtain PDFObject instances
@@ -8580,7 +8575,7 @@ class PDFParser:
                         )
                     else:
                         return ret
-                    break
+                    break           
         else:
             if content[0] == "t" or content[0] == "f":
                 ret, raw = self.readUntilNotRegularChar(content)

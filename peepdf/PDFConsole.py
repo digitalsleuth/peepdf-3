@@ -43,6 +43,7 @@ try:
     from peepdf.JSAnalysis import *
     from peepdf.PDFCore import *
     from peepdf.PDFFilters import decodeStream, encodeStream
+    from peepdf.PDFVulns import *
     from peepdf.jjdecode import JJDecoder
 except ModuleNotFoundError:
     from PDFUtils import *
@@ -50,6 +51,7 @@ except ModuleNotFoundError:
     from JSAnalysis import *
     from PDFCore import *
     from PDFFilters import decodeStream, encodeStream
+    from PDFVulns import *
     from jjdecode import JJDecoder
 
 try:
@@ -262,16 +264,19 @@ class PDFConsole(cmd.Cmd):
             return False
         # Getting information about original document
         data = self.pdfFile.getBasicMetadata(0)
+        output += f'Original document information: {newLine}'
+        if "title" in data:
+            output += f'\tTitle: {data["title"]}{newLine}'
         if "author" in data:
             output += f'\tAuthor: {data["author"]}{newLine}'
         if "creator" in data:
             output += f'\tCreator: {data["creator"]}{newLine}'
-        if "producter" in data:
+        if "producer" in data:
             output += f'\tProducer: {data["producer"]}{newLine}'
         if "creation" in data:
             output += f'\tCreation date: {data["creation"]}{newLine}'
         if output != "":
-            output += f'Original document information: {newLine}{output}{newLine}'
+            output += f'{newLine}'
 
         # Getting changes for versions
         changes = self.pdfFile.getChangeLog(version)
@@ -283,6 +288,8 @@ class PDFConsole(cmd.Cmd):
                 output += f"Changes in version {str(i + 1)}: {newLine}"
             # Getting modification information
             data = self.pdfFile.getBasicMetadata(i + 1)
+            if "title" in data:
+                output += f'\tTitle: {data["title"]}{newLine}'            
             if "author" in data:
                 output += f'\tAuthor: {data["author"]}{newLine}'
             if "creator" in data:
@@ -1650,7 +1657,7 @@ class PDFConsole(cmd.Cmd):
                         detectionRate = "File not found on VirusTotal"
                     stats += f"{beforeStaticLabel}Detection: {self.resetColor}{detectionRate}{newLine}{detectionReportInfo}"
             stats += (
-                f'{beforeStaticLabel}Version: {self.resetColor}{statsDict["Version"]}{newLine}'
+                f'{beforeStaticLabel}PDF Format Version: {self.resetColor}{statsDict["Version"]}{newLine}'
                 f'{beforeStaticLabel}Binary: {self.resetColor}{statsDict["Binary"]}{newLine}'
                 f'{beforeStaticLabel}Linearized: {self.resetColor}{statsDict["Linearized"]}{newLine}'
                 f'{beforeStaticLabel}Encrypted: {self.resetColor}{statsDict["Encrypted"]}'
@@ -1745,7 +1752,11 @@ class PDFConsole(cmd.Cmd):
                     or vulns is not None
                     or elements is not None
                 ):
-                    stats += f'{newLine}{beforeStaticLabel}\tSuspicious elements:{self.resetColor}{newLine}'
+                    totalSuspicious = 0
+                    for eachDict in (actions, events, vulns, elements):
+                        for idx, (k, v) in enumerate(eachDict.items()):
+                            totalSuspicious += len(v)                    
+                    stats += f'{newLine}{beforeStaticLabel}\tSuspicious elements ({totalSuspicious}):{self.resetColor}{newLine}'
                     if events is not None:
                         for event in events:
                             stats += (
@@ -1767,7 +1778,7 @@ class PDFConsole(cmd.Cmd):
                                 for vulnCVE in vulnCVEList:
                                     stats += f'{vulnCVE},'
                                 stats += (
-                                    f'{stats[:-1]}) {len(vulns[vuln])}: {self.resetColor}'
+                                    f'{stats[:-1]}) ({len(vulns[vuln])}): {self.resetColor}'
                                     f'{str(vulns[vuln])}{newLine}'
                                 )
                             else:
@@ -1786,7 +1797,7 @@ class PDFConsole(cmd.Cmd):
                                 stats += f'{stats[:-1]}): {self.resetColor}{str(elements[element])}{newLine}'
                             else:
                                 stats += (
-                                    f'\t\t{beforeStaticLabel}{element}: '
+                                    f'\t\t{beforeStaticLabel}{element} ({len(elements[element])}): '
                                     f'{self.resetColor}{str(elements[element])}{newLine}'
                                 )
                 if not self.avoidOutputColors:
@@ -3130,6 +3141,33 @@ class PDFConsole(cmd.Cmd):
             f'{newLine}Shows the content of the object after being decoded and decrypted. {newLine}'
         )
 
+    def do_ocr(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("ocr " + argv, message)
+            return False
+        fileName = self.pdfFile.path
+        args = self.parseArgs(argv)
+        pdfText = PDFParser.getText(self, fileName)
+        if pdfText is None:
+            message = "[!] Error: No textual content found"
+            self.log_output("ocr " + fileName, message)
+            return False
+        if args != [] and len(args) == 1:
+            with open(args[0], "w") as outputFile:
+                outputFile.write(pdfText)
+                outputFile.close()
+        elif len(args) > 1:
+            message = "[!] Error: ocr only takes one argument, or none for output to stdout"
+            self.log_output("ocr " + argv, message)
+            return False
+        else:
+            self.log_output("ocr " + fileName, pdfText)
+        
+    def help_ocr(self):
+        print(f'{newLine}Usage: ocr [$output_filename]')
+        print(f'{newLine}Uses pypdf to extract text from the PDF, optional output to file. {newLine}')
+        
     def do_offsets(self, argv):
         if self.pdfFile is None:
             message = "[!] Error: You must open a file"
@@ -5098,7 +5136,7 @@ class PDFConsole(cmd.Cmd):
             hexChain = ""
             strings = ""
             for i in range(0, len(byteVal)):
-                if ord(byteVal[i]) > 31 and ord(byteVal[i]) < 128:
+                if ord(byteVal[i]) > 31 and ord(byteVal[i]) < 127:
                     strings += byteVal[i]
                 else:
                     strings += "."
@@ -5115,7 +5153,7 @@ class PDFConsole(cmd.Cmd):
                 if hexChain == "":
                     output = output[:-1]
                 else:
-                    output += f'{hexChain}{(48 - len(hexChain)) * " "}  |{strings}|'
+                    output += f'{hexChain}{(48 - len(hexChain)) * " "}  |{strings + ((16 - len(strings)) * " ")}|'
         return output
 
     def printResult(self, result):

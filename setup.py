@@ -8,6 +8,7 @@ setup(
     url="https://github.com/digitalsleuth/peepdf-3",
     description= ("The original peepdf, ported to Python 3, and packaged in a setup"),
     install_requires=[
+        "requests",
         "jsbeautifier",
         "colorama",
         "Pillow",
