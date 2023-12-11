@@ -397,6 +397,7 @@ def main():
     argsParser.add_argument(
         "pdf",
         help="PDF File",
+        nargs="?",
     )
     argsParser.add_argument(
         "-i",
@@ -421,6 +422,13 @@ def main():
         dest="checkOnVT",
         default=False,
         help="Checks the hash of the PDF file on VirusTotal.",
+    )
+    argsParser.add_argument(
+        "-k",
+        "--key",
+        dest="vtApiKey",
+        default=VT_KEY,
+        help="VirusTotal API Key, used with -c/--check-vt",
     )
     argsParser.add_argument(
         "-f",
@@ -496,6 +504,7 @@ def main():
     argsParser.add_argument(
        "-u",
        "--update",
+       action="store_true",
        dest="update",
        help="Fetches updates for the Vulnerability List",
     )
@@ -525,37 +534,47 @@ def main():
         if args.version:
             print(peepdfHeader)
         if args.update:
+            if numArgs > 1:
+                sys.stdout.write('[*] Only one argument required for update, other arguments will be ignored\r')
+            branch = 'develop'
             remoteVersion = ''
             localVersion = vulnsVersion
-            repoVersionFile = 'https://raw.githubusercontent.com/digitalsleuth/peepdf-3/main/vulns-ver'
-            repoVulnsFile = 'https://raw.githubusercontent.com/digitalsleuth/peepdf-3/main/peepdf/PDFVulns.py'
-            sys.stdout.write('[-] Checking if there are new updates to the Vulnerabilties List')
+            repoVersionFile = f'https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/vulns-ver'
+            repoVulnsFile = f'https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/peepdf/PDFVulns.py'
+            sys.stdout.write(f'[-] Checking if there are new updates to the Vulnerabilties List{newLine}')
             try:
                 remoteVersion = requests.get(repoVersionFile).text
+                remoteVersion = remoteVersion.strip()
             except:
                 sys.exit('[!] Error: Connection error while trying to connect with the repository')
             if remoteVersion == '':
                 sys.exit('[!] Error: Unable to confirm the version number')
             if localVersion == remoteVersion:
-                sys.stdout.write(f'[-] Current Version: {localVersion}\n[-] Remote Version: {remoteVersion}\n[+] No changes')
+                sys.stdout.write(f'[-] Current Version: {localVersion}\r')
+                sys.stdout.write(f'[-] Remote Version: {remoteVersion}\r')
+                sys.stdout.write(f'[+] No changes{newLine}')
+            elif localVersion > remoteVersion:
+                sys.stdout.write(f'[-] Current Version ({localVersion}) is newer than the Remote Version ({remoteVersion}).')
             else:
-                sys.stdout.write(f'[-] Current Version: {localVersion}\n[-] Remote Version: {remoteVersion}\n[+] Update available')
-                sys.stdout.write(f'[-] Fetching the update ...')
+                sys.stdout.write(f'[-] Current Version: {localVersion}\r')
+                sys.stdout.write(f'[-] Remote Version: {remoteVersion}\r')                
+                sys.stdout.write(f'[+] Update available\r')
+                sys.stdout.write(f'[-] Fetching the update ...\r')
                 try:
                     updateContent = requests.get(repoVulnsFile).text
                 except:
-                    sys.exit('[!] Error: Connection error while trying to fetch the updated PDFVulns.py file')
+                    sys.exit(f'[!] Error: Connection error while trying to fetch the updated PDFVulns.py file{newLine}')
                 executingPath = pathlib.Path(__file__).parent.resolve()
                 vulnsFile = f'{executingPath}{os.sep}PDFVulns.py'
                 if os.path.exists(vulnsFile):
-                    sys.stdout.write(f'[*] File {vulnsFile} exists, overwriting ...')
+                    sys.stdout.write(f'[*] File {vulnsFile} exists, overwriting ...\r')
                 else:
-                    sys.stdout.write(f'[*] File {vulnsFile} does not exist, creating ...')
+                    sys.stdout.write(f'[*] File {vulnsFile} does not exist, creating ...\r')
                 try:
                     with open(vulnsFile, 'w') as localVulnsFile:
                         localVulnsFile.write(updateContent)
                         localVulnsFile.close()
-                    sys.stdout.write('[+] peepdf Vulnerabilities List updated successfully to {remoteVersion}')
+                    sys.stdout.write(f'[+] peepdf Vulnerabilities List updated successfully to {remoteVersion}')
                 except PermissionError:
                     sys.exit(f'[!] You do not have permissions to write to {vulnsFile}. Try re-running the command with appropriate permissions')
                 
@@ -586,12 +605,15 @@ def main():
                     raise SystemExit(0)
                 if args.checkOnVT:
                     # Checks the MD5 on VirusTotal
+                    vtKey = args.vtApiKey
                     md5Hash = pdf.getMD5()
-                    ret = vtcheck(md5Hash, VT_KEY)
+                    ret = vtcheck(md5Hash, vtKey)
                     if ret[0] == -1:
                         pdf.addError(ret[1])
                     else:
                         vtJsonDict = ret[1]
+                        if "error" in vtJsonDict:
+                            sys.exit(f'[!] Error: {vtJsonDict["error"]["message"]}')
                         maliciousCount = vtJsonDict["data"]["attributes"]["last_analysis_stats"]["malicious"]
                         totalCount = 0
                         for result in ("harmless", "suspicious", "malicious", "undetected"):

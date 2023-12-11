@@ -37,6 +37,7 @@ import traceback
 from builtins import input
 from base64 import b64encode, b64decode
 from datetime import datetime as dt
+
 try:
     from peepdf.PDFUtils import *
     from peepdf.PDFCrypto import *
@@ -446,8 +447,8 @@ class PDFConsole(cmd.Cmd):
         print(f"Usage: create pdf simple|(open_action_js [$js_file])")
         print(
             f"Creates a new simple PDF file or one with Javascript code to be executed when "
-            f"opening the file. It's possible to specify the file where the Javascript code is "
-            f"stored or do it manually.{newLine * 2}"
+            f"opening the file.\rIt is possible to specify the file where the Javascript code is "
+            f"stored or do it manually.{newLine}"
         )
         print(f"Usage: create object_stream [$version]")
         print(
@@ -3941,31 +3942,31 @@ class PDFConsole(cmd.Cmd):
             return False
         var = args[0]
         if not var in self.variables:
-            print(f'{newLine}[!] Error: The variable {var} does not exist {newLine}')
+            sys.stdout.write(f'{newLine}[!] Error: The variable {var} does not exist {newLine}')
             return False
         if var == "output":
             if self.variables[var][0] == "stdout":
-                print(f'{newLine}output = "stdout" {newLine}')
+                sys.stdout.write(f'{newLine}output = "stdout" {newLine}')
             else:
                 if self.variables[var][0] == "file":
-                    print(f'{newLine}output = "file"')
-                    print(f'fileName = "{self.output}" {newLine}')
+                    sys.stdout.write(f'{newLine}output = "file"')
+                    sys.stdout.write(f'fileName = "{self.output}" {newLine}')
                 else:
-                    print(f'{newLine}output = "variable"')
-                    print(f'varName = "{self.output}" {newLine}')
+                    sys.stdout.write(f'{newLine}output = "variable"')
+                    sys.stdout.write(f'varName = "{self.output}" {newLine}')
         else:
             varContent = self.printResult(str(self.variables[var][0]))
-            print(f'{newLine}{varContent}{newLine}')
+            sys.stdout.write(f'\r{varContent}{newLine}')
 
     def help_show(self):
-        print(f'{newLine}Usage: show $var_name')
-        print(f'{newLine}Shows the value of the specified variable {newLine}')
-        print(f'Special variables: {newLine}')
-        print("\theader_file")
-        print("\tmalformed_options")
-        print("\toutput")
-        print("\toutput_limit")
-        print(f'\tvt_key {newLine}')
+        sys.stdout.write(f'{newLine}Usage: show $var_name')
+        sys.stdout.write(f'{newLine}Shows the value of the specified variable {newLine}')
+        sys.stdout.write(f'Special variables: {newLine}')
+        sys.stdout.write("\theader_file\r")
+        sys.stdout.write("\tmalformed_options\r")
+        sys.stdout.write("\toutput\r")
+        sys.stdout.write("\toutput_limit\r")
+        sys.stdout.write(f'\tvt_key {newLine}')
 
     def do_stream(self, argv):
         if self.pdfFile is None:
@@ -4082,8 +4083,8 @@ class PDFConsole(cmd.Cmd):
         ]
         # Checking if a VirusTotal API key has been defined
         if self.variables["vt_key"][0] == "COPY_HERE_YOUR_API_KEY":
-            message = f'[!] Error: The "vt_key" variable has not been set! You need to use your own VirusTotal API key ;) {newLine * 2}'
-            f'Copy the key in the source code (peepdf.py:34) or define the variable "vt_key": {newLine * 2}'
+            message = f'[!] Error: The "vt_key" variable has not been set! You need to use your own VirusTotal API key. {newLine * 2}'
+            f'Define the variable "vt_key": {newLine * 2}'
             f'PPDF> set vt_key "ENTER_YOUR_API_KEY"'
             self.log_output("vtcheck " + argv, message)
             return False
@@ -4198,62 +4199,72 @@ class PDFConsole(cmd.Cmd):
             message = f'[!] Error: {ret[1]}'
             self.log_output("vtcheck " + argv, message)
             return False
+        elif "error" in ret[1]:
+            message = f'[!] Error: {ret[1]["error"]}'
+            self.log_output("vtcheck " + argv, message)
+            return False
         jsonDict = ret[1]
-        if "response_code" in jsonDict:
-            if jsonDict["response_code"] == 1:
-                if (
-                    "scan_date" in jsonDict
-                    and "positives" in jsonDict
-                    and "total" in jsonDict
-                    and "scans" in jsonDict
-                    and "permalink" in jsonDict
-                ):
-                    detectionColor = ""
-                    if args == []:
-                        self.pdfFile.setDetectionRate(
-                            [jsonDict["positives"], jsonDict["total"]]
-                        )
-                        self.pdfFile.setDetectionReport(jsonDict["permalink"])
-                    if not self.avoidOutputColors:
-                        detectionLevel = jsonDict["positives"] / (jsonDict["total"] / 3)
-                        if detectionLevel == 0:
-                            detectionColor = self.alertColor
-                        elif detectionLevel == 1:
-                            detectionColor = self.warningColor
-                    output = (
-                        f'{self.staticColor}Detection rate: {self.resetColor} {detectionColor}'
-                        f'{jsonDict["positives"]}{self.resetColor}/{jsonDict["total"]}{newLine}'
-                        f'{self.staticColor}Last analysis date: {self.resetColor}'
-                        f'{jsonDict["scan_date"]}{newLine}'
-                        f'{self.staticColor}Report link: {self.resetColor}'
-                        f'{jsonDict["permalink"]}{newLine}'
-                    )
-                    if jsonDict["positives"] > 0:
-                        output += f'{self.staticColor}Scan results: {self.resetColor}{newLine * 2}'
-                        for engine in jsonDict["scans"]:
-                            engineResults = jsonDict["scans"][engine]
-                            if (
-                                "detected" in engineResults
-                                and "version" in engineResults
-                                and "result" in engineResults
-                                and "update" in engineResults
-                            ):
-                                if engineResults["detected"]:
-                                    output += (
-                                        f'{engine}\t{engineResults["version"]}\t'
-                                        f'{engineResults["update"]}{self.alertColor}\t'
-                                        f'{engineResults["result"]}{self.resetColor}{newLine}'
-                                    )
-                else:
-                    message = (
-                        "[!] Error: Missing elements in the response from VirusTotal"
-                    )
-                    self.log_output("vtcheck " + argv, message)
-                    return False
+        maliciousCount = jsonDict["data"]["attributes"]["last_analysis_stats"]["malicious"]
+        totalCount = 0
+        for result in ("harmless", "suspicious", "malicious", "undetected"):
+            totalCount += jsonDict["data"]["attributes"]["last_analysis_stats"][result]        
+        if (
+            "last_analysis_date" in jsonDict["data"]["attributes"]
+            and "last_analysis_results" in jsonDict["data"]["attributes"]
+            and "links" in jsonDict["data"]
+        ):
+            unixEpoch = jsonDict["data"]["attributes"]["last_analysis_date"]
+            scanResults = jsonDict["data"]["attributes"]["last_analysis_results"]
+            selfLink = jsonDict["data"]["links"]["self"]
+            lastAnalysisDate = dt.utcfromtimestamp(unixEpoch).strftime(DTFMT)
+            detectionColor = ""
+            if args == []:
+                self.pdfFile.setDetectionRate(
+                    [maliciousCount, totalCount]
+                )
+                self.pdfFile.setDetectionReport(selfLink)
+            if not self.avoidOutputColors:
+                detectionLevel = maliciousCount / (totalCount / 3)
+                if detectionLevel == 0:
+                    detectionColor = self.alertColor
+                elif detectionLevel == 1:
+                    detectionColor = self.warningColor
+            output = (
+                f'{self.staticColor}Detection rate: {self.resetColor} {detectionColor}'
+                f'{maliciousCount}{self.resetColor}/{totalCount}{newLine}'
+                f'{self.staticColor}Last analysis date: {self.resetColor}'
+                f'{lastAnalysisDate}{newLine}'
+                f'{self.staticColor}Report link: {self.resetColor}'
+                f'{selfLink}{newLine}'
+            )
+            if maliciousCount > 0:
+                output += f'{self.staticColor}Scan results: {self.resetColor}{newLine * 2}'
+                output += f'{self.staticColor}Engine\tEngine Version\tEngine Update\tResult{newLine * 1}'
+                output += f'{"-" * 58}\r'
+                for engine in scanResults:
+                    engineResults = scanResults[engine]
+                    if (
+                        "malicious" in engineResults["category"]
+                        and "engine_version" in engineResults
+                        and "result" in engineResults
+                        and "engine_update" in engineResults
+                    ):
+
+                        if "malicious" in engineResults["category"]:
+                            output += (
+                                f'{engine}\t{engineResults["engine_version"]}\t'
+                                f'{engineResults["engine_update"]}{self.alertColor}\t'
+                                f'{engineResults["result"]}{self.resetColor}{newLine}'
+                            )
             else:
-                if args == []:
-                    self.pdfFile.setDetectionRate(None)
-                output = "File not found on VirusTotal!"
+                message = (
+                    "[!] Error: Missing elements in the response from VirusTotal"
+                )
+                self.log_output("vtcheck " + argv, message)
+                return False
+        elif args == []:
+            self.pdfFile.setDetectionRate(None)
+            output = "File not found on VirusTotal!"
         else:
             message = "[!] Error: Bad response from VirusTotal"
             self.log_output("vtcheck " + argv, message)
@@ -4261,15 +4272,15 @@ class PDFConsole(cmd.Cmd):
         self.log_output("vtcheck " + argv, output)
 
     def help_vtcheck(self):
-        print(f'{newLine}Usage: vtcheck')
-        print("Usage: vtcheck object|rawobject|stream|rawstream $object_id [$version]")
-        print("Usage: vtcheck raw $offset $num_bytes")
-        print("Usage: vtcheck file $file_name")
-        print("Usage: vtcheck variable $var_name")
-        print(f'{newLine}Checks the hash of the specified source on VirusTotal: raw bytes of the file, objects and streams, and the content of files or variables.')
-        print(f'If no parameters are specified then the hash of the PDF document will be checked. {newLine}')
-        print(f'[!] NOTE: NO CONTENT IS SENT TO VIRUSTOTAL, JUST HASHES!! {newLine}')
-        print(f'[!] NOTE: You need a VirusTotal API key to use this command. {newLine}')
+        sys.stdout.write(f'\rUsage: vtcheck\r')
+        sys.stdout.write(f"Usage: vtcheck object|rawobject|stream|rawstream $object_id [$version]\r")
+        sys.stdout.write(f"Usage: vtcheck raw $offset $num_bytes\r")
+        sys.stdout.write(f"Usage: vtcheck file $file_name\r")
+        sys.stdout.write(f"Usage: vtcheck variable $var_name{newLine}")
+        sys.stdout.write(f'Checks the hash of the specified source on VirusTotal: raw bytes of the file, objects and streams, and the content of files or variables.\r')
+        sys.stdout.write(f'If no parameters are specified then the hash of the PDF document will be checked.{newLine}')
+        sys.stdout.write(f'[!] NOTE: NO CONTENT IS SENT TO VIRUSTOTAL, JUST HASHES!!\r')
+        sys.stdout.write(f'[!] NOTE: You need a VirusTotal API key to use this command. {newLine}')
 
     def do_xor(self, argv):
         content = ""
