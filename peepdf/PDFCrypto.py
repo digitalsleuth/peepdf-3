@@ -26,6 +26,7 @@
 """
 
 import hashlib, struct, random, warnings, sys
+
 try:
     from peepdf import aes
 except ModuleNotFoundError:
@@ -73,7 +74,7 @@ def computeEncryptionKey(
             if lenPass > 32:
                 password = password[:32]
             elif lenPass < 32:
-                password += paddingString[:32 - lenPass]
+                password += paddingString[: 32 - lenPass]
             md5input = (
                 password + dictOwnerPass + struct.pack("<i", int(pElement)) + fileID
             )
@@ -106,7 +107,7 @@ def computeEncryptionKey(
     except:
         return (
             -1,
-            f"ComputeEncryptionKey error: {str(sys.exc_info()[0])} {str(sys.exc_info()[1])}"
+            f"ComputeEncryptionKey error: {str(sys.exc_info()[0])} {str(sys.exc_info()[1])}",
         )
 
 
@@ -139,7 +140,7 @@ def computeObjectKey(id, generationNum, encryptionKey, keyLengthBytes, algorithm
     except:
         return (
             -1,
-            f"ComputeObjectKey error: {str(sys.exc_info()[0])} {str(sys.exc_info()[1])}"
+            f"ComputeObjectKey error: {str(sys.exc_info()[0])} {str(sys.exc_info()[1])}",
         )
 
 
@@ -160,7 +161,7 @@ def computeOwnerPass(ownerPassString, userPassString, keyLength=128, revision=3)
         if lenPass > 32:
             ownerPassString = ownerPassString[:32]
         elif lenPass < 32:
-            ownerPassString += paddingString[:32 - lenPass]
+            ownerPassString += paddingString[: 32 - lenPass]
         rc4Key = hashlib.md5(ownerPassString).digest()
         if revision > 2:
             counter = 0
@@ -172,7 +173,7 @@ def computeOwnerPass(ownerPassString, userPassString, keyLength=128, revision=3)
         if lenPass > 32:
             userPassString = userPassString[:32]
         elif lenPass < 32:
-            userPassString += paddingString[:32 - lenPass]
+            userPassString += paddingString[: 32 - lenPass]
         ownerPass = RC4(userPassString, rc4Key)
         if revision > 2:
             counter = 1
@@ -186,7 +187,7 @@ def computeOwnerPass(ownerPassString, userPassString, keyLength=128, revision=3)
     except:
         return (
             -1,
-            f"ComputeOwnerPass error: {str(sys.exc_info()[0])} {str(sys.exc_info()[1])}"
+            f"ComputeOwnerPass error: {str(sys.exc_info()[0])} {str(sys.exc_info()[1])}",
         )
 
 
@@ -257,7 +258,7 @@ def computeUserPass(
     except:
         return (
             -1,
-            f"ComputeUserPass error: {str(sys.exc_info()[0])} {str(sys.exc_info()[1])}"
+            f"ComputeUserPass error: {str(sys.exc_info()[0])} {str(sys.exc_info()[1])}",
         )
 
 
@@ -315,7 +316,7 @@ def isOwnerPass(password, dictO, dictU, computedUserPass, keyLength, revision):
         if lenPass > 32:
             password = password[:32]
         elif lenPass < 32:
-            password += paddingString[:32 - lenPass]
+            password += paddingString[: 32 - lenPass]
         rc4Key = hashlib.md5(password).digest()
         if revision > 2:
             counter = 0

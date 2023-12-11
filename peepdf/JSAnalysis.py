@@ -54,7 +54,7 @@ except:
 
 errorsFile = "errors.txt"
 newLine = os.linesep
-reJSscript = '<script[^>]*?contentType\s*?=\s*?[\'"]application/x-javascript[\'"][^>]*?>(.*?)</script>'
+reJSscript = "<script[^>]*?contentType\s*?=\s*?['\"]application/x-javascript['\"][^>]*?>(.*?)</script>"
 preDefinedCode = "var app = this;"
 
 
@@ -163,7 +163,7 @@ def getVarContent(jsCode, varContent):
     varContent = varContent.replace(" ", "")
     parts = varContent.split("+")
     for part in parts:
-        if re.match('["\'].*?["\']', part, re.DOTALL):
+        if re.match("[\"'].*?[\"']", part, re.DOTALL):
             clearBytes += part[1:-1]
         else:
             part = escapeString(part)
@@ -214,7 +214,9 @@ def isJavascript(content):
     if re.findall(reJSscript, content, re.DOTALL | re.IGNORECASE):
         return True
 
-    contentAlphaNumeric = any(any(char.isalnum() and char.isascii() for char in item) for item in content)
+    contentAlphaNumeric = any(
+        any(char.isalnum() and char.isascii() for char in item) for item in content
+    )
     if not contentAlphaNumeric:
         return False
     for string in jsStrings:
@@ -225,7 +227,9 @@ def isJavascript(content):
         elif cont == 0 and string in keyStrings:
             return False
 
-    stringsFoundAlphaNumeric = any(any(char.isalnum() and char.isascii() for char in item) for item in stringsFound)
+    stringsFoundAlphaNumeric = any(
+        any(char.isalnum() and char.isascii() for char in item) for item in stringsFound
+    )
     if not stringsFoundAlphaNumeric:
         return False
     numDistinctStringsFound = len(stringsFound)

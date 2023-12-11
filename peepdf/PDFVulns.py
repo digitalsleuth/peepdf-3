@@ -31,6 +31,7 @@ jsVulns = [
     "doc.printSeps",
     "app.removeToolButton",
     ".SettingContent",
+    "0x01a11d09",
 ]
 singUniqueName = "CoolType.SING.uniqueName"
 bmpVuln = "BMP/RLE heap corruption"
@@ -53,7 +54,10 @@ vulnsDict = {
         ["CVE-2013-0640"],
     ),  # https://labs.portcullis.co.uk/blog/cve-2013-0640-adobe-reader-xfa-oneofchild-un-initialized-memory-vulnerability-part-1/
     bmpVuln: (bmpVuln, ["CVE-2013-2729"]),
-   "app.removeToolButton": ("app.removeToolButton", ["CVE-2013-3346"]),
-   ".SettingContent": (".SettingContent", ["CVE-2018-8414"]),
+    "app.removeToolButton": ("app.removeToolButton", ["CVE-2013-3346"]),
+    ".SettingContent": (".SettingContent", ["CVE-2018-8414"]),
+    "0x01a11d09": (
+        "Foxit Reader 9.0.1.1049 Arbitrary Code Execution",
+        ["CVE-2018-9958"],
+    ),
 }
-

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 #
 #    peepdf is a tool to analyse and modify PDF files
 #    http://peepdf.eternal-todo.com
@@ -38,6 +37,7 @@ import json
 import pathlib
 from lxml import etree
 from datetime import datetime as dt
+from operator import attrgetter
 
 try:
     from peepdf.PDFCore import PDFParser
@@ -48,9 +48,9 @@ except ModuleNotFoundError:
     from PDFUtils import vtcheck
     from PDFVulns import *
 
-VT_KEY = "fc90df3f5ac749a94a94cb8bf87e05a681a2eb001aef34b6a0084b8c22c97a64"
+VT_KEY = "<YOUR KEY GOES ON LINE 51 OF main.py, USE set vt_key yourAPIkey in interactive, OR -k from your terminal with -c>"
 VERSION = "2.0.0"
-DTNOW = "%Y%m%d-%H%M%S"
+DTFMT = "%Y%m%d-%H%M%S"
 
 try:
     import STPyV8 as PyV8
@@ -80,12 +80,20 @@ try:
 except:
     PIL_MODULE = False
 
+    from operator import attrgetter
+
+
+class SortHelp(argparse.HelpFormatter):
+    def add_arguments(self, actions):
+        actions = sorted(actions, key=attrgetter("option_strings"))
+        super(SortHelp, self).add_arguments(actions)
+
 
 def getPeepXML(statsDict):
     root = etree.Element(
         "peepdf_analysis",
-        version=f'{VERSION}',
-        url="http://peepdf.eternal-todo.com - https://github.com/digitalsleuth/peepdf-3",
+        version=f"{VERSION}",
+        url="https://github.com/digitalsleuth/peepdf-3",
         author="Jose Miguel Esparza and Corey Forman",
     )
     analysisDate = etree.SubElement(root, "date")
@@ -104,9 +112,7 @@ def getPeepXML(statsDict):
     detection = etree.SubElement(basicInfo, "detection")
     if statsDict["Detection"]:
         detectionRate = etree.SubElement(detection, "rate")
-        detectionRate.text = (
-            f'{statsDict["Detection"][0]}/{statsDict["Detection"][1]}'
-        )
+        detectionRate.text = f'{statsDict["Detection"][0]}/{statsDict["Detection"][1]}'
         detectionReport = etree.SubElement(detection, "report_link")
         detectionReport.text = statsDict["Detection report"]
     version = etree.SubElement(basicInfo, "pdf_version")
@@ -202,7 +208,12 @@ def getPeepXML(statsDict):
         vulns = statsVersion["Vulns"]
         elements = statsVersion["Elements"]
         suspicious = etree.SubElement(versionInfo, "suspicious_elements")
-        if events is not None or actions is not None or vulns is not None or elements is not None:
+        if (
+            events is not None
+            or actions is not None
+            or vulns is not None
+            or elements is not None
+        ):
             if events:
                 triggers = etree.SubElement(suspicious, "triggers")
                 for event in events:
@@ -252,12 +263,12 @@ def getPeepXML(statsDict):
     return etree.tostring(root, pretty_print=True)
 
 
-def getPeepJSON(statsDict):
+def getPeepJSON(statsDict, VERSION):
     # peepdf info
     peepdfDict = {
         "version": VERSION,
         "author": "Jose Miguel Esparza and Corey Forman",
-        "url": "http://peepdf.eternal-todo.com - https://github.com/digitalsleuth/peepdf-3",
+        "url": "https://github.com/digitalsleuth/peepdf-3",
     }
     # Basic info
     basicDict = {}
@@ -385,14 +396,14 @@ def main():
     newLine = os.linesep
     currentDir = os.getcwd()
     absPeepdfRoot = os.path.dirname(os.path.realpath(sys.argv[0]))
-    currentDateTime = dt.now().strftime(DTNOW)
+    currentDateTime = dt.now().strftime(DTFMT)
     errorsFile = os.path.join(currentDir, f"peepdf_errors-{currentDateTime}.txt")
-    peepdfHeader = (
-        f"{versionHeader}{newLine * 2}{url}{newLine}"
-    )
+    peepdfHeader = f"{versionHeader}{newLine * 2}{url}{newLine}"
     f"{newLine * 2}{author}{newLine}"
     argsParser = argparse.ArgumentParser(
-        usage="peepdf [options] pdf", description=versionHeader
+        usage="peepdf [options] pdf",
+        description=versionHeader,
+        formatter_class=SortHelp,
     )
     argsParser.add_argument(
         "pdf",
@@ -502,11 +513,11 @@ def main():
         help="Extract text from the PDF",
     )
     argsParser.add_argument(
-       "-u",
-       "--update",
-       action="store_true",
-       dest="update",
-       help="Fetches updates for the Vulnerability List",
+        "-u",
+        "--update",
+        action="store_true",
+        dest="update",
+        help="Fetches updates for the Vulnerability List",
     )
     args = argsParser.parse_args()
     numArgs = len(sys.argv) - 1
@@ -535,49 +546,65 @@ def main():
             print(peepdfHeader)
         if args.update:
             if numArgs > 1:
-                sys.stdout.write('[*] Only one argument required for update, other arguments will be ignored\r')
-            branch = 'develop'
-            remoteVersion = ''
+                sys.stdout.write(
+                    "[*] Only one argument required for update, other arguments will be ignored\r"
+                )
+            branch = "main"
+            remoteVersion = ""
             localVersion = vulnsVersion
-            repoVersionFile = f'https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/vulns-ver'
-            repoVulnsFile = f'https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/peepdf/PDFVulns.py'
-            sys.stdout.write(f'[-] Checking if there are new updates to the Vulnerabilties List{newLine}')
+            repoVersionFile = f"https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/vulns-ver"
+            repoVulnsFile = f"https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/peepdf/PDFVulns.py"
+            sys.stdout.write(
+                f"[-] Checking if there are new updates to the Vulnerabilties List{newLine}"
+            )
             try:
                 remoteVersion = requests.get(repoVersionFile).text
                 remoteVersion = remoteVersion.strip()
             except:
-                sys.exit('[!] Error: Connection error while trying to connect with the repository')
-            if remoteVersion == '':
-                sys.exit('[!] Error: Unable to confirm the version number')
+                sys.exit(
+                    "[!] Error: Connection error while trying to connect with the repository"
+                )
+            if remoteVersion == "":
+                sys.exit("[!] Error: Unable to confirm the version number")
             if localVersion == remoteVersion:
-                sys.stdout.write(f'[-] Current Version: {localVersion}\r')
-                sys.stdout.write(f'[-] Remote Version: {remoteVersion}\r')
-                sys.stdout.write(f'[+] No changes{newLine}')
+                sys.stdout.write(f"[-] Current Version: {localVersion}\r")
+                sys.stdout.write(f"[-] Remote Version: {remoteVersion}\r")
+                sys.stdout.write(f"[+] No changes{newLine}")
             elif localVersion > remoteVersion:
-                sys.stdout.write(f'[-] Current Version ({localVersion}) is newer than the Remote Version ({remoteVersion}).')
+                sys.stdout.write(
+                    f"[-] Current Version ({localVersion}) is newer than the Remote Version ({remoteVersion})."
+                )
             else:
-                sys.stdout.write(f'[-] Current Version: {localVersion}\r')
-                sys.stdout.write(f'[-] Remote Version: {remoteVersion}\r')                
-                sys.stdout.write(f'[+] Update available\r')
-                sys.stdout.write(f'[-] Fetching the update ...\r')
+                sys.stdout.write(f"[-] Current Version: {localVersion}\r")
+                sys.stdout.write(f"[-] Remote Version: {remoteVersion}\r")
+                sys.stdout.write(f"[+] Update available\r")
+                sys.stdout.write(f"[-] Fetching the update ...\r")
                 try:
                     updateContent = requests.get(repoVulnsFile).text
                 except:
-                    sys.exit(f'[!] Error: Connection error while trying to fetch the updated PDFVulns.py file{newLine}')
+                    sys.exit(
+                        f"[!] Error: Connection error while trying to fetch the updated PDFVulns.py file{newLine}"
+                    )
                 executingPath = pathlib.Path(__file__).parent.resolve()
-                vulnsFile = f'{executingPath}{os.sep}PDFVulns.py'
+                vulnsFile = f"{executingPath}{os.sep}PDFVulns.py"
                 if os.path.exists(vulnsFile):
-                    sys.stdout.write(f'[*] File {vulnsFile} exists, overwriting ...\r')
+                    sys.stdout.write(f"[*] File {vulnsFile} exists, overwriting ...\r")
                 else:
-                    sys.stdout.write(f'[*] File {vulnsFile} does not exist, creating ...\r')
+                    sys.stdout.write(
+                        f"[*] File {vulnsFile} does not exist, creating ...\r"
+                    )
                 try:
-                    with open(vulnsFile, 'w') as localVulnsFile:
+                    with open(vulnsFile, "w") as localVulnsFile:
                         localVulnsFile.write(updateContent)
                         localVulnsFile.close()
-                    sys.stdout.write(f'[+] peepdf Vulnerabilities List updated successfully to {remoteVersion}')
+                    sys.stdout.write(
+                        f"[+] peepdf Vulnerabilities List updated successfully to {remoteVersion}"
+                    )
                 except PermissionError:
-                    sys.exit(f'[!] You do not have permissions to write to {vulnsFile}. Try re-running the command with appropriate permissions')
-                
+                    sys.exit(
+                        f"[!] You do not have permissions to write to {vulnsFile}. Try re-running the command with appropriate permissions"
+                    )
+
         else:
             if numArgs == 2:
                 if not os.path.exists(fileName):
@@ -600,7 +627,7 @@ def main():
                 )
                 if args.getText:
                     output = pdfParser.getText(fileName)
-                    sys.stdout.write(f'Text content of: {fileName}{newLine}')
+                    sys.stdout.write(f"Text content of: {fileName}{newLine}")
                     sys.stdout.write(output)
                     raise SystemExit(0)
                 if args.checkOnVT:
@@ -614,10 +641,19 @@ def main():
                         vtJsonDict = ret[1]
                         if "error" in vtJsonDict:
                             sys.exit(f'[!] Error: {vtJsonDict["error"]["message"]}')
-                        maliciousCount = vtJsonDict["data"]["attributes"]["last_analysis_stats"]["malicious"]
+                        maliciousCount = vtJsonDict["data"]["attributes"][
+                            "last_analysis_stats"
+                        ]["malicious"]
                         totalCount = 0
-                        for result in ("harmless", "suspicious", "malicious", "undetected"):
-                            totalCount += vtJsonDict["data"]["attributes"]["last_analysis_stats"][result]
+                        for result in (
+                            "harmless",
+                            "suspicious",
+                            "malicious",
+                            "undetected",
+                        ):
+                            totalCount += vtJsonDict["data"]["attributes"][
+                                "last_analysis_stats"
+                            ][result]
                         pdf.setDetectionRate([maliciousCount, totalCount])
                         if "links" in vtJsonDict["data"]:
                             pdf.setDetectionReport(vtJsonDict["data"]["links"]["self"])
@@ -626,17 +662,15 @@ def main():
             if args.xmlOutput:
                 try:
                     xml = getPeepXML(statsDict)
-                    xml = xml.decode('latin-1')
+                    xml = xml.decode("latin-1")
                     sys.stdout.write(xml)  ## Check this output and format better
                 except:
-                    errorMessage = (
-                        "[!] Error: Exception while generating the XML file"
-                    )
+                    errorMessage = "[!] Error: Exception while generating the XML file"
                     traceback.print_exc(file=open(errorsFile, "a"))
                     raise Exception("PeepException", "Open an Issue on GitHub")
             elif args.jsonOutput and not args.commands:
                 try:
-                    jsonReport = getPeepJSON(statsDict, version)
+                    jsonReport = getPeepJSON(statsDict, VERSION)
                     sys.stdout.write(jsonReport)
                 except:
                     errorMessage = (
@@ -678,7 +712,9 @@ def main():
                         for command in args.commands:
                             console.onecmd(command)
                     except:
-                        errorMessage = "[!] Error: Exception not handled using the batch commands"
+                        errorMessage = (
+                            "[!] Error: Exception not handled using the batch commands"
+                        )
                         traceback.print_exc(file=open(errorsFile, "a"))
                         raise Exception("PeepException", "Open an Issue on GitHub")
                 else:
@@ -710,11 +746,11 @@ def main():
                         if stats != "":
                             stats += newLine
                         statsDict = pdf.getStats()
-                        latestVersion = len(statsDict["Versions"]) -1
+                        latestVersion = len(statsDict["Versions"]) - 1
                         latestMetadata = pdf.getBasicMetadata(latestVersion)
                         stats += f'{beforeStaticLabel}File: {resetColor}{statsDict["File"]}{newLine}'
                         if "title" in latestMetadata:
-                            stats += f'{beforeStaticLabel}Title: {resetColor}{latestMetadata["title"]}{newLine}'                        
+                            stats += f'{beforeStaticLabel}Title: {resetColor}{latestMetadata["title"]}{newLine}'
                         stats += f'{beforeStaticLabel}MD5: {resetColor}{statsDict["MD5"]}{newLine}'
                         stats += f'{beforeStaticLabel}SHA1: {resetColor}{statsDict["SHA1"]}{newLine}'
                         stats += f'{beforeStaticLabel}SHA256: {resetColor}{statsDict["SHA256"]}{newLine}'
@@ -754,9 +790,9 @@ def main():
                             stats += " ("
                             for algorithmInfo in statsDict["Encryption Algorithms"]:
                                 stats += (
-                                    f'{algorithmInfo[0]} {str(algorithmInfo[1])} bits, '
+                                    f"{algorithmInfo[0]} {str(algorithmInfo[1])} bits, "
                                 )
-                            stats = f'{stats[:-2]})'
+                            stats = f"{stats[:-2]})"
                         stats += newLine
                         stats += f'{beforeStaticLabel}Updates: {resetColor}{statsDict["Updates"]}{newLine}'
                         stats += f'{beforeStaticLabel}Objects: {resetColor}{statsDict["Objects"]}{newLine}'
@@ -844,8 +880,9 @@ def main():
                             ):
                                 totalSuspicious = 0
                                 for eachDict in (actions, events, vulns, elements):
-                                    for idx, (k, v) in enumerate(eachDict.items()):
-                                        totalSuspicious += len(v)
+                                    if eachDict is not None:
+                                        for idx, (k, v) in enumerate(eachDict.items()):
+                                            totalSuspicious += len(v)
                                 stats += f"{newLine}{beforeStaticLabel}\tSuspicious elements ({totalSuspicious}):{resetColor}{newLine}"
                                 if events is not None:
                                     for event in events:
@@ -901,14 +938,12 @@ def main():
                                 stats += f"{newLine}{beforeStaticLabel}\tFound URLs:{resetColor}{newLine}"
                                 for url in urls:
                                     stats += f"\t\t{url}{newLine}"
-                            stats += f'{newLine * 2}'
+                            stats += f"{newLine * 2}"
                     if fileName is not None:
                         niceOutput = stats.strip(newLine)
                         niceOutput = niceOutput.replace("\r\n", "\n")
                         niceOutput = niceOutput.replace("\r", "\n")
-                        niceOutput += newLine
-                        if args.isInteractive:
-                            niceOutput += newLine
+                        niceOutput += newLine * 2
                         sys.stdout.write(niceOutput)
                     if args.isInteractive:
                         try:
@@ -947,5 +982,7 @@ def main():
             )
             message = f"{errorColor}{message}{resetColor}"
             sys.exit(message)
+
+
 if __name__ == "__main__":
     main()
