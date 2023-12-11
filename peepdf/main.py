@@ -91,7 +91,7 @@ class SortHelp(argparse.HelpFormatter):
 
 def getUpdate():
     newLine = os.linesep
-    branch = "develop"
+    branch = "main"
     remoteVersion = ""
     localVersion = vulnsVersion
     repoVersionFile = (
