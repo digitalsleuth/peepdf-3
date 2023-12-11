@@ -89,6 +89,63 @@ class SortHelp(argparse.HelpFormatter):
         super(SortHelp, self).add_arguments(actions)
 
 
+def getUpdate():
+    newLine = os.linesep
+    branch = "develop"
+    remoteVersion = ""
+    localVersion = vulnsVersion
+    repoVersionFile = (
+        f"https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/vulns-ver"
+    )
+    repoVulnsFile = f"https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/peepdf/PDFVulns.py"
+    print(f"[-] Checking if there are new updates to the Vulnerabilties List")
+    try:
+        remoteVersion = requests.get(repoVersionFile).text
+        remoteVersion = remoteVersion.strip()
+    except:
+        sys.exit(
+            "[!] Error: Connection error while trying to connect with the repository"
+        )
+    if remoteVersion == "":
+        sys.exit("[!] Error: Unable to confirm the version number")
+    if localVersion == remoteVersion:
+        print(f"[-] Current Version: {localVersion}")
+        print(f"[-] Remote Version: {remoteVersion}")
+        print(f"[+] No changes{newLine}")
+    elif localVersion > remoteVersion:
+        print(
+            f"[-] Current Version ({localVersion}) is newer than the Remote Version ({remoteVersion})."
+        )
+    else:
+        print(f"[-] Current Version: {localVersion}")
+        print(f"[-] Remote Version: {remoteVersion}")
+        print(f"[+] Update available")
+        print(f"[-] Fetching the update ...")
+        try:
+            updateContent = requests.get(repoVulnsFile).text
+        except:
+            sys.exit(
+                f"[!] Error: Connection error while trying to fetch the updated PDFVulns.py file{newLine}"
+            )
+        executingPath = pathlib.Path(__file__).parent.resolve()
+        vulnsFile = f"{executingPath}{os.sep}PDFVulns.py"
+        if os.path.exists(vulnsFile):
+            print(f"[*] File {vulnsFile} exists, overwriting ...")
+        else:
+            print(f"[*] File {vulnsFile} does not exist, creating ...")
+        try:
+            with open(vulnsFile, "w") as localVulnsFile:
+                localVulnsFile.write(updateContent)
+                localVulnsFile.close()
+            print(
+                f"[+] peepdf Vulnerabilities List updated successfully to {remoteVersion}{newLine}"
+            )
+        except PermissionError:
+            sys.exit(
+                f"[!] You do not have permissions to write to {vulnsFile}. Try re-running the command with appropriate permissions"
+            )
+
+
 def getPeepXML(statsDict):
     root = etree.Element(
         "peepdf_analysis",
@@ -546,65 +603,10 @@ def main():
             print(peepdfHeader)
         if args.update:
             if numArgs > 1:
-                sys.stdout.write(
-                    "[*] Only one argument required for update, other arguments will be ignored\r"
+                print(
+                    "[*] Only one argument required for update, other arguments will be ignored"
                 )
-            branch = "main"
-            remoteVersion = ""
-            localVersion = vulnsVersion
-            repoVersionFile = f"https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/vulns-ver"
-            repoVulnsFile = f"https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/peepdf/PDFVulns.py"
-            sys.stdout.write(
-                f"[-] Checking if there are new updates to the Vulnerabilties List{newLine}"
-            )
-            try:
-                remoteVersion = requests.get(repoVersionFile).text
-                remoteVersion = remoteVersion.strip()
-            except:
-                sys.exit(
-                    "[!] Error: Connection error while trying to connect with the repository"
-                )
-            if remoteVersion == "":
-                sys.exit("[!] Error: Unable to confirm the version number")
-            if localVersion == remoteVersion:
-                sys.stdout.write(f"[-] Current Version: {localVersion}\r")
-                sys.stdout.write(f"[-] Remote Version: {remoteVersion}\r")
-                sys.stdout.write(f"[+] No changes{newLine}")
-            elif localVersion > remoteVersion:
-                sys.stdout.write(
-                    f"[-] Current Version ({localVersion}) is newer than the Remote Version ({remoteVersion})."
-                )
-            else:
-                sys.stdout.write(f"[-] Current Version: {localVersion}\r")
-                sys.stdout.write(f"[-] Remote Version: {remoteVersion}\r")
-                sys.stdout.write(f"[+] Update available\r")
-                sys.stdout.write(f"[-] Fetching the update ...\r")
-                try:
-                    updateContent = requests.get(repoVulnsFile).text
-                except:
-                    sys.exit(
-                        f"[!] Error: Connection error while trying to fetch the updated PDFVulns.py file{newLine}"
-                    )
-                executingPath = pathlib.Path(__file__).parent.resolve()
-                vulnsFile = f"{executingPath}{os.sep}PDFVulns.py"
-                if os.path.exists(vulnsFile):
-                    sys.stdout.write(f"[*] File {vulnsFile} exists, overwriting ...\r")
-                else:
-                    sys.stdout.write(
-                        f"[*] File {vulnsFile} does not exist, creating ...\r"
-                    )
-                try:
-                    with open(vulnsFile, "w") as localVulnsFile:
-                        localVulnsFile.write(updateContent)
-                        localVulnsFile.close()
-                    sys.stdout.write(
-                        f"[+] peepdf Vulnerabilities List updated successfully to {remoteVersion}"
-                    )
-                except PermissionError:
-                    sys.exit(
-                        f"[!] You do not have permissions to write to {vulnsFile}. Try re-running the command with appropriate permissions"
-                    )
-
+            getUpdate()
         else:
             if numArgs == 2:
                 if not os.path.exists(fileName):

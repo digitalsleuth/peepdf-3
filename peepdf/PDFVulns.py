@@ -1,4 +1,3 @@
-#! /usr/bin/env python3
 # This file is a part of peepdf-3
 #
 #        peepdf-3 is free software: you can redistribute it and/or modify
