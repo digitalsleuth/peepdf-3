@@ -1,10 +1,27 @@
 -----------------------------------------------
-peepdf 2.0.0, 2023-12-06
+peepdf 2.0.0, 2023-12-11
 -----------------------------------------------
 
 	* Fixes:
-		- Fixed JavaScript detection, whereby if the line contained even one invalid character, the remainder of the line would be ignored
-		- Fixed the incorrect implementation of iterating over .keys(), which subsequently fixed the "filters" option
+
+		- Fixed JavaScript detection, whereby if the line contained even one invalid character, the remainder of the line would be ignored.
+		- Fixed the incorrect implementation of iterating over .keys(), which subsequently fixed the "filters" option.
+		- Filters not parsing correctly, and not providing a nicer output (hex column expanded to fill instead of stop at last character).
+		- Changed the initial and do_info output to show full count of Suspicious Elements.
+		- Hash values not being calculated properly for the "info" on objects when instantiated as strings.
+
+	* Changes:
+
+		- Updated the VirusTotal API to use API 3.
+		- Moved the JS and other vulnerabilities to a separate single file, PDFVulns.py.
+		- Changed optparse to argparse for better flexibility and support
+
+	* New Features:
+
+		- If present, the PDF title will be displayed in the output.
+		- Added (re-introduced) an "update" feature to update the PDFVulns.py file separately, allowing for updating of list of vulnerabilities without having to re-install peepdf.
+		- Added an ocr feature which will extract text from the PDF itself. Allows for additional context during analysis.
+		- Added the -k argument at the shell to allow the passing of the VT API Key instead of requiring the python code be modified manually
 
 -----------------------------------------------
 peepdf 1.0.9, 2023-09-18

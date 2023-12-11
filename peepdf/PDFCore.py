@@ -1,4 +1,3 @@
-
 #    peepdf is a tool to analyse and modify PDF files
 #    http://peepdf.eternal-todo.com
 #    By Jose Miguel Esparza <jesparza AT eternal-todo.com>
@@ -26,18 +25,22 @@
 """
 
 import sys, os, re, hashlib, struct
+import pypdf
+
 try:
     from peepdf import aes as AES
     from peepdf.PDFUtils import *
     from peepdf.PDFCrypto import *
     from peepdf.JSAnalysis import *
     from peepdf.PDFFilters import decodeStream, encodeStream
+    from peepdf.PDFVulns import *
 except ModuleNotFoundError:
     import aes as AES
     from PDFUtils import *
     from PDFCrypto import *
     from JSAnalysis import *
     from PDFFilters import decodeStream, encodeStream
+    from PDFVulns import *
 
 MAL_ALL = 1
 MAL_HEAD = 2
@@ -66,40 +69,6 @@ monitorizedElements = [
     ".rawValue",
     "keep.previous",
 ]
-jsVulns = [
-    "mailto",
-    "Collab.collectEmailInfo",
-    "util.printf",
-    "getAnnots",
-    "getIcon",
-    "spell.customDictionaryOpen",
-    "media.newPlayer",
-    "doc.printSeps",
-    "app.removeToolButton",
-]
-singUniqueName = "CoolType.SING.uniqueName"
-bmpVuln = "BMP/RLE heap corruption"
-vulnsDict = {
-    "mailto": ("mailto", ["CVE-2007-5020"]),
-    "Collab.collectEmailInfo": ("Collab.collectEmailInfo", ["CVE-2007-5659"]),
-    "util.printf": ("util.printf", ["CVE-2008-2992"]),
-    "/JBIG2Decode": ("Adobe JBIG2Decode Heap Corruption", ["CVE-2009-0658"]),
-    "getIcon": ("getIcon", ["CVE-2009-0927"]),
-    "getAnnots": ("getAnnots", ["CVE-2009-1492"]),
-    "spell.customDictionaryOpen": ("spell.customDictionaryOpen", ["CVE-2009-1493"]),
-    "media.newPlayer": ("media.newPlayer", ["CVE-2009-4324"]),
-    ".rawValue": ("Adobe Acrobat Bundled LibTIFF Integer Overflow", ["CVE-2010-0188"]),
-    singUniqueName: (singUniqueName, ["CVE-2010-2883"]),
-    "doc.printSeps": ("doc.printSeps", ["CVE-2010-4091"]),
-    "/U3D": ("/U3D", ["CVE-2009-3953", "CVE-2009-3959", "CVE-2011-2462"]),
-    "/PRC": ("/PRC", ["CVE-2011-4369"]),
-    "keep.previous": (
-        "Adobe Reader XFA oneOfChild Un-initialized memory vulnerability",
-        ["CVE-2013-0640"],
-    ),  # https://labs.portcullis.co.uk/blog/cve-2013-0640-adobe-reader-xfa-oneofchild-un-initialized-memory-vulnerability-part-1/
-    bmpVuln: (bmpVuln, ["CVE-2013-2729"]),
-    "app.removeToolButton": ("app.removeToolButton", ["CVE-2013-3346"]),
-}
 jsContexts = {"global": None}
 
 
@@ -795,10 +764,12 @@ class PDFHexString(PDFObject):
                     if len(tmpValue) % 2 != 0:
                         tmpValue += "0"
                     self.value = bytes.fromhex(tmpValue).decode("latin-1")
-                    #self.value = self.value.decode("latin-1")  ## replacing decode("hex)"
+                    # self.value = self.value.decode("latin-1")  ## replacing decode("hex)"
                 else:
                     # New decoded value
-                    self.rawValue = (self.value).encode("latin-1").hex()  ## replacing encode("hex")
+                    self.rawValue = (
+                        (self.value).encode("latin-1").hex()
+                    )  ## replacing encode("hex")
                 self.encryptedValue = self.value
             except:
                 errorMessage = "[!] Error in hexadecimal conversion"
@@ -1031,7 +1002,7 @@ class PDFArray(PDFObject):
                     self.urlsFound += element.getURLs()
                 if element.isFaulty():
                     for error in element.getErrors():
-                        self.addError(f"Children element contains errors: {error}")
+                        self.addError(f"Child element contains errors: {error}")
                 if (
                     type in ["string", "hexstring", "array", "dictionary"]
                     and self.encrypted
@@ -1335,7 +1306,7 @@ class PDFDictionary(PDFObject):
                 self.uriList += valueObject.getURIs()
             if valueObject.isFaulty():
                 for error in valueObject.getErrors():
-                    self.addError(f"Children element contains errors: {error}")
+                    self.addError(f"Child element contains errors: {error}")
             if keys[i] in self.rawNames:
                 rawName = self.rawNames[keys[i]]
                 rawValue = rawName.getRawValue()
@@ -1399,7 +1370,7 @@ class PDFDictionary(PDFObject):
         @return: A tuple (status,statusContent), where statusContent is empty in case status = 0 or an error message in case status = -1
         """
         if name in self.elements:
-            del(self.elements[name])
+            del self.elements[name]
             if update:
                 ret = self.update()
                 return ret
@@ -1512,6 +1483,8 @@ class PDFDictionary(PDFObject):
     def getStats(self):
         stats = {}
         stats["Object"] = self.type
+        if isinstance(self.value, str):
+            self.value = self.value.encode()
         stats["MD5"] = hashlib.md5(self.value).hexdigest()
         stats["SHA1"] = hashlib.sha1(self.value).hexdigest()
         if self.isCompressed():
@@ -1834,7 +1807,7 @@ class PDFStream(PDFDictionary):
                 self.urlsFound = list(set(self.urlsFound + valueElement.getURLs()))
             if valueElement.isFaulty():
                 for error in valueElement.getErrors():
-                    self.addError(f"Children element contains errors: {error}")
+                    self.addError(f"Child element contains errors: {error}")
             if keys[i] in self.rawNames:
                 rawName = self.rawNames[keys[i]]
                 rawValue = rawName.getRawValue()
@@ -1918,7 +1891,9 @@ class PDFStream(PDFDictionary):
                         )
                         if jsErrors != []:
                             for jsError in jsErrors:
-                                errorMessage = f"[!] Error analysing Javascript: {jsError}"
+                                errorMessage = (
+                                    f"[!] Error analysing Javascript: {jsError}"
+                                )
                                 if isForceMode:
                                     self.addError(errorMessage)
                                 else:
@@ -1932,7 +1907,9 @@ class PDFStream(PDFDictionary):
                                         self.encodedStream, self.encryptionKey
                                     )
                                 except:
-                                    errorMessage = "[!] Error encrypting stream with RC4"
+                                    errorMessage = (
+                                        "[!] Error encrypting stream with RC4"
+                                    )
                                     if isForceMode:
                                         self.addError(errorMessage)
                                     else:
@@ -2012,7 +1989,9 @@ class PDFStream(PDFDictionary):
                                     else:
                                         self.rawStream = rc4Result
                                 except:
-                                    errorMessage = "[!] Error encrypting stream with RC4"
+                                    errorMessage = (
+                                        "[!] Error encrypting stream with RC4"
+                                    )
                                     if isForceMode:
                                         self.addError(errorMessage)
                                     else:
@@ -2023,7 +2002,9 @@ class PDFStream(PDFDictionary):
                         self.size = len(self.rawStream)
                         if not self.isFaultyDecoding():
                             if isinstance(self.decodedStream, bytes):
-                                self.decodedStream = self.decodedStream.decode('latin-1')
+                                self.decodedStream = self.decodedStream.decode(
+                                    "latin-1"
+                                )
                             refs = re.findall(
                                 "(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream
                             )
@@ -2447,7 +2428,7 @@ class PDFStream(PDFDictionary):
             if name in ["/Filter", "/DecodeParm", "/FFilter", "/FDecodeParm"]:
                 self.deletedFilters = True
                 onlyElements = False
-            del(self.elements[name])
+            del self.elements[name]
             if update:
                 ret = self.update(onlyElements=onlyElements)
             return ret
@@ -2609,10 +2590,16 @@ class PDFStream(PDFDictionary):
     def getStats(self):
         stats = {}
         stats["Object"] = self.type
+        if isinstance(self.value, str):
+            self.value = self.value.encode()
         stats["MD5"] = hashlib.md5(self.value).hexdigest()
         stats["SHA1"] = hashlib.sha1(self.value).hexdigest()
+        if isinstance(self.decodedStream, str):
+            self.decodedStream = self.decodedStream.encode()
         stats["Stream MD5"] = hashlib.md5(self.decodedStream).hexdigest()
         stats["Stream SHA1"] = hashlib.sha1(self.decodedStream).hexdigest()
+        if isinstance(self.rawStream, str):
+            self.rawStream = self.rawStream.encode()
         stats["Raw Stream MD5"] = hashlib.md5(self.rawStream).hexdigest()
         stats["Raw Stream SHA1"] = hashlib.sha1(self.rawStream).hexdigest()
         if self.isCompressed():
@@ -2771,7 +2758,7 @@ class PDFStream(PDFDictionary):
         if ret[0] == -1:
             errorMessage = ret[1]
         if isinstance(self.decodedStream, bytes):
-            self.decodedStream = self.decodedStream.decode('latin-1')
+            self.decodedStream = self.decodedStream.decode("latin-1")
         refs = re.findall("(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream)
         if refs != []:
             self.references += refs
@@ -3206,9 +3193,7 @@ class PDFObjectStream(PDFStream):
                                                     self.rawStream, self.encryptionKey
                                                 )
                                             except:
-                                                errorMessage = (
-                                                    "[!] Error encrypting stream with RC4"
-                                                )
+                                                errorMessage = "[!] Error encrypting stream with RC4"
                                                 if isForceMode:
                                                     self.addError(errorMessage)
                                                 else:
@@ -3232,14 +3217,20 @@ class PDFObjectStream(PDFStream):
                                         self.decode()
                                 self.size = len(self.rawStream)
                         if not self.updateNeeded:
-                            offsetsSection = self.decodedStream[:self.firstObjectOffset]
-                            objectsSection = self.decodedStream[self.firstObjectOffset:]
+                            offsetsSection = self.decodedStream[
+                                : self.firstObjectOffset
+                            ]
+                            objectsSection = self.decodedStream[
+                                self.firstObjectOffset :
+                            ]
                             numbers = re.findall("\d{1,10}", offsetsSection)
                             if numbers != [] and len(numbers) % 2 == 0:
                                 for i in range(0, len(numbers), 2):
                                     id = int(numbers[i])
                                     offset = int(numbers[i + 1])
-                                    ret = PDFParser().readObject(objectsSection[offset:])
+                                    ret = PDFParser().readObject(
+                                        objectsSection[offset:]
+                                    )
                                     if ret[0] == -1:
                                         if isForceMode:
                                             object = None
@@ -3314,9 +3305,7 @@ class PDFObjectStream(PDFStream):
                                             else:
                                                 return (-1, errorMessage)
                                 except:
-                                    errorMessage = (
-                                        f"[!] Error decrypting stream with {str(algorithm)}"
-                                    )
+                                    errorMessage = f"[!] Error decrypting stream with {str(algorithm)}"
                                     if isForceMode:
                                         self.addError(errorMessage)
                                     else:
@@ -3343,9 +3332,7 @@ class PDFObjectStream(PDFStream):
                                             else:
                                                 return (-1, errorMessage)
                                 except:
-                                    errorMessage = (
-                                        f"[!] Error decrypting stream with {str(algorithm)}"
-                                    )
+                                    errorMessage = f"[!] Error decrypting stream with {str(algorithm)}"
                                     if isForceMode:
                                         self.addError(errorMessage)
                                     else:
@@ -3516,8 +3503,8 @@ class PDFObjectStream(PDFStream):
                     self.references += refs
                     self.references = list(set(self.references))
                 # Extracting the compressed objects
-                offsetsSection = self.decodedStream[:self.firstObjectOffset]
-                objectsSection = self.decodedStream[self.firstObjectOffset:]
+                offsetsSection = self.decodedStream[: self.firstObjectOffset]
+                objectsSection = self.decodedStream[self.firstObjectOffset :]
                 numbers = re.findall("\d{1,10}", offsetsSection)
                 if numbers != [] and len(numbers) % 2 == 0:
                     for i in range(0, len(numbers), 2):
@@ -4257,7 +4244,7 @@ class PDFBody:
                                 if compressedId in self.compressedObjects:
                                     self.compressedObjects.remove(compressedId)
                                 self.delObject(compressedId)
-                            del(compressedObjectsDict)
+                            del compressedObjectsDict
         objectErrors = pdfObject.getErrors()
         if objectErrors != []:
             index = 0
@@ -4271,7 +4258,7 @@ class PDFBody:
                         self.errors.pop(index + indexAux)
                     break
                 else:
-                    errorsAux = errorsAux[indexAux + len(objectErrors):]
+                    errorsAux = errorsAux[indexAux + len(objectErrors) :]
                     index = indexAux + len(objectErrors)
         if type == "":
             type = objectType
@@ -4475,9 +4462,11 @@ class PDFBody:
                             for compressedId in compressedObjectsDict:
                                 self.addCompressedObject(compressedId)
                                 offset = compressedObjectsDict[compressedId][0]
-                                compressedObject = compressedObjectsDict[compressedId][1]
+                                compressedObject = compressedObjectsDict[compressedId][
+                                    1
+                                ]
                                 self.setObject(compressedId, compressedObject, offset)
-                            del(compressedObjectsDict)
+                            del compressedObjectsDict
             elif objectType == "dictionary":
                 self.referencedJSObjects += pdfObject.getReferencedJSObjectIds()
                 self.referencedJSObjects = list(set(self.referencedJSObjects))
@@ -4602,9 +4591,11 @@ class PDFBody:
                             for compressedId in compressedObjectsDict:
                                 self.addCompressedObject(compressedId)
                                 offset = compressedObjectsDict[compressedId][0]
-                                compressedObject = compressedObjectsDict[compressedId][1]
+                                compressedObject = compressedObjectsDict[compressedId][
+                                    1
+                                ]
                                 self.setObject(compressedId, compressedObject, offset)
-                            del(compressedObjectsDict)
+                            del compressedObjectsDict
         for id in self.referencedJSObjects:
             if id not in self.containingJS and id in self.objects:
                 object = self.objects[id].getObject()
@@ -5268,7 +5259,7 @@ class PDFFile:
                 if trailerDict is not None:
                     elementsTrailerDict = dict(trailerDict.getElements())
                     elementsDict = dict(elementsTrailerDict)
-                del(trailerDict)
+                del trailerDict
             if self.trailer[version][0] is not None:
                 trailerDict = self.trailer[version][0].getTrailerDictionary()
                 if trailerDict is not None:
@@ -5278,8 +5269,8 @@ class PDFFile:
                             if key not in elementsTrailerDict:
                                 elementsTrailerDict[key] = trailerElementsDict[key]
                                 elementsDict[key] = trailerElementsDict[key]
-                    del(trailerElementsDict)
-                del(trailerDict)
+                    del trailerElementsDict
+                del trailerDict
         self.createXrefStreamSection(version)
         if len(self.crossRefTable) <= version:
             errorMessage = "Cross Reference Table not found"
@@ -5434,10 +5425,10 @@ class PDFFile:
         revision = 0
         fileId = self.getFileId()
         if isinstance(fileId, str):
-            fileId = fileId.encode('latin-1')
+            fileId = fileId.encode("latin-1")
         self.removeError(errorType="Decryption error")
         if isinstance(password, str):
-            password = password.encode('latin-1')
+            password = password.encode("latin-1")
         if self.encryptDict is None or self.encryptDict[1] == []:
             errorMessage = "[!] Decryption error: /Encrypt dictionary not found"
             if isForceMode:
@@ -5720,7 +5711,7 @@ class PDFFile:
                 else:
                     return (-1, errorMessage)
             if isinstance(dictO, str):
-                dictO = dictO.encode('latin-1')
+                dictO = dictO.encode("latin-1")
         else:
             errorMessage = "[!] Decryption error: Owner password not found"
             if isForceMode:
@@ -5828,7 +5819,7 @@ class PDFFile:
                 passType = "OWNER"
             else:
                 badPassword = True
-                if password == b'':
+                if password == b"":
                     errorMessage = (
                         "[!] Decryption error: Default user password not working here"
                     )
@@ -5837,7 +5828,9 @@ class PDFFile:
                     else:
                         return (-1, errorMessage)
                 else:
-                    errorMessage = "[!] Decryption error: User password not working here"
+                    errorMessage = (
+                        "[!] Decryption error: User password not working here"
+                    )
                     if isForceMode:
                         self.addError(errorMessage)
                     else:
@@ -6172,6 +6165,9 @@ class PDFFile:
             creationDate = infoObject.getElementByName("/CreationDate")
             if creationDate is not None and creationDate != []:
                 basicMetadata["creation"] = creationDate.getValue()
+            modificationDate = infoObject.getElementByName("/ModDate")
+            if modificationDate is not None and modificationDate != []:
+                basicMetadata["modification"] = modificationDate.getValue()
             subject = infoObject.getElementByName("/Subject")
             if subject is not None and subject != []:
                 basicMetadata["subject"] = subject.getValue()
@@ -6668,7 +6664,7 @@ class PDFFile:
         stats["Comments"] = str(len(self.comments))
         stats["Errors"] = self.errors
         stats["Versions"] = []
-        stats["IDs"] = "\n"
+        stats["IDs"] = newLine
         for version in range(self.updates + 1):
             statsVersion = {}
             catalogId = None
@@ -6678,8 +6674,8 @@ class PDFFile:
                 catalogId = trailer.getCatalogId()
                 infoId = trailer.getInfoId()
                 trailerId = trailer.getTrailerId()
-            if trailerId is not None and streamTrailer is None:
-                stats["IDs"] += f'Version {version}: {trailerId}{newLine}'
+                if trailerId is not None and streamTrailer is None:
+                    stats["IDs"] += f"\tVersion {version}: {trailerId}{newLine}"
             if catalogId is None and streamTrailer is not None:
                 catalogId = streamTrailer.getCatalogId()
             if infoId is None and streamTrailer is not None:
@@ -7455,7 +7451,9 @@ class PDFParser:
         # Reading the file header
         file = open(fileName, "rb")
         for line in file:
-            line = line.decode('latin-1')  ## Latin-1 seems to be the better choice here over utf-8
+            line = line.decode(
+                "latin-1"
+            )  ## Latin-1 seems to be the better choice here over utf-8
             if versionLine == "":
                 pdfHeaderIndex = line.find("%PDF-")
                 psHeaderIndex = line.find("%!PS-Adobe-")
@@ -7538,9 +7536,9 @@ class PDFParser:
         # Getting the number of updates in the file
         while fileContent.find(b"%%EOF") != -1:
             self.readUntilSymbol(fileContent, b"%%EOF")
-            self.readUntilEndOfLine(fileContent.decode('latin-1'))
-            self.fileParts.append(fileContent[:self.charCounter].decode('latin-1'))
-            fileContent = fileContent[self.charCounter:]
+            self.readUntilEndOfLine(fileContent.decode("latin-1"))
+            self.fileParts.append(fileContent[: self.charCounter].decode("latin-1"))
+            fileContent = fileContent[self.charCounter :]
             self.charCounter = 0
         else:
             if self.fileParts == []:
@@ -7551,7 +7549,7 @@ class PDFParser:
                 else:
                     sys.exit(errorMessage)
         pdfFile.setUpdates(len(self.fileParts) - 1)
-        fileContent = fileContent.decode('latin-1')
+        fileContent = fileContent.decode("latin-1")
         # Getting the body, cross reference table and trailer of each part of the file
         for i in range(len(self.fileParts)):
             bodyOffset = 0
@@ -7580,7 +7578,7 @@ class PDFParser:
 
             # Getting the content for each section
             if isinstance(content, bytes):
-                content = content.decode('latin-1')
+                content = content.decode("latin-1")
             bodyContent, xrefContent, trailerContent = self.parsePDFSections(
                 content, forceMode, looseMode
             )
@@ -7626,7 +7624,7 @@ class PDFParser:
                         if not re.match("\d{1,10}" + objectHeader, checkHeader):
                             break
                         else:
-                            auxContent = auxContent[index + len(objectHeader):]
+                            auxContent = auxContent[index + len(objectHeader) :]
                             relativeOffset += len(objectHeader)
                     ret = self.createPDFIndirectObject(rawObject, forceMode, looseMode)
                     if ret[0] != -1:
@@ -7670,7 +7668,7 @@ class PDFParser:
                     else:
                         if not forceMode:
                             sys.exit(
-                                "[!] Error: An error has occurred while parsing an indirect object"
+                                f"[!] Error: An error has occurred while parsing an indirect object: {str(objectHeader)} ({str(ret[1])})"
                             )
                         else:
                             pdfFile.addError(
@@ -7782,7 +7780,7 @@ class PDFParser:
             if indexEOF == -1:
                 trailerContent = auxTrailer
             else:
-                trailerContent = auxTrailer[:indexEOF + 5]
+                trailerContent = auxTrailer[: indexEOF + 5]
             indexXref = restContent.find("xref")
             if indexXref != -1:
                 bodyContent = restContent[:indexXref]
@@ -7801,7 +7799,7 @@ class PDFParser:
             if indexEOF == -1:
                 trailerContent = auxTrailer
             else:
-                trailerContent = auxTrailer[:indexEOF + 5]
+                trailerContent = auxTrailer[: indexEOF + 5]
             bodyContent = restContent
             return [bodyContent, xrefContent, trailerContent]
 
@@ -7828,7 +7826,7 @@ class PDFParser:
             ret = self.readSymbol(rawIndirectObject, "obj")
             if ret[0] == -1:
                 return ret
-            rawObject = rawIndirectObject[self.charCounter:]
+            rawObject = rawIndirectObject[self.charCounter :]
             ret = self.readObject(rawObject, forceMode=forceMode, looseMode=looseMode)
             if ret[0] == -1:
                 return ret
@@ -7899,7 +7897,7 @@ class PDFParser:
         self.charCounter = 0
         elements = {}
         rawNames = {}
-        ret = self.readObject(rawContent[self.charCounter:], "name")
+        ret = self.readObject(rawContent[self.charCounter :], "name")
         if ret[0] == -1:
             if ret[1] != "Empty content reading object":
                 if isForceMode:
@@ -7914,7 +7912,7 @@ class PDFParser:
         while name is not None:
             key = name.getValue()
             rawNames[key] = name
-            rawValue = rawContent[self.charCounter:]
+            rawValue = rawContent[self.charCounter :]
             ret = self.readObject(rawValue)
             if ret[0] == -1:
                 if isForceMode:
@@ -7929,10 +7927,10 @@ class PDFParser:
                     return (-1, f"Bad object for {str(key)} key")
             else:
                 value = ret[1]
-                if value.value == '<< >>':
+                if value.value == "<< >>":
                     elements[key] = PDFString(rawValue)
                 elements[key] = value
-            ret = self.readObject(rawContent[self.charCounter:], "name")
+            ret = self.readObject(rawContent[self.charCounter :], "name")
             if ret[0] == -1:
                 if ret[1] != "Empty content reading object":
                     if isForceMode:
@@ -8211,7 +8209,10 @@ class PDFParser:
                         if bytesPerField[0] == 0:
                             f1 = 1
                         else:
-                            f1 = int(entryBytes[: bytesPerField[0]].encode('latin-1').hex(), 16)
+                            f1 = int(
+                                entryBytes[: bytesPerField[0]].encode("latin-1").hex(),
+                                16,
+                            )
                         if bytesPerField[1] == 0:
                             f2 = 0
                         else:
@@ -8219,16 +8220,18 @@ class PDFParser:
                                 entryBytes[
                                     bytesPerField[0] : bytesPerField[0]
                                     + bytesPerField[1]
-                                ].encode('latin-1').hex(),
+                                ]
+                                .encode("latin-1")
+                                .hex(),
                                 16,
                             )
                         if bytesPerField[2] == 0:
                             f3 = 0
                         else:
                             f3 = int(
-                                entryBytes[
-                                    bytesPerField[0] + bytesPerField[1] :
-                                ].encode('latin-1').hex(),
+                                entryBytes[bytesPerField[0] + bytesPerField[1] :]
+                                .encode("latin-1")
+                                .hex(),
                                 16,
                             )
                     except:
@@ -8285,7 +8288,7 @@ class PDFParser:
         if not isinstance(rawContent, str):
             return (-1, "Empty trailer content")
         self.readSymbol(rawContent, "trailer")
-        ret = self.readObject(rawContent[self.charCounter:], "dictionary")
+        ret = self.readObject(rawContent[self.charCounter :], "dictionary")
         if ret[0] == -1:
             dict = PDFDictionary("")
             dict.addError("[!] Error creating the trailer dictionary")
@@ -8294,7 +8297,7 @@ class PDFParser:
         ret = self.readSymbol(rawContent, "startxref")
         if ret[0] == -1:
             try:
-                trailer = PDFTrailer(dict, streamPresent = streamPresent)
+                trailer = PDFTrailer(dict, streamPresent=streamPresent)
             except Exception as e:
                 errorMessage = "[!] Error creating PDFTrailer"
                 if e.args[0] != "":
@@ -8415,13 +8418,13 @@ class PDFParser:
                 if matchingObjectsAux[0] != []:
                     objectBody = matchingObjectsAux[0][0]
                     matchingObjects.append(matchingObjectsAux[0])
-                    content = content[content.find(objectBody) + len(objectBody):]
+                    content = content[content.find(objectBody) + len(objectBody) :]
                     matchingObjectsAux = regExp.findall(content)
                 else:
                     matchingObjectsAux = []
             lastObject = re.findall("(\d{1,5}\s\d{1,5}\sobj)", content, re.DOTALL)
             if lastObject != []:
-                content = content[content.find(lastObject[0]):]
+                content = content[content.find(lastObject[0]) :]
                 matchingObjects.append((content, lastObject[0]))
         return matchingObjects
 
@@ -8449,6 +8452,23 @@ class PDFParser:
             lines.append(content)
         return lines
 
+    def getText(self, fileName):
+        output = ""
+
+        import logging
+
+        logger = logging.getLogger("pypdf")
+        logger.setLevel(logging.ERROR)
+        reader = pypdf.PdfReader(fileName)
+        numPages = len(reader.pages)
+        if numPages > 200:
+            sys.stdout.write(
+                f"[*] Warning: This may take some time, as this file is {numPages} pages long."
+            )
+        for page in reader.pages:
+            output += f"{page.extract_text()}{newLine}"
+        return output
+
     def readObject(self, content, objectType=None, forceMode=False, looseMode=False):
         """
         Method to parse the raw body of the PDF file and obtain PDFObject instances
@@ -8466,7 +8486,7 @@ class PDFParser:
         self.charCounter = 0
         self.readSpaces(content)
         if self.charCounter > 0:
-            content = content[self.charCounter:]
+            content = content[self.charCounter :]
             self.charCounter = 0
         if objectType is not None:
             objectsTypeArray = [
@@ -8576,7 +8596,7 @@ class PDFParser:
                         self.comments.append(ret[1])
                         self.readSpaces(content)
                         pdfObject = self.readObject(
-                            content[self.charCounter:], objectType
+                            content[self.charCounter :], objectType
                         )
                     else:
                         return ret
@@ -8804,7 +8824,10 @@ class PDFParser:
         @return A tuple (status,statusContent), where statusContent is the characters read in case status = 0 or an error in case status = -1
         """
         global pdfFile
-        if not ((isinstance(string, str) and isinstance(symbol, str)) or (isinstance(symbol, bytes) and isinstance(string, bytes))):  ## check various types
+        if not (
+            (isinstance(string, str) and isinstance(symbol, str))
+            or (isinstance(symbol, bytes) and isinstance(string, bytes))
+        ):  ## check various types
             return (-1, "Bad string")
         newString = string[self.charCounter :]
         index = newString.find(symbol)

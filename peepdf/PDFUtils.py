@@ -25,7 +25,7 @@
     Module with some misc functions
 """
 
-import os, re, html.entities, json, urllib
+import os, re, html.entities, json, requests
 
 
 def clearScreen():
@@ -68,7 +68,7 @@ def countNonPrintableChars(string):
     """
     counter = 0
     for i in range(len(string)):
-        if ord(string[i]) <= 31 or ord(string[i]) > 127:
+        if ord(string[i]) <= 31 or ord(string[i]) >= 127:
             counter += 1
     return counter
 
@@ -445,17 +445,15 @@ def vtcheck(md5, vtKey):
     @param vtKey: The VirusTotal API key needed to perform the request
     @return: A dictionary with the result of the request
     """
-    vtUrl = "https://www.virustotal.com/vtapi/v2/file/report"
-    parameters = {"resource": md5, "apikey": vtKey}
+    vtUrl = f"https://www.virustotal.com/api/v3/files/{md5}"
+    headers = {"accept": "application/json", "x-apikey": vtKey}
     try:
-        data = urllib.parse.urlencode(parameters)
-        #req = urllib2.Request(vtUrl, data)
-        response = urllib.request.urlopen(vtUrl, data)
-        jsonResponse = response.read()
+        response = requests.get(vtUrl, headers=headers)
+        jsonResponse = response.json()
     except:
-        return (-1, "The request to VirusTotal has not been successful")
+        return (-1, f"The request to VirusTotal failed")
     try:
-        jsonDict = json.loads(jsonResponse)
+        jsonDict = jsonResponse
     except:
         return (
             -1,

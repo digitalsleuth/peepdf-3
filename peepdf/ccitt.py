@@ -82,39 +82,35 @@ class BitReaderException(Exception):
 
 
 class BitReader:
-    """
-    """
+    """ """
 
     def __init__(self, data):
-        """
-        """
+        """ """
         self._data = data
         self._byte_ptr, self._bit_ptr = 0, 0
 
     def reset(self):
-        """
-        """
+        """ """
         self._byte_ptr, self._bit_ptr = 0, 0
 
     @property
     def eod_p(self):
-        """
-        """
+        """ """
         return self._byte_ptr >= len(self._data)
 
     @property
     def pos(self):
-        """ Comment """
+        """Comment"""
         return (self._byte_ptr << 3) + self._bit_ptr
 
     @property
     def size(self):
-        """ Comment """
+        """Comment"""
         return len(self._data) << 3
 
     @pos.setter
     def pos(self, bits):
-        """ Comment """
+        """Comment"""
         if bits > self.size:
             raise BitReaderException("Pointer position out of data")
 
@@ -123,7 +119,7 @@ class BitReader:
         self._byte_ptr, self._bit_ptr = pbyte, pbit
 
     def peek(self, length):
-        """ Comment """
+        """Comment"""
         if length <= 0:
             raise BitReaderException("Invalid read length")
         elif (self.pos + length) > self.size:
@@ -148,7 +144,7 @@ class BitReader:
         return n
 
     def read(self, length):
-        """ Comment """
+        """Comment"""
         n = self.peek(length)
         self.pos += length
 
@@ -161,7 +157,7 @@ def codeword(bits):
 
 
 class CCITTFax:
-    """ Comment """
+    """Comment"""
 
     EOL = codeword("000000000001")
     RTC = codeword("000000000001" * 6)
@@ -405,7 +401,7 @@ class CCITTFax:
     def __init__(
         self,
     ):
-        """ Comment """
+        """Comment"""
         self._decoded = []
 
     def decode(
@@ -420,7 +416,7 @@ class CCITTFax:
         blackIs1=False,
         damagedRowsBeforeError=0,
     ):
-        """ Comment """
+        """Comment"""
         # FIXME seems not stick to the spec? default is false, but if not set as true, it won't decode 6cc2a162e08836f7d50d461a9fc136fe correctly
         byteAlign = True
 
@@ -474,7 +470,7 @@ class CCITTFax:
         return bitw.data
 
     def get_white_bits(self, bitr):
-        """ Comment """
+        """Comment"""
         return self.get_color_bits(
             bitr,
             self.WHITE_CONFIGURATION_DECODE_TABLE,
@@ -482,7 +478,7 @@ class CCITTFax:
         )
 
     def get_black_bits(self, bitr):
-        """ Comment """
+        """Comment"""
         return self.get_color_bits(
             bitr,
             self.BLACK_CONFIGURATION_DECODE_TABLE,
@@ -490,7 +486,7 @@ class CCITTFax:
         )
 
     def get_color_bits(self, bitr, config_words, term_words):
-        """ Comment """
+        """Comment"""
         bits = 0
         check_conf = True
 

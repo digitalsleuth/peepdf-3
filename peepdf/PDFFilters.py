@@ -58,6 +58,7 @@
 
 import sys, zlib, struct
 from binascii import hexlify, unhexlify
+
 try:
     from peepdf import lzw
     from peepdf.PDFUtils import getNumsFromBytes, getBytesFromBits, getBitsFromNum
@@ -66,6 +67,7 @@ except ModuleNotFoundError:
     import lzw
     from PDFUtils import getNumsFromBytes, getBytesFromBits, getBitsFromNum
     from ccitt import CCITTFax
+
 
 def decodeStream(stream, filter, parameters={}):
     """
@@ -254,9 +256,7 @@ def asciiHexEncode(stream):
     Confirm whether or not Unicode correction is needed here.
     """
     try:
-        #encodedStream = stream.encode("hex")
-        #encodedStream = ''.join([f"{ord(c):x}" for c in stream])
-        encodedStream = hexlify(stream.encode()).decode('latin-1')
+        encodedStream = hexlify(stream.encode()).decode("latin-1")
     except:
         return (-1, "Error in hexadecimal conversion")
     return (0, encodedStream)
@@ -272,9 +272,11 @@ def flateDecode(stream, parameters):
     decodedStream = ""
     try:
         if not isinstance(stream, bytes):
-            decodedStream = (zlib.decompress(stream.encode("latin-1"))).decode("latin-1")
+            decodedStream = (zlib.decompress(stream.encode("latin-1"))).decode(
+                "latin-1"
+            )
         else:
-            decodedStream = zlib.decompress(stream).decode('latin-1')
+            decodedStream = zlib.decompress(stream).decode("latin-1")
     except:
         return (-1, "Error decompressing string")
 
@@ -490,7 +492,7 @@ def pre_prediction(stream, predictor, columns, colors, bits):
     if predictor >= 10 and predictor <= 15:
         # PNG prediction can vary from row to row
         for row in range(len(stream) / columns):
-            rowdata = [ord(x) for x in stream[(row * columns):((row + 1) * columns)]]
+            rowdata = [ord(x) for x in stream[(row * columns) : ((row + 1) * columns)]]
             filterByte = predictor - 10
             rowdata = [filterByte] + rowdata
             if filterByte == 0:
@@ -562,7 +564,9 @@ def post_prediction(decodedStream, predictor, columns, colors, bits):
         for row in range(numRows):
             rowdata = [
                 ord(x)
-                for x in decodedStream[(row * int(bytesPerRow)):((row + 1) * int(bytesPerRow))]
+                for x in decodedStream[
+                    (row * int(bytesPerRow)) : ((row + 1) * int(bytesPerRow))
+                ]
             ]
             # PNG prediction can vary from row to row
             filterByte = rowdata[0]
@@ -830,7 +834,7 @@ def dctDecode(stream, parameters):
         return (-1, "Python Imaging Library (PIL) not installed")
     # Quick implementation, assuming the library can detect the parameters
     try:
-        im = Image.open(BytesIO(stream.encode('latin-1')))
+        im = Image.open(BytesIO(stream.encode("latin-1")))
         decodedStream = im.tobytes()
         return (0, decodedStream)
     except:
