@@ -1,5 +1,5 @@
 -----------------------------------------------
-peepdf 2.0.0, 2023-12-06
+peepdf 2.0.0, 2023-12-11
 -----------------------------------------------
 
 	* Fixes:
@@ -14,12 +14,14 @@ peepdf 2.0.0, 2023-12-06
 
 		- Updated the VirusTotal API to use API 3.
 		- Moved the JS and other vulnerabilities to a separate single file, PDFVulns.py.
+		- Changed optparse to argparse for better flexibility and support
 
 	* New Features:
 
 		- If present, the PDF title will be displayed in the output.
 		- Added (re-introduced) an "update" feature to update the PDFVulns.py file separately, allowing for updating of list of vulnerabilities without having to re-install peepdf.
 		- Added an ocr feature which will extract text from the PDF itself. Allows for additional context during analysis.
+		- Added the -k argument at the shell to allow the passing of the VT API Key instead of requiring the python code be modified manually
 
 -----------------------------------------------
 peepdf 1.0.9, 2023-09-18
