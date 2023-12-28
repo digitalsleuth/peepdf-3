@@ -273,7 +273,7 @@ def isUserPass(password, computedUserPass, dictU, revision):
     @return The boolean telling if the given password is the user password or not
     """
     if revision == 5:
-        vSalt = dictU[32:40]
+        vSalt = dictU[32:40].encode()
         inputHash = hashlib.sha256(password + vSalt).digest()
         if inputHash == dictU[:32]:
             return True
@@ -305,7 +305,7 @@ def isOwnerPass(password, dictO, dictU, computedUserPass, keyLength, revision):
     """
     if revision == 5:
         vSalt = dictO[32:40]
-        inputHash = hashlib.sha256(password + vSalt + dictU).digest()
+        inputHash = hashlib.sha256(password + vSalt + dictU.encode()).digest()
         if inputHash == dictO[:32]:
             return True
         else:
