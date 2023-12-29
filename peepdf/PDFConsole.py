@@ -30,10 +30,10 @@ import sys
 import os
 import re
 import subprocess
-import optparse
 import hashlib
 import jsbeautifier
 import traceback
+import pathlib
 from builtins import input
 from base64 import b64encode, b64decode
 from datetime import datetime as dt
@@ -269,7 +269,7 @@ class PDFConsole(cmd.Cmd):
         # Getting information about original document
         data = self.pdfFile.getBasicMetadata(0)
         output += f"Original document information: {newLine}"
-        if "title" in data:
+        if "title" in data and data["title"].isascii():
             output += f'\tTitle: {data["title"]}{newLine}'
         if "author" in data:
             output += f'\tAuthor: {data["author"]}{newLine}'
@@ -292,7 +292,7 @@ class PDFConsole(cmd.Cmd):
                 output += f"Changes in version {str(i + 1)}: {newLine}"
             # Getting modification information
             data = self.pdfFile.getBasicMetadata(i + 1)
-            if "title" in data:
+            if "title" in data and data["title"].isascii():
                 output += f'\tTitle: {data["title"]}{newLine}'
             if "author" in data:
                 output += f'\tAuthor: {data["author"]}{newLine}'
@@ -3718,8 +3718,10 @@ class PDFConsole(cmd.Cmd):
                 message = "[!] Error: The version number is not valid"
                 self.log_output("save_version " + argv, message)
                 return False
+            currentFilePath = str(pathlib.Path(self.pdfFile.path).parent)
             ret = self.pdfFile.save(
                 fileName,
+                currentFilePath,
                 version,
                 malformedOptions=self.variables["malformed_options"][0],
                 headerFile=self.variables["header_file"][0],

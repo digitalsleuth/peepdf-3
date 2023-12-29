@@ -92,17 +92,17 @@ def computeEncryptionKey(
             return (0, key)
         else:
             if passwordType == "USER":
-                password = password.encode("utf-8")[:127]
+                password = password[:127]
                 kSalt = dictUserPass[40:48]
                 intermediateKey = hashlib.sha256(password + kSalt).digest()
-                ret = aes.decryptData("\0" * 16 + dictUE, intermediateKey)
+                ret = aes.decryptData(b"\0" * 16 + dictUE, intermediateKey)
             elif passwordType == "OWNER":
-                password = password.encode("utf-8")[:127]
+                password = password[:127]
                 kSalt = dictOwnerPass[40:48]
                 intermediateKey = hashlib.sha256(
                     password + kSalt + dictUserPass
                 ).digest()
-                ret = aes.decryptData("\0" * 16 + dictOE, intermediateKey)
+                ret = aes.decryptData(b"\0" * 16 + dictOE, intermediateKey)
             return ret
     except:
         return (

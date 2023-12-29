@@ -54,21 +54,6 @@ isForceMode = False
 isManualAnalysis = False
 spacesChars = ["\x00", "\x09", "\x0a", "\x0c", "\x0d", "\x20"]
 delimiterChars = ["<<", "(", "<", "[", "{", "/", "%"]
-monitorizedEvents = ["/OpenAction ", "/AA ", "/Names ", "/AcroForm ", "/XFA "]
-monitorizedActions = ["/JS ", "/JavaScript", "/Launch", "/SubmitForm", "/ImportData"]
-monitorizedElements = [
-    "/EmbeddedFiles ",
-    "/EmbeddedFile",
-    "/JBIG2Decode",
-    "getPageNthWord",
-    "arguments.callee",
-    "/U3D",
-    "/PRC",
-    "/RichMedia",
-    "/Flash",
-    ".rawValue",
-    "keep.previous",
-]
 jsContexts = {"global": None}
 
 
@@ -750,6 +735,8 @@ class PDFHexString(PDFObject):
         @param decrypt: A boolean indicating if a decryption has been performed. By default: False.
         @return: A tuple (status,statusContent), where statusContent is empty in case status = 0 or an error message in case status = -1
         """
+        global IS_ID_1
+        global IS_ID_2
         self.errors = []
         self.containsJScode = False
         self.JSCode = []
@@ -764,13 +751,16 @@ class PDFHexString(PDFObject):
                     if len(tmpValue) % 2 != 0:
                         tmpValue += "0"
                     self.value = bytes.fromhex(tmpValue).decode("latin-1")
-                    # self.value = self.value.decode("latin-1")  ## replacing decode("hex)"
                 else:
                     # New decoded value
-                    self.rawValue = (
-                        (self.value).encode("latin-1").hex()
-                    )  ## replacing encode("hex")
+                    self.rawValue = (self.value).encode("latin-1").hex()
                 self.encryptedValue = self.value
+                if IS_ID_2 and not IS_ID_1:
+                    self.value = f"<{self.rawValue}>"
+                    IS_ID_2 = False
+                if IS_ID_1:
+                    self.value = f"<{self.rawValue}>"
+                    IS_ID_1 = False
             except:
                 errorMessage = "[!] Error in hexadecimal conversion"
                 self.addError(errorMessage)
@@ -4918,7 +4908,7 @@ class PDFTrailer:
             and self.id != ""
             and self.id != " "
         ):
-            stats["ID"] = self.id  ##NEW
+            stats["ID"] = self.id  ## NEW
         else:
             stats["ID"] = None
         if self.dict.hasElement("/Encrypt"):
@@ -5731,6 +5721,8 @@ class PDFFile:
                     self.addError(errorMessage)
                 else:
                     return (-1, errorMessage)
+            if isinstance(dictOE, str):
+                dictOE = dictOE.encode("latin-1")
         else:
             dictOE = ""
             if revision == 5:
@@ -5752,6 +5744,8 @@ class PDFFile:
                     self.addError(errorMessage)
                 else:
                     return (-1, errorMessage)
+            if isinstance(dictU, str):
+                dictU = dictU.encode("latin-1")
         else:
             errorMessage = "[!] Decryption error: User password not found"
             if isForceMode:
@@ -5771,6 +5765,8 @@ class PDFFile:
                     self.addError(errorMessage)
                 else:
                     return (-1, errorMessage)
+            if isinstance(dictUE, str):
+                dictUE = dictUE.encode("latin-1")
         else:
             dictUE = ""
             if revision == 5:
@@ -5793,10 +5789,6 @@ class PDFFile:
                     return (-1, errorMessage)
         else:
             encryptMetadata = True
-        if isinstance(password, str):
-            password = password.encode("latin-1")
-            dictO = dictO.encode("latin-1")
-            fileId = fileId.encode("latin-1")
         if not fatalError:
             # Checking user password
             if revision != 5:
@@ -6674,8 +6666,11 @@ class PDFFile:
                 catalogId = trailer.getCatalogId()
                 infoId = trailer.getInfoId()
                 trailerId = trailer.getTrailerId()
+                streamTrailerId = streamTrailer.getTrailerId()
                 if trailerId is not None and streamTrailer is None:
                     stats["IDs"] += f"\tVersion {version}: {trailerId}{newLine}"
+                elif trailerId is None and streamTrailer is not None:
+                    stats["IDs"] += f"\tVersion {version}: {streamTrailerId}{newLine}"
             if catalogId is None and streamTrailer is not None:
                 catalogId = streamTrailer.getCatalogId()
             if infoId is None and streamTrailer is not None:
@@ -6905,7 +6900,6 @@ class PDFFile:
                 else:
                     return (i, xrefArray)
             else:
-                # self.addError('Xref section not found in file')
                 return None
         else:
             if version > self.updates or version < 0:
@@ -7099,7 +7093,9 @@ class PDFFile:
                 if error[:lenErrorType] == errorType:
                     self.errors.remove(error)
 
-    def save(self, filename, version=None, malformedOptions=[], headerFile=None):
+    def save(
+        self, filename, pdfPath, version=None, malformedOptions=[], headerFile=None
+    ):
         maxId = 0
         offset = 0
         lastXrefSectionOffset = 0
@@ -7243,7 +7239,13 @@ class PDFFile:
                 prevXrefSectionOffset = lastXrefSectionOffset
                 self.body[v].setObjects(indirectObjects)
                 offset = len(outputFileContent)
-            open(filename, "wb").write(outputFileContent)
+            if not os.sep in filename:
+                outputPath = f"{pdfPath}{os.sep}{filename}"
+            else:
+                outputPath = filename
+            if isinstance(outputFileContent, str):
+                outputFileContent = outputFileContent.encode()
+            open(outputPath, "wb").write(outputFileContent)
             self.setMD5(hashlib.md5(outputFileContent).hexdigest())
             self.setSize(len(outputFileContent))
             self.path = os.path.realpath(filename)
@@ -7746,10 +7748,12 @@ class PDFParser:
                     fileIdElements = fileId.getElements()
                     if fileIdElements is not None and fileIdElements != []:
                         if fileIdElements[0] is not None:
-                            fileId = fileIdElements[0].getValue()
+                            fileId = f"[{fileIdElements[0].getRawValue()}]"
+                            fileIdElements[0].setValue(fileIdElements[0].getRawValue())
                             pdfFile.setFileId(fileId)
-                        elif fileIdElements[1] is not None:
-                            fileId = fileIdElements[1].getValue()
+                        if fileIdElements[1] is not None:
+                            fileId += f"[{fileIdElements[1].getRawValue()}]"
+                            fileIdElements[1].setValue(fileIdElements[1].getRawValue())
                             pdfFile.setFileId(fileId)
             pdfFile.addTrailer([trailer, streamTrailer])
         if pdfFile.isEncrypted() and pdfFile.getEncryptDict() is not None:
@@ -8479,6 +8483,8 @@ class PDFParser:
         @return A tuple (status,statusContent), where statusContent is a PDFObject instance in case status = 0 or an error in case status = -1
         """
         global pdfFile
+        global IS_ID_1
+        global IS_ID_2
         if len(content) == 0 or content[:6] == "endobj":
             return (-1, "Empty content reading object")
         pdfObject = None
@@ -8588,6 +8594,9 @@ class PDFParser:
                     break
                 elif delim[2] == "name":
                     ret, raw = self.readUntilNotRegularChar(content)
+                    if raw == "ID":
+                        IS_ID_1 = True
+                        IS_ID_2 = True
                     pdfObject = PDFName(raw)
                     break
                 elif delim[2] == "comment":

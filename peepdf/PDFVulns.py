@@ -1,3 +1,4 @@
+#! /usr/bin/env python3
 # This file is a part of peepdf-3
 #
 #        peepdf-3 is free software: you can redistribute it and/or modify
@@ -18,7 +19,7 @@
     This module contains the vulnerabilities to analyse for peepdf-3
 """
 
-vulnsVersion = "1.0.0"
+vulnsVersion = "1.0.1"
 jsVulns = [
     "mailto",
     "Collab.collectEmailInfo",
@@ -60,3 +61,18 @@ vulnsDict = {
         ["CVE-2018-9958"],
     ),
 }
+monitorizedEvents = ["/OpenAction ", "/AA ", "/Names ", "/AcroForm ", "/XFA "]
+monitorizedActions = ["/JS ", "/JavaScript", "/Launch", "/SubmitForm", "/ImportData"]
+monitorizedElements = [
+    "/EmbeddedFiles ",
+    "/EmbeddedFile",
+    "/JBIG2Decode",
+    "getPageNthWord",
+    "arguments.callee",
+    "/U3D",
+    "/PRC",
+    "/RichMedia",
+    "/Flash",
+    ".rawValue",
+    "keep.previous",
+]
