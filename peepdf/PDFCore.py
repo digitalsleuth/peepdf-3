@@ -6666,10 +6666,10 @@ class PDFFile:
                 catalogId = trailer.getCatalogId()
                 infoId = trailer.getInfoId()
                 trailerId = trailer.getTrailerId()
-                streamTrailerId = streamTrailer.getTrailerId()
                 if trailerId is not None and streamTrailer is None:
                     stats["IDs"] += f"\tVersion {version}: {trailerId}{newLine}"
                 elif trailerId is None and streamTrailer is not None:
+                    streamTrailerId = streamTrailer.getTrailerId()
                     stats["IDs"] += f"\tVersion {version}: {streamTrailerId}{newLine}"
             if catalogId is None and streamTrailer is not None:
                 catalogId = streamTrailer.getCatalogId()
