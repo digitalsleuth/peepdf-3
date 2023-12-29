@@ -1,4 +1,19 @@
 -----------------------------------------------
+peepdf 2.1.0, 2023-12-28
+-----------------------------------------------
+
+	* Fixes:
+
+		- AES decryption had several type errors (as indicated in Issue #5). These have been fixed.
+		- The string for the ID was getting unintentionally decoded from string to hex, leaving an illegible ID string
+		- Added error handling for the missing ID from the Trailer
+
+	* Changes:
+
+		- Updated PDFVulns.py to contain the Elements and Actions to be watched
+		- The "title" of the document sometimes would contain unusable characters if decryption failed. Now will check for ascii content before outputting title.
+
+-----------------------------------------------
 peepdf 2.0.0, 2023-12-11
 -----------------------------------------------
 
