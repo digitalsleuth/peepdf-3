@@ -19,7 +19,7 @@
 #        GNU General Public License for more details.
 #
 #        You should have received a copy of the GNU General Public License
-#        along with peepdf.    If not, see <http://www.gnu.org/licenses/>.
+#        along with peepdf. If not, see <http://www.gnu.org/licenses/>.
 #
 
 """
@@ -750,7 +750,10 @@ def main():
                         latestVersion = len(statsDict["Versions"]) - 1
                         latestMetadata = pdf.getBasicMetadata(latestVersion)
                         stats += f'{beforeStaticLabel}File: {resetColor}{statsDict["File"]}{newLine}'
-                        if "title" in latestMetadata and latestMetadata["title"].isascii():
+                        if (
+                            "title" in latestMetadata
+                            and latestMetadata["title"].isascii()
+                        ):
                             stats += f'{beforeStaticLabel}Title: {resetColor}{latestMetadata["title"]}{newLine}'
                         stats += f'{beforeStaticLabel}MD5: {resetColor}{statsDict["MD5"]}{newLine}'
                         stats += f'{beforeStaticLabel}SHA1: {resetColor}{statsDict["SHA1"]}{newLine}'

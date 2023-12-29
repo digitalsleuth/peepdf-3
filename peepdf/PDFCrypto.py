@@ -92,17 +92,17 @@ def computeEncryptionKey(
             return (0, key)
         else:
             if passwordType == "USER":
-                password = password.encode("utf-8")[:127]
+                password = password[:127]
                 kSalt = dictUserPass[40:48]
                 intermediateKey = hashlib.sha256(password + kSalt).digest()
-                ret = aes.decryptData("\0" * 16 + dictUE, intermediateKey)
+                ret = aes.decryptData(b"\0" * 16 + dictUE, intermediateKey)
             elif passwordType == "OWNER":
-                password = password.encode("utf-8")[:127]
+                password = password[:127]
                 kSalt = dictOwnerPass[40:48]
                 intermediateKey = hashlib.sha256(
                     password + kSalt + dictUserPass
                 ).digest()
-                ret = aes.decryptData("\0" * 16 + dictOE, intermediateKey)
+                ret = aes.decryptData(b"\0" * 16 + dictOE, intermediateKey)
             return ret
     except:
         return (
@@ -273,7 +273,7 @@ def isUserPass(password, computedUserPass, dictU, revision):
     @return The boolean telling if the given password is the user password or not
     """
     if revision == 5:
-        vSalt = dictU[32:40].encode()
+        vSalt = dictU[32:40]
         inputHash = hashlib.sha256(password + vSalt).digest()
         if inputHash == dictU[:32]:
             return True
@@ -305,7 +305,7 @@ def isOwnerPass(password, dictO, dictU, computedUserPass, keyLength, revision):
     """
     if revision == 5:
         vSalt = dictO[32:40]
-        inputHash = hashlib.sha256(password + vSalt + dictU.encode()).digest()
+        inputHash = hashlib.sha256(password + vSalt + dictU).digest()
         if inputHash == dictO[:32]:
             return True
         else:

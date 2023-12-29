@@ -41,9 +41,14 @@ def decryptData(data, password=None, keyLength=None, mode="CBC"):
         keyLength = len(password) * 8
     if keyLength not in [128, 192, 256]:
         return (-1, "Bad length key in AES decryption process")
-
-    iv = list(map(ord, data[:16]))
-    key = list(map(ord, password))
+    try:
+        iv = list(map(ord, data[:16]))
+    except:
+        iv = list(data[:16])
+    try:
+        key = list(map(ord, password))
+    except:
+        key = list(password)
     data = data[16:]
     if len(data) % 16 != 0:
         data = data[: -(len(data) % 16)]
@@ -54,7 +59,10 @@ def decryptData(data, password=None, keyLength=None, mode="CBC"):
         aesMode = cbc_mode.CBCMode(aesCipher, 16)
     aesMode.set_iv(iv)
     for i in range(0, len(data), 16):
-        ciphertext = list(map(ord, data[i : i + 16]))
+        try:
+            ciphertext = list(map(ord, data[i : i + 16]))
+        except:
+            ciphertext = list(data[i : i + 16])
         decryptedBytes = aesMode.decrypt_block(ciphertext)
         for byte in decryptedBytes:
             decryptedData += chr(byte)
