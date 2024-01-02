@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="peepdf-3",
-    version="2.3.0-rc1",
+    version="2.3.0",
     author="Jose Miguel Esparza, Corey Forman",
     license="GNU GPLv3",
     url="https://github.com/digitalsleuth/peepdf-3",
