@@ -48,7 +48,7 @@ except ModuleNotFoundError:
     from PDFVulns import *
 
 VT_KEY = "<YOUR KEY GOES ON LINE 51 OF main.py, USE set vt_key yourAPIkey in interactive, OR -k from your terminal with -c>"
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 DTFMT = "%Y%m%d-%H%M%S"
 
 try:

@@ -48,6 +48,8 @@ MAL_EOBJ = 3
 MAL_ESTREAM = 4
 MAL_XREF = 5
 MAL_BAD_HEAD = 6
+IS_ID_1 = False
+IS_ID_2 = False
 pdfFile = None
 newLine = os.linesep
 isForceMode = False
@@ -703,7 +705,7 @@ class PDFHexString(PDFObject):
     Hexadecimal string object of a PDF document
     """
 
-    def __init__(self, hex):
+    def __init__(self, hex, IS_ID=False):
         self.asciiValue = ""
         self.type = "hexstring"
         self.errors = []
@@ -721,6 +723,7 @@ class PDFHexString(PDFObject):
         self.urlsFound = []
         self.referencesInElements = {}
         self.references = []
+        self.IS_ID = IS_ID
         ret = self.update()
         if ret[0] == -1:
             if isForceMode:
@@ -755,12 +758,8 @@ class PDFHexString(PDFObject):
                     # New decoded value
                     self.rawValue = (self.value).encode("latin-1").hex()
                 self.encryptedValue = self.value
-                if IS_ID_2 and not IS_ID_1:
+                if self.IS_ID:
                     self.value = f"<{self.rawValue}>"
-                    IS_ID_2 = False
-                if IS_ID_1:
-                    self.value = f"<{self.rawValue}>"
-                    IS_ID_1 = False
             except:
                 errorMessage = "[!] Error in hexadecimal conversion"
                 self.addError(errorMessage)
@@ -8570,7 +8569,14 @@ class PDFParser:
                     if ret[0] != -1:
                         hexContent = ret[1]
                         self.readSymbol(content, delim[1])
-                        pdfObject = PDFHexString(hexContent)
+                        if IS_ID_1:
+                            pdfObject = PDFHexString(hexContent, True)
+                            IS_ID_1 = False
+                        elif IS_ID_2 and not IS_ID_1:
+                            pdfObject = PDFHexString(hexContent, True)
+                            IS_ID_2 = False
+                        else:
+                            pdfObject = PDFHexString(hexContent)
                     else:
                         pdfObject = PDFHexString(content)
                         pdfObject.addError(

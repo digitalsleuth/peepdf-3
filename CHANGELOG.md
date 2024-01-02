@@ -1,14 +1,21 @@
------------------------------------------------
-peepdf 2.2.0, 2023-12-28
------------------------------------------------
+## peepdf 2.3.0, 2024-01-02
+
+
+	* Fixes:
+
+		- Fixed an issue whereby a race condition was caused which failed to "decrypt" hexadecimal JS objects when ID values were set to True too soon.
+  
+  
+## peepdf 2.2.0, 2023-12-28
+
 
 	* Fixes:
 
 		- Fixed an error introduced when streamTrailer is None
 
------------------------------------------------
-peepdf 2.1.0, 2023-12-28
------------------------------------------------
+
+## peepdf 2.1.0, 2023-12-28
+
 
 	* Fixes:
 
@@ -21,9 +28,9 @@ peepdf 2.1.0, 2023-12-28
 		- Updated PDFVulns.py to contain the Elements and Actions to be watched
 		- The "title" of the document sometimes would contain unusable characters if decryption failed. Now will check for ascii content before outputting title.
 
------------------------------------------------
-peepdf 2.0.0, 2023-12-11
------------------------------------------------
+
+## peepdf 2.0.0, 2023-12-11
+
 
 	* Fixes:
 
@@ -46,31 +53,31 @@ peepdf 2.0.0, 2023-12-11
 		- Added an ocr feature which will extract text from the PDF itself. Allows for additional context during analysis.
 		- Added the -k argument at the shell to allow the passing of the VT API Key instead of requiring the python code be modified manually
 
------------------------------------------------
-peepdf 1.0.9, 2023-09-18
------------------------------------------------
+
+## peepdf 1.0.9, 2023-09-18
+
 
 	* Fixes:
 		- Attempt to fix continual failures in parsing indirect objects
 
------------------------------------------------
-peepdf 1.0.8, 2023-09-18
------------------------------------------------
+
+## peepdf 1.0.8, 2023-09-18
+
 
 	* Fixes:
 		- Fixed an issue with the PDFParser where the function was called incorrectly
 
------------------------------------------------
-peepdf 1.0.7, 2023-09-18
------------------------------------------------
+
+## peepdf 1.0.7, 2023-09-18
+
 
 	* Fixes:
 		- Removed suggestion to contact original author with issues, instead direct user to open issues at github.com/digitalsleuth/peepdf-3/issues
 		- Add updated author information
 
------------------------------------------------
-peepdf 1.0.2, 2023-09-06
------------------------------------------------
+
+## peepdf 1.0.2, 2023-09-06
+
 
 	* New features:
 		- Updated for Python 3
@@ -80,9 +87,9 @@ peepdf 1.0.2, 2023-09-06
 		- Fixed issues with interactive console not loading
 		- Fixed bug where bytes offset was not logging output
 
------------------------------------------------
-peepdf 0.3 r235, 2014-06-09
------------------------------------------------
+
+## peepdf 0.3 r235, 2014-06-09
+
 
     * New features:
 
@@ -119,9 +126,9 @@ peepdf 0.3 r235, 2014-06-09
 	
 		- It exists a problem related to the readline module in Mac OS X (it uses editline instead of GNU readline), not handling correctly colorized prompts.
 
------------------------------------------------
-peepdf Black Hat Vegas (0.2 r156), 2012-07-25
------------------------------------------------
+
+## peepdf Black Hat Vegas (0.2 r156), 2012-07-25
+
 
     * New features:
 
@@ -144,9 +151,9 @@ peepdf Black Hat Vegas (0.2 r156), 2012-07-25
         - Bug in PDFStream.decode and PDFStream.encode, dealing with an array of filter parameters (Thanks to @binjo)
 
 
------------------------------------------------
-peepdf Black Hat Arsenal (0.1 r92), 2012-03-16
------------------------------------------------
+
+## peepdf Black Hat Arsenal (0.1 r92), 2012-03-16
+
 
     * New features:
 
@@ -183,9 +190,9 @@ peepdf Black Hat Arsenal (0.1 r92), 2012-03-16
         - Fix in asciiHexDecode filter function
 
 
------------------------------------------------
-peepdf 0.1 r15, 2011-05-05
------------------------------------------------
+
+## peepdf 0.1 r15, 2011-05-05
+
 
 - Initial Release
 
