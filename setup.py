@@ -9,6 +9,7 @@ setup(
     description=("The original peepdf, ported to Python 3, and packaged in a setup"),
     install_requires=[
         "requests",
+        "pypdf",
         "jsbeautifier",
         "colorama",
         "Pillow",
