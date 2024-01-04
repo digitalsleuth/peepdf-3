@@ -1,24 +1,23 @@
-#    peepdf is a tool to analyse and modify PDF files
-#    http://peepdf.eternal-todo.com
-#    By Jose Miguel Esparza <jesparza AT eternal-todo.com>
+#    peepdf-3 is a tool to analyse and modify PDF files
+#    https://github.com/digitalsleuth/peepdf-3
+#    Original Author: Jose Miguel Esparza <jesparza AT eternal-todo.com>
 #    Updated for Python 3 by Corey Forman (digitalsleuth - https://github.com/digitalsleuth/peepdf-3)
 #    Copyright (C) 2011-2017 Jose Miguel Esparza
 #
-#    This file is part of peepdf.
+#    This file is part of peepdf-3.
 #
-#        peepdf is free software: you can redistribute it and/or modify
+#        peepdf-3 is free software: you can redistribute it and/or modify
 #        it under the terms of the GNU General Public License as published by
 #        the Free Software Foundation, either version 3 of the License, or
 #        (at your option) any later version.
 #
-#        peepdf is distributed in the hope that it will be useful,
+#        peepdf-3 is distributed in the hope that it will be useful,
 #        but WITHOUT ANY WARRANTY; without even the implied warranty of
-#        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.    See the
+#        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 #        GNU General Public License for more details.
 #
 #        You should have received a copy of the GNU General Public License
-#        along with peepdf.    If not, see <http://www.gnu.org/licenses/>.
-#
+#        along with peepdf-3. If not, see <http://www.gnu.org/licenses/>.
 
 """
     This module contains classes and methods to analyse and modify PDF files
@@ -28,14 +27,12 @@ import sys, os, re, hashlib, struct
 import pypdf
 
 try:
-    from peepdf import aes as AES
     from peepdf.PDFUtils import *
     from peepdf.PDFCrypto import *
     from peepdf.JSAnalysis import *
     from peepdf.PDFFilters import decodeStream, encodeStream
     from peepdf.PDFVulns import *
 except ModuleNotFoundError:
-    import aes as AES
     from PDFUtils import *
     from PDFCrypto import *
     from JSAnalysis import *
@@ -48,6 +45,7 @@ MAL_EOBJ = 3
 MAL_ESTREAM = 4
 MAL_XREF = 5
 MAL_BAD_HEAD = 6
+VERSION = "3.0.0"
 IS_ID_1 = False
 IS_ID_2 = False
 pdfFile = None
@@ -56,6 +54,22 @@ isForceMode = False
 isManualAnalysis = False
 spacesChars = ["\x00", "\x09", "\x0a", "\x0c", "\x0d", "\x20"]
 delimiterChars = ["<<", "(", "<", "[", "{", "/", "%"]
+
+monitorizedEvents = ["/OpenAction ", "/AA ", "/Names ", "/AcroForm ", "/XFA "]
+monitorizedActions = ["/JS ", "/JavaScript", "/Launch", "/SubmitForm", "/ImportData"]
+monitorizedElements = [
+    "/EmbeddedFiles ",
+    "/EmbeddedFile",
+    "/JBIG2Decode",
+    "getPageNthWord",
+    "arguments.callee",
+    "/U3D",
+    "/PRC",
+    "/RichMedia",
+    "/Flash",
+    ".rawValue",
+    "keep.previous",
+]
 jsContexts = {"global": None}
 
 
@@ -655,7 +669,7 @@ class PDFString(PDFObject):
             if algorithm == "RC4":
                 self.rawValue = RC4(cleanString, self.encryptionKey)
             elif algorithm == "AES":
-                ret = AES.decryptData(cleanString, self.encryptionKey)
+                ret = decryptData(cleanString, self.encryptionKey)
                 if ret[0] != -1:
                     self.rawValue = ret[1]
                 else:
@@ -814,7 +828,7 @@ class PDFHexString(PDFObject):
             if algorithm == "RC4":
                 self.value = RC4(cleanString, self.encryptionKey)
             elif algorithm == "AES":
-                ret = AES.decryptData(cleanString, self.encryptionKey)
+                ret = decryptData(cleanString, self.encryptionKey)
                 if ret[0] != -1:
                     self.value = ret[1]
                 else:
@@ -1934,7 +1948,7 @@ class PDFStream(PDFDictionary):
                                                 self.encodedStream, self.encryptionKey
                                             )
                                         elif algorithm == "AES":
-                                            ret = AES.decryptData(
+                                            ret = decryptData(
                                                 self.encodedStream, self.encryptionKey
                                             )
                                             if ret[0] != -1:
@@ -2051,7 +2065,7 @@ class PDFStream(PDFDictionary):
                                         self.encodedStream, self.encryptionKey
                                     )
                                 elif algorithm == "AES":
-                                    ret = AES.decryptData(
+                                    ret = decryptData(
                                         self.encodedStream, self.encryptionKey
                                     )
                                     if ret[0] != -1:
@@ -2078,7 +2092,7 @@ class PDFStream(PDFDictionary):
                                         self.decodedStream, self.encryptionKey
                                     )
                                 elif algorithm == "AES":
-                                    ret = AES.decryptData(
+                                    ret = decryptData(
                                         self.decodedStream, self.encryptionKey
                                     )
                                     if ret[0] != -1:
@@ -3157,7 +3171,7 @@ class PDFObjectStream(PDFStream):
                                                         self.encryptionKey,
                                                     )
                                                 elif algorithm == "AES":
-                                                    ret = AES.decryptData(
+                                                    ret = decryptData(
                                                         self.rawStream,
                                                         self.encryptionKey,
                                                     )
@@ -3280,7 +3294,7 @@ class PDFObjectStream(PDFStream):
                                             self.rawStream, self.encryptionKey
                                         )
                                     elif algorithm == "AES":
-                                        ret = AES.decryptData(
+                                        ret = decryptData(
                                             self.rawStream, self.encryptionKey
                                         )
                                         if ret[0] != -1:
@@ -3307,7 +3321,7 @@ class PDFObjectStream(PDFStream):
                                             self.rawStream, self.encryptionKey
                                         )
                                     elif algorithm == "AES":
-                                        ret = AES.decryptData(
+                                        ret = decryptData(
                                             self.rawStream, self.encryptionKey
                                         )
                                         if ret[0] != -1:

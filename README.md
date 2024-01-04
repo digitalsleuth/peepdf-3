@@ -8,6 +8,9 @@ With peepdf it's possible to see all the objects in the document showing
 the suspicious elements, supports all the most used filters and encodings, it can parse different versions of a file, object streams and encrypted files. With the installation
 of [STPyV8](https://github.com/cloudflare/stpyv8) and [Pylibemu](https://github.com/buffer/pylibemu) it provides **Javascript and shellcode analysis** wrappers too. Apart of this it's able to create new PDF files and to modify/obfuscate existent ones.
 
+As of version 3.0.0, peepdf-3 no longer includes pylibemu as a **requirement** in order to use peepdf-3 on Windows systems. However, all functionality of libemu, pylibemu, and sctest still exist, and will function on Linux systems.
+  
+
 ![PyPI - Version](https://img.shields.io/pypi/v/peepdf-3)
 
 # Features
@@ -25,12 +28,14 @@ The main functionalities of peepdf are the following:
   * Metadata
   * Modifications between versions (changelog)
   * Compressed objects (object streams)
-  * Analysis and modification of Javascript (PyV8): unescape, replace, join
+  * Analysis and modification of Javascript (STPyV8): unescape, replace, join
   * Shellcode analysis (Libemu python wrapper, pylibemu)
   * Variables (set command)
   * Extraction of old versions of the document
   * Easy extraction of objects, Javascript code, shellcodes (>, >>, $>, $>>)
   * Checking hashes on **VirusTotal**
+  * Detection of common encryption methods
+  * Output of XML and JSON data
 
 
 **Creation/Modification:**
@@ -45,11 +50,15 @@ The main functionalities of peepdf are the following:
   * Objects modification
 
 
-**Execution modes:**
+**Ways to use peepdf:**
 
-  * Simple command line execution
-  * **Powerful interactive console** (colorized or not)
-  * Batch mode
+  * Basic execution
+  * Interactive console
+  * Script mode
+  * JSON Output
+  * XML Output
+  * VirusTotal analysis
+  * OCR
 
 
 **TODO:**
@@ -78,14 +87,20 @@ The main functionalities of peepdf are the following:
 
 # Installation
 
-You can install via two methods:
+You can install / use peepdf-3 via these methods:
 
   * From PyPI via pip - `python3 -m pip install peepdf-3`
   * From GitHub via pip and git - `python3 -m pip install git+https://github.com/digitalsleuth/peepdf-3.git`
+  * Clone the GitHub repo, cd into the `peepdf-3` folder, `chmod +x peepdf.py` and `./peepdf.py`
 
 # Current Known Limitations
 
-  * Not installable on Windows - because pylibemu is not installable on Windows without libemu - future research to be done
+  * As of version 3.0.0, there are no limitations with the installation and usage of peepdf-3, as the hard requirement for pylibemu has been lifted. The functionality still remains for Linux systems.
+
+# Notes
+
+  * The current maintainer of this project (Corey Forman - digitalsleuth), does not receive any funding for, and is not currently seeking any monetary contributions for this work. If you are willing to provide assistance, programming contributions, and feedback, that is always welcome.  
+  * As this project originated with Jose Miguel Esparza, I will continue to leave his sentiments, and PayPal link, below to acknowledge his original product.
 
 **You are free to contribute with feedback, bugs, patches, etc. Any help is welcome. Also, if you really enjoy using peepdf, you think it is worth it and you feel really generous today you can donate some bucks to the project ;) Thanks!**
 

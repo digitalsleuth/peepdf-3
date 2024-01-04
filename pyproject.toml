@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+exclude = ["archive*"]
+
+[project]
+name = "peepdf-3"
+version = "3.0.0"
+dependencies = [
+  "requests",
+  "pypdf",
+  "jsbeautifier",
+  "colorama",
+  "Pillow",
+  "pythonaes",
+  "lxml",
+]
+requires-python = ">=3.6"
+authors = [
+  {name = "Corey Forman (digitalsleuth)", email = "github@digitalsleuth.ca"},
+  {name = "Jose Miguel Esparza"}
+]
+maintainers = [
+  {name = "Corey Forman (digitalsleuth)", email = "github@digitalsleuth.ca"}
+]
+description = "A Python 3 tool to explore, analyse, and disassemble PDF files"
+readme = "README.md"
+license = {file = "COPYING"}
+keywords = ["pdf", "peepdf", "forensics"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Programming Language :: Python :: 3"
+]
+
+[project.urls]
+Homepage = "https://github.com/digitalsleuth/peepdf-3"
+Changelog = "https://github.com/digitalsleuth/peepdf-3/blob/main/CHANGELOG.md"
+Wiki = "https://github.com/digitalsleuth/peepdf-3/wiki"
+
+[project.scripts]
+peepdf = "peepdf.peepdf:main"
