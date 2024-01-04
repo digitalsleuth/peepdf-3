@@ -1,11 +1,41 @@
-## peepdf 2.3.0, 2024-01-02
+## peepdf 3.0.0, 2024-01-02
 
 
 	* Fixes:
 
-		- Fixed an issue whereby a race condition was caused which failed to "decrypt" hexadecimal JS objects when ID values were set to True too soon.
+		- AES decryption inaccurately determines the default password is incorrect
+		- When supplying a file name, previous versions wouldn't check to see if the file existed before attempting actions
+		- Parsing of rawobjects only returned identical information instead of actual raw data
+		- Fixed an error whereby the ID did not parse correctly when using the `info trailer` command (when the ID is present)
+		- Fixed the URL for the VT report, was previously directing to the API call, not the actual standard web location
+
+	* Changes:
+
+		- **NOTE** Removed pylibemu as a requirement to allow an installation on Windows systems. All libemu/pylibemu/sctest functions will still work on linux, provided libemu and pylibemu are installed.
+		- Moved the lzw, jjdecode, and ccitt modules to their own encode/decode module, PDFEnDec.py
+		- Moved the aes module into PDFCrypto.py
+		- Renamed main.py to peepdf.py (to fit better naming structure and usage)
+		- Added clarity to the interactive console commands and their outputs (modified help menus, explained outputs)
+		- Added feedback to the redirect functions of the interactive console to confirm success / failure of action
+		- Modified the error handling and argument parsing on initial launch to better handle multiple arguments
+
+	* New Features:
+
+		- Added a `json` and `xml` option in the interactive console to print the xml and json output of the currently loaded file
+		- Added `objects` and `streams` options to the interactive console to show all objects and streams without having to resend the `info` command
+		- Added a `clear` command to the interactive console to clear the screen
+		- Not previously documented, but an `ocr` command has been added to the command line and interactive shells to extract text from the PDF
+		- Added the document "ID" to the XML and JSON outputs
   
   
+## peepdf 2.3.0, 2024-01-02
+
+
+    * Fixes:
+
+        - Fixed an issue whereby a race condition was caused which failed to "decrypt" hexadecimal JS objects when ID values were set to True too soon.
+
+
 ## peepdf 2.2.0, 2023-12-28
 
 

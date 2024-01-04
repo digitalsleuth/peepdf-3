@@ -1,37 +1,30 @@
-#
-#    peepdf is a tool to analyse and modify PDF files
-#    http://peepdf.eternal-todo.com
-#    By Jose Miguel Esparza <jesparza AT eternal-todo.com>
+#    peepdf-3 is a tool to analyse and modify PDF files
+#    https://github.com/digitalsleuth/peepdf-3
+#    Original Author: Jose Miguel Esparza <jesparza AT eternal-todo.com>
 #    Updated for Python 3 by Corey Forman (digitalsleuth - https://github.com/digitalsleuth/peepdf-3)
 #    Copyright (C) 2011-2017 Jose Miguel Esparza
 #
-#    This file is part of peepdf.
+#    This file is part of peepdf-3.
 #
-#        peepdf is free software: you can redistribute it and/or modify
+#        peepdf-3 is free software: you can redistribute it and/or modify
 #        it under the terms of the GNU General Public License as published by
 #        the Free Software Foundation, either version 3 of the License, or
 #        (at your option) any later version.
 #
-#        peepdf is distributed in the hope that it will be useful,
+#        peepdf-3 is distributed in the hope that it will be useful,
 #        but WITHOUT ANY WARRANTY; without even the implied warranty of
-#        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.    See the
+#        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 #        GNU General Public License for more details.
 #
 #        You should have received a copy of the GNU General Public License
-#        along with peepdf. If not, see <http://www.gnu.org/licenses/>.
-#
+#        along with peepdf-3. If not, see <http://www.gnu.org/licenses/>.
 
 """
     Module to manage cryptographic operations with PDF files
 """
 
 import hashlib, struct, random, warnings, sys
-
-try:
-    from peepdf import aes
-except ModuleNotFoundError:
-    import aes
-from itertools import cycle
+from aespython import key_expander, aes_cipher, cbc_mode
 
 warnings.filterwarnings("ignore")
 
@@ -95,14 +88,14 @@ def computeEncryptionKey(
                 password = password[:127]
                 kSalt = dictUserPass[40:48]
                 intermediateKey = hashlib.sha256(password + kSalt).digest()
-                ret = aes.decryptData(b"\0" * 16 + dictUE, intermediateKey)
+                ret = decryptData(b"\0" * 16 + dictUE, intermediateKey)
             elif passwordType == "OWNER":
                 password = password[:127]
                 kSalt = dictOwnerPass[40:48]
                 intermediateKey = hashlib.sha256(
                     password + kSalt + dictUserPass
                 ).digest()
-                ret = aes.decryptData(b"\0" * 16 + dictOE, intermediateKey)
+                ret = decryptData(b"\0" * 16 + dictOE, intermediateKey)
             return ret
     except:
         return (
@@ -272,6 +265,7 @@ def isUserPass(password, computedUserPass, dictU, revision):
     @param revision: The number of revision of the standard security handler
     @return The boolean telling if the given password is the user password or not
     """
+
     if revision == 5:
         vSalt = dictU[32:40]
         inputHash = hashlib.sha256(password + vSalt).digest()
@@ -375,21 +369,56 @@ def RC4(data, key):
         box[y] = tmp
         k = box[((box[z] + box[y]) % 256)]
         ret += chr(data[x] ^ k)
+    if isinstance(ret, str):
+        ret = ret.encode('latin-1')
     return ret
-
-
-"""
-    Author: Evan Fosmark (http://www.evanfosmark.com/2008/06/xor-encryption-with-python/)
-"""
-
 
 def xor(bytes, key):
     """
     Simple XOR implementation
-
+    Author: Evan Fosmark (http://www.evanfosmark.com/2008/06/xor-encryption-with-python/)
     @param bytes: Bytes to be xored
     @param key: Key used for the operation, it's cycled.
     @return: The xored bytes
     """
     key = cycle(key)
     return "".join(chr(ord(x) ^ ord(y)) for (x, y) in zip(bytes, key))
+
+def decryptData(data, password=None, keyLength=None, mode="CBC"):
+    """
+    Created from the demonstration of the pythonaes package.
+    
+    Copyright (c) 2010, Adam Newman http://www.caller9.com/
+    Licensed under the MIT license http://www.opensource.org/licenses/mit-license.php
+    """
+    decryptedData = ""
+    if keyLength == None:
+        keyLength = len(password) * 8
+    if keyLength not in [128, 192, 256]:
+        return (-1, "Bad length key in AES decryption process")
+    try:
+        iv = list(map(ord, data[:16]))
+    except:
+        iv = list(data[:16])
+    try:
+        key = list(map(ord, password))
+    except:
+        key = list(password)
+    data = data[16:]
+    if len(data) % 16 != 0:
+        data = data[: -(len(data) % 16)]
+    keyExpander = key_expander.KeyExpander(keyLength)
+    expandedKey = keyExpander.expand(key)
+    aesCipher = aes_cipher.AESCipher(expandedKey)
+    if mode == "CBC":
+        aesMode = cbc_mode.CBCMode(aesCipher, 16)
+    aesMode.set_iv(iv)
+    for i in range(0, len(data), 16):
+        try:
+            ciphertext = list(map(ord, data[i : i + 16]))
+        except:
+            ciphertext = list(data[i : i + 16])
+        decryptedBytes = aesMode.decrypt_block(ciphertext)
+        for byte in decryptedBytes:
+            decryptedData += chr(byte)
+    return (0, decryptedData)

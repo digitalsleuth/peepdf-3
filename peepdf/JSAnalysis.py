@@ -1,25 +1,23 @@
-#
-#    peepdf is a tool to analyse and modify PDF files
-#    http://peepdf.eternal-todo.com
-#    By Jose Miguel Esparza <jesparza AT eternal-todo.com>
+#    peepdf-3 is a tool to analyse and modify PDF files
+#    https://github.com/digitalsleuth/peepdf-3
+#    Original Author: Jose Miguel Esparza <jesparza AT eternal-todo.com>
 #    Updated for Python 3 by Corey Forman (digitalsleuth - https://github.com/digitalsleuth/peepdf-3)
 #    Copyright (C) 2011-2017 Jose Miguel Esparza
 #
-#    This file is part of peepdf.
+#    This file is part of peepdf-3.
 #
-#        peepdf is free software: you can redistribute it and/or modify
+#        peepdf-3 is free software: you can redistribute it and/or modify
 #        it under the terms of the GNU General Public License as published by
 #        the Free Software Foundation, either version 3 of the License, or
 #        (at your option) any later version.
 #
-#        peepdf is distributed in the hope that it will be useful,
+#        peepdf-3 is distributed in the hope that it will be useful,
 #        but WITHOUT ANY WARRANTY; without even the implied warranty of
-#        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.    See the
+#        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 #        GNU General Public License for more details.
 #
 #        You should have received a copy of the GNU General Public License
-#        along with peepdf.    If not, see <http://www.gnu.org/licenses/>.
-#
+#        along with peepdf-3. If not, see <http://www.gnu.org/licenses/>.
 
 """
     This module contains some functions to analyse Javascript code inside the PDF file
@@ -37,9 +35,9 @@ except ModuleNotFoundError:
     from PDFUtils import unescapeHTMLEntities, escapeString
 
 try:
-    import STPyV8 as PyV8
+    import STPyV8
 
-    class Global(PyV8.JSClass):
+    class Global(STPyV8.JSClass):
         evalCode = ""
 
         def evalOverride(self, expression):
@@ -87,7 +85,7 @@ def analyseJS(code, context=None, manualAnalysis=False):
 
         if code is not None and JS_MODULE and not manualAnalysis:
             if context is None:
-                context = PyV8.JSContext(Global())
+                context = STPyV8.JSContext(Global())
             context.enter()
             # Hooking the eval function
             context.eval("eval=evalOverride")

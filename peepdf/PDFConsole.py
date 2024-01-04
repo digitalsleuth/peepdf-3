@@ -1,25 +1,23 @@
-#
-# peepdf is a tool to analyse and modify PDF files
-#    http://peepdf.eternal-todo.com
-#    By Jose Miguel Esparza <jesparza AT eternal-todo.com>
+#    peepdf-3 is a tool to analyse and modify PDF files
+#    https://github.com/digitalsleuth/peepdf-3
+#    Original Author: Jose Miguel Esparza <jesparza AT eternal-todo.com>
 #    Updated for Python 3 by Corey Forman (digitalsleuth - https://github.com/digitalsleuth/peepdf-3)
 #    Copyright (C) 2011-2017 Jose Miguel Esparza
 #
-#    This file is part of peepdf.
+#    This file is part of peepdf-3.
 #
-#        peepdf is free software: you can redistribute it and/or modify
+#        peepdf-3 is free software: you can redistribute it and/or modify
 #        it under the terms of the GNU General Public License as published by
 #        the Free Software Foundation, either version 3 of the License, or
 #        (at your option) any later version.
 #
-#        peepdf is distributed in the hope that it will be useful,
+#        peepdf-3 is distributed in the hope that it will be useful,
 #        but WITHOUT ANY WARRANTY; without even the implied warranty of
-#        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.    See the
+#        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 #        GNU General Public License for more details.
 #
 #        You should have received a copy of the GNU General Public License
-#        along with peepdf.    If not, see <http://www.gnu.org/licenses/>.
-#
+#        along with peepdf-3. If not, see <http://www.gnu.org/licenses/>.
 
 """
     Implementation of the interactive console of peepdf
@@ -45,7 +43,7 @@ try:
     from peepdf.PDFCore import *
     from peepdf.PDFFilters import decodeStream, encodeStream
     from peepdf.PDFVulns import *
-    from peepdf.jjdecode import JJDecoder
+    from peepdf.PDFEnDec import JJDecoder
 except ModuleNotFoundError:
     from PDFUtils import *
     from PDFCrypto import *
@@ -53,7 +51,7 @@ except ModuleNotFoundError:
     from PDFCore import *
     from PDFFilters import decodeStream, encodeStream
     from PDFVulns import *
-    from jjdecode import JJDecoder
+    from PDFEnDec import JJDecoder
 
 try:
     from colorama import init, Fore, Back, Style
@@ -63,7 +61,7 @@ except:
     COLORIZED_OUTPUT = False
 
 try:
-    import STPyV8 as PyV8
+    import STPyV8
 
     JS_MODULE = True
 except ImportError as e:
@@ -125,7 +123,7 @@ class PDFConsole(cmd.Cmd):
         vtKey,
         avoidOutputColors=False,
         stdin=None,
-        batchMode=False,
+        scriptMode=False,
         jsonOutput=False,
     ):
         global COLORIZED_OUTPUT
@@ -181,7 +179,7 @@ class PDFConsole(cmd.Cmd):
         self.output = None
         self.redirect = None
         self.leaving = False
-        self.batchMode = batchMode
+        self.scriptMode = scriptMode
         self.jsonOutput = jsonOutput
         self.outputVarName = None
         self.outputFileName = None
@@ -372,7 +370,7 @@ class PDFConsole(cmd.Cmd):
                                 f"use a js_file instead): {newLine * 2}"
                             )
                         else:
-                            message = "[!] Error: You must specify a Javascript file in batch mode"
+                            message = "[!] Error: You must specify a Javascript file in script mode"
                             self.log_output("create " + argv, message)
                             return False
                 elif pdfType == "simple":
@@ -2027,7 +2025,7 @@ class PDFConsole(cmd.Cmd):
         content = ""
         validTypes = ["variable", "file", "object", "string"]
         if not JS_MODULE:
-            message = "[!] Error: PyV8 is not installed"
+            message = "[!] Error: STPyV8 is not installed"
             self.log_output("js_analyse " + argv, message)
             return False
         args = self.parseArgs(argv)
@@ -2389,7 +2387,7 @@ class PDFConsole(cmd.Cmd):
         error = ""
         content = ""
         if not JS_MODULE:
-            message = "[!] Error: PyV8 is not installed"
+            message = "[!] Error: STPyV8 is not installed"
             self.log_output("js_eval " + argv, message)
             return False
         validTypes = ["variable", "file", "object", "string"]
@@ -2513,7 +2511,7 @@ class PDFConsole(cmd.Cmd):
             context = self.javaScriptContexts["global"]
         else:
             # Using the global context to hook the eval fucntion and other definitions
-            context = PyV8.JSContext(Global())
+            context = STPyV8.JSContext(Global())
             self.javaScriptContexts["global"] = context
         context.enter()
         # Hooking the eval function
@@ -2832,7 +2830,7 @@ class PDFConsole(cmd.Cmd):
     def do_js_vars(self, argv):
         varName = None
         if not JS_MODULE:
-            message = "[!] Error: PyV8 is not installed"
+            message = "[!] Error: STPyV8 is not installed"
             self.log_output("js_vars " + argv, message)
             return False
         args = self.parseArgs(argv)
@@ -2895,6 +2893,38 @@ class PDFConsole(cmd.Cmd):
             f"Shows the Javascript variables defined in the execution context or the content of the specified variable {newLine}"
         )
 
+    def do_json(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("json " + argv, message)
+            return False
+        jsonReport = ""
+        args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("json " + argv, message)
+            return False
+        if not self.avoidOutputColors:
+            beforeStaticLabel = self.staticColor
+        else:
+            beforeStaticLabel = ""
+        if len(args) == 0:
+            statsDict = self.pdfFile.getStats()        
+            jsonReport = getPeepJSON(statsDict, VERSION)
+        elif len(args) > 0:
+            message = '[!] Error: The "json" command does not require any arguments'
+            self.log_output("json " + argv, message)
+            return False
+        else:
+            message = '[!] Error: The "json" command failed.'
+            self.log_output("json " + argv, message)
+            return False        
+        self.log_output("json " + argv, jsonReport)
+        
+    def help_json(self):
+        print(f"{newLine}Usage: json")
+        print(f"Shows the info for the currently loaded file in JSON format")
+    
     def do_log(self, argv):
         args = self.parseArgs(argv)
         if args is None:
@@ -3127,7 +3157,7 @@ class PDFConsole(cmd.Cmd):
                             f"{newLine * 2}"
                         )
                     else:
-                        message = "[!] Error: in batch mode you must specify a file storing the stream content"
+                        message = "[!] Error: In script mode you must specify a file storing the stream content"
                         self.log_output("modify " + argv, message)
                         return False
                 object.setDecodedStream(streamContent)
@@ -3186,6 +3216,49 @@ class PDFConsole(cmd.Cmd):
             f"Shows the content of the object after being decoded and decrypted.{newLine}"
         )
 
+    def do_objects(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("objects " + argv, message)
+            return False
+        stats = ""
+        args = self.parseArgs(argv)
+        if not self.avoidOutputColors:
+            beforeStaticLabel = self.staticColor
+        else:
+            beforeStaticLabel = ""
+        statsDict = self.pdfFile.getStats()
+        if len(args) == 0:
+            for version in range(len(statsDict["Versions"])):
+                statsVersion = statsDict["Versions"][version]
+                stats += f"{beforeStaticLabel}Version {self.resetColor}{str(version)}: "
+                stats += (
+                    f'{beforeStaticLabel}Objects ({statsVersion["Objects"][0]}): '
+                    f'{self.resetColor}{str(statsVersion["Objects"][1])}{newLine}'
+                )
+        elif len(args) == 1:
+            version = int(args[0])
+            if version in range(len(statsDict["Versions"])):
+                statsVersion = statsDict["Versions"][version]
+                stats += f"{beforeStaticLabel}Version {self.resetColor}{str(version)}: "
+                stats += (
+                    f'{beforeStaticLabel}Objects ({statsVersion["Objects"][0]}): '
+                    f'{self.resetColor}{str(statsVersion["Objects"][1])}{newLine}'
+                )
+            else:
+                message = f'[!] Version {version} does not exist.'
+                self.log_output("objects " + argv, message)
+                return False            
+        else:
+            message = '[!] Error: The "objects" command requires 0 or 1 argument'
+            self.log_output("objects " + argv, message)
+            return False
+        self.log_output("objects " + argv, stats)
+
+    def help_objects(self):
+        print(f"{newLine}Usage: objects [version]")
+        print(f"Shows all available objects or objects by version.{newLine}")
+
     def do_ocr(self, argv):
         if self.pdfFile is None:
             message = "[!] Error: You must open a file"
@@ -3202,6 +3275,10 @@ class PDFConsole(cmd.Cmd):
             with open(args[0], "w") as outputFile:
                 outputFile.write(pdfText)
                 outputFile.close()
+            message = (
+                f"[+] The content has been written to {outputFile.name}."
+            )
+            self.log_output("ocr" + argv, message)
         elif len(args) > 1:
             message = (
                 "[!] Error: ocr only takes one argument, or none for output to stdout"
@@ -3341,7 +3418,7 @@ class PDFConsole(cmd.Cmd):
             self.pdfFile = None
         self.log_output("open " + argv, message)
         if not JS_MODULE:
-            print(f"Warning: PyV8 is not installed {newLine}")
+            print(f"Warning: STPyV8 is not installed {newLine}")
         if self.pdfFile is not None:
             self.do_info("")
 
@@ -3432,8 +3509,6 @@ class PDFConsole(cmd.Cmd):
             message = "[!] Error: offset cannot be calculated"
             self.log_output("rawobject " + argv, message)
             return False
-        """
-        # Getting the raw bytes directly from the file
         filePath = self.pdfFile.getPath()
         if not compressed and filePath != '' and os.path.exists(filePath):
             ret = getBytesFromFile(filePath,offset,size)
@@ -3442,7 +3517,6 @@ class PDFConsole(cmd.Cmd):
                 self.log_output('rawobject ' + argv, message)
                 return False
             rawValue = ret[1]
-        """
         self.log_output("rawobject " + argv, rawValue)
 
     def help_rawobject(self):
@@ -3912,7 +3986,7 @@ class PDFConsole(cmd.Cmd):
                 for version in range(len(objects)):
                     if objects[version] != []:
                         output += (
-                            f"{newLine}{str(version)}: {str(objects[version])}{newLine}"
+                            f"{newLine}Version {str(version)}: {str(objects[version])}{newLine}"
                         )
                 if output == "":
                     output = "Not found"
@@ -4007,7 +4081,7 @@ class PDFConsole(cmd.Cmd):
         var = args[0]
         if not var in self.variables:
             print(
-                f"{newLine}[!] Error: The variable {var} does not exist. It can be {newLine}"
+                f"{newLine}[!] Error: The variable {var} does not exist.{newLine}"
             )
             return False
         if var == "output":
@@ -4084,6 +4158,49 @@ class PDFConsole(cmd.Cmd):
         print(
             f"Shows the object stream content of the specified version after being decoded and decrypted (if necessary) {newLine}"
         )
+
+    def do_streams(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("streams " + argv, message)
+            return False
+        stats = ""
+        args = self.parseArgs(argv)
+        if not self.avoidOutputColors:
+            beforeStaticLabel = self.staticColor
+        else:
+            beforeStaticLabel = ""
+        statsDict = self.pdfFile.getStats()
+        if len(args) == 0:
+            for version in range(len(statsDict["Versions"])):
+                statsVersion = statsDict["Versions"][version]
+                stats += f"{beforeStaticLabel}Version {self.resetColor}{str(version)}: "
+                stats += (
+                    f'{beforeStaticLabel}Streams ({statsVersion["Streams"][0]}): '
+                    f'{self.resetColor}{str(statsVersion["Streams"][1])}{newLine}'
+                )
+        elif len(args) == 1:
+            version = int(args[0])
+            if version in range(len(statsDict["Versions"])):
+                statsVersion = statsDict["Versions"][version]
+                stats += f"{beforeStaticLabel}Version {self.resetColor}{str(version)}: "
+                stats += (
+                    f'{beforeStaticLabel}Streams ({statsVersion["Streams"][0]}): '
+                    f'{self.resetColor}{str(statsVersion["Streams"][1])}{newLine}'
+                )
+            else:
+                message = f'[!] Version {version} does not exist.'
+                self.log_output("streams " + argv, message)
+                return False
+        else:
+            message = '[!] Error: The "streams" command requires 0 or 1 argument'
+            self.log_output("streams " + argv, message)
+            return False
+        self.log_output("streams " + argv, stats)
+
+    def help_streams(self):
+        print(f"{newLine}Usage: streams")
+        print(f"Shows all available streams.{newLine}")
 
     def do_tree(self, argv):
         if self.pdfFile is None:
@@ -4284,7 +4401,7 @@ class PDFConsole(cmd.Cmd):
         ):
             unixEpoch = jsonDict["data"]["attributes"]["last_analysis_date"]
             scanResults = jsonDict["data"]["attributes"]["last_analysis_results"]
-            selfLink = jsonDict["data"]["links"]["self"]
+            selfLink = f'https://www.virustotal.com/gui/file/{jsonDict["data"]["attributes"]["sha256"]}' #  jsonDict["data"]["links"]["self"]
             lastAnalysisDate = dt.utcfromtimestamp(unixEpoch).strftime(DTFMT)
             detectionColor = ""
             if args == []:
@@ -4318,12 +4435,15 @@ class PDFConsole(cmd.Cmd):
                         and "result" in engineResults
                         and "engine_update" in engineResults
                     ):
-                        if "malicious" in engineResults["category"]:
-                            output += (
-                                f'{engine}\t{engineResults["engine_version"]}\t'
-                                f'{engineResults["engine_update"]}{self.alertColor}\t'
-                                f'{engineResults["result"]}{self.resetColor}{newLine}'
-                            )
+                        #if "malicious" in engineResults["category"]:
+                        output += (
+                            f'{engine}\t{engineResults["engine_version"]}\t'
+                            f'{engineResults["engine_update"]}{self.alertColor}\t'
+                            f'{engineResults["result"]}{self.resetColor}{newLine}'
+                        )
+            elif maliciousCount == 0:
+                output += f"{self.staticColor}Scan results: {self.resetColor}{newLine * 2}"
+                output += f"{self.staticColor}No malicious detection for {md5Hash}{self.resetColor}."
             else:
                 message = "[!] Error: Missing elements in the response from VirusTotal"
                 self.log_output("vtcheck " + argv, message)
@@ -4355,6 +4475,39 @@ class PDFConsole(cmd.Cmd):
             f'[*] Set your vt_key in the interactive console by using: "set vt_key YOUR_API_KEY".{newLine}'
         )
 
+    def do_xml(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("xml " + argv, message)
+            return False
+        xmlReport = ""
+        args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("xml " + argv, message)
+            return False
+        if not self.avoidOutputColors:
+            beforeStaticLabel = self.staticColor
+        else:
+            beforeStaticLabel = ""
+        if len(args) == 0:
+            statsDict = self.pdfFile.getStats()        
+            xmlReport = getPeepXML(statsDict, VERSION)
+            xmlReport = xmlReport.decode('latin-1')
+        elif len(args) >0:
+            message = '[!] Error: The "xml" command does not require any arguments'
+            self.log_output("xml " + argv, message)
+            return False
+        else:
+            message = '[!] Error: The "xml" command failed.'
+            self.log_output("xml " + argv, message)
+            return False
+        self.log_output("xml " + argv, xmlReport)
+        
+    def help_xml(self):
+        print(f"{newLine}Usage: xml")
+        print(f"Shows the info for the currently loaded file in XML format")
+        
     def do_xor(self, argv):
         content = ""
         found = False
@@ -4874,6 +5027,8 @@ class PDFConsole(cmd.Cmd):
         niceOutput = niceOutput.replace("\r", "\n")
         longOutput = f"{command}{newLine * 2}{niceOutput}{newLine * 2}"
         if self.loggingFile is not None:
+            if isinstance(longOutput, str):
+                longOutput = longOutput.encode()
             open(self.loggingFile, "ab").write("PPDF> " + longOutput)
         if self.redirect:
             if bytesToSave is None:
@@ -4888,9 +5043,15 @@ class PDFConsole(cmd.Cmd):
                     else:
                         outFile = f"{str(self.outputFileName)}_{i}"
                     if self.redirect == FILE_WRITE:
+                        if isinstance(byteVal, str):
+                            byteVal = byteVal.encode()
                         open(outFile, "wb").write(byteVal)
+                        print(f"[+] Content has been written to file {outFile}")
                     elif self.redirect == FILE_ADD:
+                        if isinstance(byteVal, str):
+                            byteVal = byteVal.encode()
                         open(outFile, "ab").write(byteVal)
+                        print(f"[+] Content has been appended to file {outFile}")
                 elif (
                     self.redirect == VAR_WRITE or self.redirect == VAR_ADD
                 ) and self.outputVarName is not None:
@@ -4900,11 +5061,14 @@ class PDFConsole(cmd.Cmd):
                         varName = f"{self.outputVarName}_{i}"
                     if self.redirect == VAR_WRITE:
                         self.variables[varName] = [byteVal, byteVal]
+                        print(f"[+] Content has been written to varaible {varName}")
                     elif self.redirect == VAR_ADD:
                         if varName in self.variables:
                             self.variables[varName][0] += byteVal
+                            print(f"[+] Content has been appended to varaible {varName}")
                         else:
                             self.variables[varName] = [byteVal, byteVal]
+                            print(f"[+] Content has been appended to varaible {varName}")
         elif printOutput:
             if niceOutput:
                 niceOutput = f"{newLine}{niceOutput}{newLine}"
