@@ -2,7 +2,11 @@ from setuptools import setup
 
 setup(
     name="peepdf-3",
+<<<<<<< HEAD:archive/setup.py
     version="3.0.0",
+=======
+    version="2.3.0",
+>>>>>>> main:setup.py
     author="Jose Miguel Esparza, Corey Forman",
     license="GNU GPLv3",
     url="https://github.com/digitalsleuth/peepdf-3",
@@ -13,6 +17,10 @@ setup(
         "jsbeautifier",
         "colorama",
         "Pillow",
+<<<<<<< HEAD:archive/setup.py
+=======
+        "pylibemu",
+>>>>>>> main:setup.py
         "pythonaes",
         "lxml",
     ],

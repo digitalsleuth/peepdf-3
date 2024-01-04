@@ -45,7 +45,10 @@ MAL_EOBJ = 3
 MAL_ESTREAM = 4
 MAL_XREF = 5
 MAL_BAD_HEAD = 6
+<<<<<<< HEAD
 VERSION = "3.0.0"
+=======
+>>>>>>> main
 IS_ID_1 = False
 IS_ID_2 = False
 pdfFile = None

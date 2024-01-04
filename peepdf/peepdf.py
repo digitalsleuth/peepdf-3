@@ -44,7 +44,12 @@ except ModuleNotFoundError:
     from PDFUtils import vtcheck, getPeepJSON, getPeepXML, getUpdate
     from PDFVulns import *
 
+<<<<<<< HEAD:peepdf/peepdf.py
 VT_KEY = f"YOUR KEY GOES ON LINE 47 OF {__file__}, USE set vt_key yourAPIkey in interactive mode instead of -c, OR use -k yourAPIkey with -c"
+=======
+VT_KEY = "<YOUR KEY GOES ON LINE 51 OF main.py, USE set vt_key yourAPIkey in interactive, OR -k from your terminal with -c>"
+VERSION = "2.3.0"
+>>>>>>> main:peepdf/main.py
 DTFMT = "%Y%m%d-%H%M%S"
 
 try:
