@@ -7,7 +7,7 @@
 <!ELEMENT date ( #PCDATA ) >
 
 
-<!ELEMENT basic ( filename, md5, sha1, sha256, size, detection, pdf_version, binary, linearized, encrypted, updates, num_objects, num_streams, comments, errors ) >
+<!ELEMENT basic ( filename, md5, sha1, sha256, size, id0, id1, id2, id3, id4, id5, detection, pdf_version, binary, linearized, encrypted, updates, num_objects, num_streams, comments, errors ) >
 
 <!ELEMENT filename ( #PCDATA ) >
 
@@ -18,6 +18,18 @@
 <!ELEMENT sha256 ( #PCDATA ) >
 
 <!ELEMENT size ( #PCDATA ) >
+
+<!ELEMENT id0 ( #PCDATA ) >
+
+<!ELEMENT id1 ( #PCDATA ) >
+
+<!ELEMENT id2 ( #PCDATA ) >
+
+<!ELEMENT id3 ( #PCDATA ) >
+
+<!ELEMENT id4 ( #PCDATA ) >
+
+<!ELEMENT id5 ( #PCDATA ) >
 
 <!ELEMENT detection ( rate?, report_link? ) >
 

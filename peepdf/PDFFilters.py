@@ -1,25 +1,23 @@
-#
-# peepdf is a tool to analyse and modify PDF files
-#    http://peepdf.eternal-todo.com
-#    By Jose Miguel Esparza <jesparza AT eternal-todo.com>
+#    peepdf-3 is a tool to analyse and modify PDF files
+#    https://github.com/digitalsleuth/peepdf-3
+#    Original Author: Jose Miguel Esparza <jesparza AT eternal-todo.com>
 #    Updated for Python 3 by Corey Forman (digitalsleuth - https://github.com/digitalsleuth/peepdf-3)
 #    Copyright (C) 2011-2017 Jose Miguel Esparza
 #
-#    This file is part of peepdf.
+#    This file is part of peepdf-3.
 #
-#        peepdf is free software: you can redistribute it and/or modify
+#        peepdf-3 is free software: you can redistribute it and/or modify
 #        it under the terms of the GNU General Public License as published by
 #        the Free Software Foundation, either version 3 of the License, or
 #        (at your option) any later version.
 #
-#        peepdf is distributed in the hope that it will be useful,
+#        peepdf-3 is distributed in the hope that it will be useful,
 #        but WITHOUT ANY WARRANTY; without even the implied warranty of
-#        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.    See the
+#        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 #        GNU General Public License for more details.
 #
 #        You should have received a copy of the GNU General Public License
-#        along with peepdf.    If not, see <http://www.gnu.org/licenses/>.
-#
+#        along with peepdf-3. If not, see <http://www.gnu.org/licenses/>.
 
 # Some code has been reused and modified from the original by Mathieu Fenniak:
 # Parameters management in Flate and LZW algorithms, asciiHexDecode and ascii85Decode
@@ -60,13 +58,11 @@ import sys, zlib, struct
 from binascii import hexlify, unhexlify
 
 try:
-    from peepdf import lzw
+    from peepdf.PDFEnDec import *
     from peepdf.PDFUtils import getNumsFromBytes, getBytesFromBits, getBitsFromNum
-    from peepdf.ccitt import CCITTFax
 except ModuleNotFoundError:
-    import lzw
+    from PDFEnDec import *
     from PDFUtils import getNumsFromBytes, getBytesFromBits, getBitsFromNum
-    from ccitt import CCITTFax
 
 
 def decodeStream(stream, filter, parameters={}):
