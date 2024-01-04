@@ -1,4 +1,13 @@
-## peepdf 3.0.0, 2024-01-02
+## peepdf 3.0.1, 2024-01-04
+
+
+	* Fixes:
+
+		- Fixed an issue where the json output wasn't formulated properly based on the differences in CRLF and blanks in the "IDs" field
+
+
+
+## peepdf 3.0.0, 2024-01-04
 
 
 	* Fixes:

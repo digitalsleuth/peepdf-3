@@ -256,8 +256,8 @@ def main():
                 try:
                     from peepdf.PDFConsole import PDFConsole
                 except ModuleNotFoundError:
-                    from PDFConsole import PDFConsole                
-                console = PDFConsole(pdf, VT_KEY, args.avoidColors)                
+                    from PDFConsole import PDFConsole
+                console = PDFConsole(pdf, VT_KEY, args.avoidColors)
                 try:
                     console.cmdloop()
                 except:
@@ -265,7 +265,7 @@ def main():
                         "[!] Error: Exception while launching Interactive mode without a PDF file"
                     )
                     traceback.print_exc(file=open(errorsFile, "a"))
-                    raise Exception("PeepException", "Open an Issue on GitHub")               
+                    raise Exception("PeepException", "Open an Issue on GitHub")
             elif (numArgs > 4 and not fileName) or (numArgs == 0 and not args.isInteractive):
                 sys.exit(argsParser.print_help())
             if args.jsonOutput and args.xmlOutput:
