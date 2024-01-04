@@ -662,7 +662,7 @@ def getPeepJSON(statsDict, VERSION):
     basicDict["sha1"] = statsDict["SHA1"]
     basicDict["sha256"] = statsDict["SHA256"]
     basicDict["size"] = int(statsDict["Size"])
-    if statsDict["IDs"] != "\r\n":
+    if statsDict["IDs"] not in ("\r\n","\n",None):
         basicDict["ids"] = {}
         ids = statsDict["IDs"].split("\r\n\t")
         for each_id in ids:

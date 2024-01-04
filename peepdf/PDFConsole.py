@@ -2909,7 +2909,7 @@ class PDFConsole(cmd.Cmd):
         else:
             beforeStaticLabel = ""
         if len(args) == 0:
-            statsDict = self.pdfFile.getStats()        
+            statsDict = self.pdfFile.getStats()
             jsonReport = getPeepJSON(statsDict, VERSION)
         elif len(args) > 0:
             message = '[!] Error: The "json" command does not require any arguments'
@@ -2918,13 +2918,13 @@ class PDFConsole(cmd.Cmd):
         else:
             message = '[!] Error: The "json" command failed.'
             self.log_output("json " + argv, message)
-            return False        
+            return False
         self.log_output("json " + argv, jsonReport)
-        
+
     def help_json(self):
         print(f"{newLine}Usage: json")
         print(f"Shows the info for the currently loaded file in JSON format")
-    
+
     def do_log(self, argv):
         args = self.parseArgs(argv)
         if args is None:
@@ -3248,7 +3248,7 @@ class PDFConsole(cmd.Cmd):
             else:
                 message = f'[!] Version {version} does not exist.'
                 self.log_output("objects " + argv, message)
-                return False            
+                return False
         else:
             message = '[!] Error: The "objects" command requires 0 or 1 argument'
             self.log_output("objects " + argv, message)
@@ -4491,7 +4491,7 @@ class PDFConsole(cmd.Cmd):
         else:
             beforeStaticLabel = ""
         if len(args) == 0:
-            statsDict = self.pdfFile.getStats()        
+            statsDict = self.pdfFile.getStats()
             xmlReport = getPeepXML(statsDict, VERSION)
             xmlReport = xmlReport.decode('latin-1')
         elif len(args) >0:
@@ -4503,11 +4503,11 @@ class PDFConsole(cmd.Cmd):
             self.log_output("xml " + argv, message)
             return False
         self.log_output("xml " + argv, xmlReport)
-        
+
     def help_xml(self):
         print(f"{newLine}Usage: xml")
         print(f"Shows the info for the currently loaded file in XML format")
-        
+
     def do_xor(self, argv):
         content = ""
         found = False
