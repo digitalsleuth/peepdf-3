@@ -1,3 +1,12 @@
+## peepdf 3.0.2, 2024-01-04
+
+
+	* Fixes:
+
+		- Fixes incorrect version number
+
+
+
 ## peepdf 3.0.1, 2024-01-04
 
 
