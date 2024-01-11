@@ -35,6 +35,7 @@ import pathlib
 from builtins import input
 from base64 import b64encode, b64decode
 from datetime import datetime as dt
+from prettytable import *
 
 try:
     from peepdf.PDFUtils import *
@@ -4383,10 +4384,6 @@ class PDFConsole(cmd.Cmd):
             message = f"[!] Error: {ret[1]}"
             self.log_output("vtcheck " + argv, message)
             return False
-        elif "error" in ret[1]:
-            message = f'[!] Error: {ret[1]["error"]}'
-            self.log_output("vtcheck " + argv, message)
-            return False
         jsonDict = ret[1]
         maliciousCount = jsonDict["data"]["attributes"]["last_analysis_stats"][
             "malicious"
@@ -4401,7 +4398,7 @@ class PDFConsole(cmd.Cmd):
         ):
             unixEpoch = jsonDict["data"]["attributes"]["last_analysis_date"]
             scanResults = jsonDict["data"]["attributes"]["last_analysis_results"]
-            selfLink = f'https://www.virustotal.com/gui/file/{jsonDict["data"]["attributes"]["sha256"]}' #  jsonDict["data"]["links"]["self"]
+            selfLink = f'https://www.virustotal.com/gui/file/{jsonDict["data"]["attributes"]["sha256"]}'
             lastAnalysisDate = dt.utcfromtimestamp(unixEpoch).strftime(DTFMT)
             detectionColor = ""
             if args == []:
@@ -4411,10 +4408,10 @@ class PDFConsole(cmd.Cmd):
                 detectionLevel = maliciousCount / (totalCount / 3)
                 if detectionLevel == 0:
                     detectionColor = self.alertColor
-                elif detectionLevel == 1:
+                elif detectionLevel >= 1:
                     detectionColor = self.warningColor
             output = (
-                f"{self.staticColor}Detection rate: {self.resetColor} {detectionColor}"
+                f"{self.staticColor}Detection rate: {self.resetColor}{detectionColor}"
                 f"{maliciousCount}{self.resetColor}/{totalCount}{newLine}"
                 f"{self.staticColor}Last analysis date: {self.resetColor}"
                 f"{lastAnalysisDate}{newLine}"
@@ -4422,11 +4419,15 @@ class PDFConsole(cmd.Cmd):
                 f"{selfLink}{newLine}"
             )
             if maliciousCount > 0:
+                if len(jsonDict['data']['attributes']['names']) > 0:
+                    output += (
+                        f"{self.staticColor}Names: {self.resetColor}{', '.join(jsonDict['data']['attributes']['names'])}{newLine}"
+                    )
                 output += (
                     f"{self.staticColor}Scan results: {self.resetColor}{newLine * 2}"
                 )
-                output += f"{self.staticColor}Engine\tEngine Version\tEngine Update\tResult{newLine * 1}"
-                output += f'{"-" * 58}\r'
+                scan_list = []
+                scan_list.append([f"{self.staticColor}Engine{self.resetColor}",f"{self.staticColor}Engine Version{self.resetColor}",f"{self.staticColor}Engine Update{self.resetColor}",f"{self.staticColor}Result{self.resetColor}"])
                 for engine in scanResults:
                     engineResults = scanResults[engine]
                     if (
@@ -4435,12 +4436,14 @@ class PDFConsole(cmd.Cmd):
                         and "result" in engineResults
                         and "engine_update" in engineResults
                     ):
-                        #if "malicious" in engineResults["category"]:
-                        output += (
-                            f'{engine}\t{engineResults["engine_version"]}\t'
-                            f'{engineResults["engine_update"]}{self.alertColor}\t'
-                            f'{engineResults["result"]}{self.resetColor}{newLine}'
-                        )
+                        scan_list.append([engine,f'{self.resetColor}{engineResults["engine_version"]}',engineResults["engine_update"],f'{self.alertColor}{engineResults["result"]}{self.resetColor}'])
+                table = PrettyTable(scan_list[0])
+                table.set_style(SINGLE_BORDER)
+                table.align = "l"
+                table.sortby = f"{self.staticColor}Engine{self.resetColor}"
+                if len(scan_list) > 1:
+                    table.add_rows(scan_list[1:])
+                output += str(table)
             elif maliciousCount == 0:
                 output += f"{self.staticColor}Scan results: {self.resetColor}{newLine * 2}"
                 output += f"{self.staticColor}No malicious detection for {md5Hash}{self.resetColor}."
