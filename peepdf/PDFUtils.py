@@ -455,15 +455,10 @@ def vtcheck(md5, vtKey):
         response = requests.get(vtUrl, headers=headers)
         jsonResponse = response.json()
     except:
-        return (-1, f"The request to VirusTotal failed")
-    try:
-        jsonDict = jsonResponse
-    except:
-        return (
-            -1,
-            "An error has occurred while parsing the JSON response from VirusTotal",
-        )
-    return (0, jsonDict)
+        return (-1, "The request to VirusTotal failed")
+    if "error" in jsonResponse:
+        return (-1, jsonResponse["error"]["message"])
+    return (0, jsonResponse)
 
 def getPeepXML(statsDict, VERSION):
     root = etree.Element(

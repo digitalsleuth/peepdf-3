@@ -1,3 +1,17 @@
+## peepdf 3.0.3, 2024-01-10
+
+
+	* Fixes:
+
+		- Layout of table from vtcheck now better formatted
+
+	* Changes:
+
+		- New requirement (prettytable) added to pyproject.toml
+		- Reorganized the code surrounding the vtcheck and do_vtcheck functions
+
+
+
 ## peepdf 3.0.2, 2024-01-04
 
 
