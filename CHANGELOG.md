@@ -1,3 +1,37 @@
+## peepdf 4.0.0, 2024-07-30
+
+
+	* Fixes:
+
+		- Fixed issue with analysis of RC4 encrypted pdf - [Issue 17](https://github.com/digitalsleuth/peepdf-3/issues/17)
+		- Identified and corrected issue with deciphering JavaScript entries and reporting detected JS - [Issue 18](https://github.com/digitalsleuth/peepdf-3/issues/18)
+		- Correction of JSON output displaying incorrect version and ID entry - [Issue 20](https://github.com/digitalsleuth/peepdf-3/issues/20)
+		- Linted to correct import issues and expedite analysis
+		- Re-mapped variables from builtins to properly named variables
+		- Corrected JSAnalysis detection and analysis of JS code to more accurately detect JS and not send it for analysis unnecessarily
+		- Standardized logging output filenames
+		- Fixed an issue with detecting a `not found` error on VirusTotal both in the interactive console and on command line
+
+	* Changes:
+
+		- Added a confirmation prompt when viewing large objects (greater-than 10000 bytes in size)
+
+
+
+## peepdf 3.0.3, 2024-01-10
+
+
+	* Fixes:
+
+		- Layout of table from vtcheck now better formatted
+
+	* Changes:
+
+		- New requirement (prettytable) added to pyproject.toml
+		- Reorganized the code surrounding the vtcheck and do_vtcheck functions
+
+
+
 ## peepdf 3.0.2, 2024-01-04
 
 

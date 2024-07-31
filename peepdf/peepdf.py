@@ -28,60 +28,38 @@
 import sys
 import os
 import argparse
-import requests
-import hashlib
 import traceback
-import pathlib
 from datetime import datetime as dt
 from operator import attrgetter
 
+
 try:
-    from peepdf.PDFCore import PDFParser, VERSION
+    from peepdf.PDFCore import PDFParser, VERSION, PIL_MODULE, EMU_MODULE, JS_MODULE
     from peepdf.PDFUtils import vtcheck, getPeepJSON, getPeepXML, getUpdate
-    from peepdf.PDFVulns import *
+    from peepdf.PDFVulns import vulnsDict
+    from peepdf.PDFConsole import PDFConsole
 except ModuleNotFoundError:
-    from PDFCore import PDFParser, VERSION
+    from PDFCore import PDFParser, VERSION, PIL_MODULE, EMU_MODULE, JS_MODULE
     from PDFUtils import vtcheck, getPeepJSON, getPeepXML, getUpdate
-    from PDFVulns import *
-
-VT_KEY = f"YOUR KEY GOES ON LINE 47 OF {__file__}, USE set vt_key yourAPIkey in interactive mode instead of -c, OR use -k yourAPIkey with -c"
-DTFMT = "%Y%m%d-%H%M%S"
+    from PDFVulns import vulnsDict
+    from PDFConsole import PDFConsole
 
 try:
-    import STPyV8
-
-    JS_MODULE = True
-except:
-    JS_MODULE = False
-
-try:
-    import pylibemu
-
-    EMU_MODULE = True
-except:
-    EMU_MODULE = False
-
-try:
-    from colorama import init, Fore, Back, Style
+    from colorama import init, Fore, Style
 
     COLORIZED_OUTPUT = True
-except:
+except ModuleNotFoundError:
     COLORIZED_OUTPUT = False
 
-try:
-    from PIL import Image
-
-    PIL_MODULE = True
-except:
-    PIL_MODULE = False
-
-    from operator import attrgetter
+VT_KEY = f"YOUR KEY GOES ON LINE 54 OF {__file__}, USE set vt_key yourAPIkey in interactive mode instead of -c, OR use -k yourAPIkey with -c"
+DTFMT = "%Y%m%d-%H%M%S"
+ERROR_LOG = f"peepdf_errors-{dt.now().strftime(DTFMT)}.txt"
 
 
 class SortHelp(argparse.HelpFormatter):
     def add_arguments(self, actions):
         actions = sorted(actions, key=attrgetter("option_strings"))
-        super(SortHelp, self).add_arguments(actions)
+        super().add_arguments(actions)
 
 
 def main():
@@ -91,11 +69,8 @@ def main():
     url = "https://github.com/digitalsleuth/peepdf-3"
     newLine = os.linesep
     currentDir = os.getcwd()
-    absPeepdfRoot = os.path.dirname(os.path.realpath(sys.argv[0]))
-    currentDateTime = dt.now().strftime(DTFMT)
-    errorsFile = os.path.join(currentDir, f"peepdf_errors-{currentDateTime}.txt")
-    peepdfHeader = f"{versionHeader}{newLine * 2}{url}{newLine}"
-    f"{newLine * 2}{author}{newLine}"
+    errorsFile = os.path.join(currentDir, ERROR_LOG)
+    peepdfHeader = f"{versionHeader}{newLine * 2}{url}{newLine}{author}{newLine}"
     argsParser = argparse.ArgumentParser(
         usage="peepdf [options] pdf",
         description=versionHeader,
@@ -253,20 +228,16 @@ def main():
                 if not os.path.exists(fileName):
                     sys.exit(f'[!] Error: The file "{fileName}" does not exist')
             elif numArgs == 2 and (args.isInteractive and args.avoidColors):
-                try:
-                    from peepdf.PDFConsole import PDFConsole
-                except ModuleNotFoundError:
-                    from PDFConsole import PDFConsole
                 console = PDFConsole(pdf, VT_KEY, args.avoidColors)
                 try:
                     console.cmdloop()
-                except:
-                    errorMessage = (
-                        "[!] Error: Exception while launching Interactive mode without a PDF file"
-                    )
-                    traceback.print_exc(file=open(errorsFile, "a"))
-                    raise Exception("PeepException", "Open an Issue on GitHub")
-            elif (numArgs > 4 and not fileName) or (numArgs == 0 and not args.isInteractive):
+                except Exception as exc:
+                    errorMessage = "[!] Error: Exception while launching Interactive mode without a PDF file"
+                    traceback.print_exc(file=open(errorsFile, "a", encoding="utf-8"))
+                    raise Exception("PeepException", "Open an Issue on GitHub") from exc
+            elif (numArgs > 4 and not fileName) or (
+                numArgs == 0 and not args.isInteractive
+            ):
                 sys.exit(argsParser.print_help())
             if args.jsonOutput and args.xmlOutput:
                 sys.exit("[*] Only one of XML or JSON should be selected")
@@ -295,10 +266,10 @@ def main():
                     ret = vtcheck(md5Hash, vtKey)
                     if ret[0] == -1:
                         pdf.addError(ret[1])
+                        if "not found" in ret[1]:
+                            sys.exit(f"[!] Error: {ret[1]} on VirusTotal.")
                     else:
                         vtJsonDict = ret[1]
-                        if "error" in vtJsonDict:
-                            sys.exit(f'[!] Error: {vtJsonDict["error"]["message"]} on VirusTotal.')
                         maliciousCount = vtJsonDict["data"]["attributes"][
                             "last_analysis_stats"
                         ]["malicious"]
@@ -313,9 +284,13 @@ def main():
                                 "last_analysis_stats"
                             ][result]
                         pdf.setDetectionRate([maliciousCount, totalCount])
-                        pdf.setDetectionReport(f'https://www.virustotal.com/gui/file/{vtJsonDict["data"]["attributes"]["sha256"]}')
+                        pdf.setDetectionReport(
+                            f'https://www.virustotal.com/gui/file/{vtJsonDict["data"]["attributes"]["sha256"]}'
+                        )
                 elif args.checkOnVT and "vt_key" in args.vtApiKey:
-                    sys.exit(f"[*] Warning: Your API key is not properly set - {VT_KEY}")
+                    sys.exit(
+                        f"[*] Warning: Your API key is not properly set - {VT_KEY}"
+                    )
                 statsDict = pdf.getStats()
 
             if args.xmlOutput:
@@ -323,20 +298,20 @@ def main():
                     xml = getPeepXML(statsDict, VERSION)
                     xml = xml.decode("latin-1")
                     sys.stdout.write(xml)
-                except:
+                except Exception as exc:
                     errorMessage = "[!] Error: Exception while generating the XML file"
-                    traceback.print_exc(file=open(errorsFile, "a"))
-                    raise Exception("PeepException", "Open an Issue on GitHub")
+                    traceback.print_exc(file=open(errorsFile, "a", encoding="utf-8"))
+                    raise Exception("PeepException", "Open an Issue on GitHub") from exc
             elif args.jsonOutput and not args.commands:
                 try:
                     jsonReport = getPeepJSON(statsDict, VERSION)
                     sys.stdout.write(jsonReport)
-                except:
+                except Exception as exc:
                     errorMessage = (
                         "[!] Error: Exception while generating the JSON report"
                     )
-                    traceback.print_exc(file=open(errorsFile, "a"))
-                    raise Exception("PeepException", "Open an Issue on GitHub")
+                    traceback.print_exc(file=open(errorsFile, "a", encoding="utf-8"))
+                    raise Exception("PeepException", "Open an Issue on GitHub") from exc
             else:
                 if COLORIZED_OUTPUT and not args.avoidColors:
                     try:
@@ -344,41 +319,43 @@ def main():
                     except:
                         COLORIZED_OUTPUT = False
                 if args.scriptFile is not None:
-                    try:
-                        from peepdf.PDFConsole import PDFConsole
-                    except ModuleNotFoundError:
-                        from PDFConsole import PDFConsole
                     if os.path.exists(args.scriptFile):
                         scriptFileObject = open(args.scriptFile, "rb")
                     else:
-                        sys.exit(f"[*] Warning: The file {args.scriptFile} cannot be found - check your path and try again!")
+                        sys.exit(
+                            f"[*] Warning: The file {args.scriptFile} cannot be found - check your path and try again!"
+                        )
                     console = PDFConsole(
                         pdf, VT_KEY, args.avoidColors, stdin=scriptFileObject
                     )
                     try:
                         console.cmdloop()
-                    except:
+                    except Exception as exc:
                         errorMessage = (
                             "[!] Error: Exception not handled using the script mode"
                         )
                         scriptFileObject.close()
-                        traceback.print_exc(file=open(errorsFile, "a"))
-                        raise Exception("PeepException", "Open an Issue on GitHub")
+                        traceback.print_exc(
+                            file=open(errorsFile, "a", encoding="utf-8")
+                        )
+                        raise Exception(
+                            "PeepException", "Open an Issue on GitHub"
+                        ) from exc
                 elif args.commands is not None:
-                    try:
-                        from peepdf.PDFConsole import PDFConsole
-                    except ModuleNotFoundError:
-                        from PDFConsole import PDFConsole
                     console = PDFConsole(pdf, VT_KEY, args.avoidColors)
                     try:
                         for command in args.commands:
                             console.onecmd(command)
-                    except:
+                    except Exception as exc:
                         errorMessage = (
                             "[!] Error: Exception not handled using the script commands"
                         )
-                        traceback.print_exc(file=open(errorsFile, "a"))
-                        raise Exception("PeepException", "Open an Issue on GitHub")
+                        traceback.print_exc(
+                            file=open(errorsFile, "a", encoding="utf-8")
+                        )
+                        raise Exception(
+                            "PeepException", "Open an Issue on GitHub"
+                        ) from exc
                 else:
                     if statsDict is not None:
                         if COLORIZED_OUTPUT and not args.avoidColors:
@@ -546,14 +523,14 @@ def main():
                                 totalSuspicious = 0
                                 for eachDict in (actions, events, vulns, elements):
                                     if eachDict is not None:
-                                        for idx, (k, v) in enumerate(eachDict.items()):
+                                        for _, (_, v) in enumerate(eachDict.items()):
                                             totalSuspicious += len(v)
                                 stats += f"{newLine}{beforeStaticLabel}\tSuspicious elements ({totalSuspicious}):{resetColor}{newLine}"
                                 if events is not None:
                                     for event in events:
                                         stats += (
                                             f"\t\t{beforeStaticLabel}{event} ({len(events[event])}): "
-                                            f"{resetColor}{str(events[event])}{newLine}"
+                                            f"{resetColor}{str(sorted(events[event]))}{newLine}"
                                         )
                                 if actions is not None:
                                     for action in actions:
@@ -611,30 +588,28 @@ def main():
                         niceOutput += newLine * 2
                         sys.stdout.write(niceOutput)
                     if args.isInteractive:
-                        try:
-                            from peepdf.PDFConsole import PDFConsole
-                        except ModuleNotFoundError:
-                            from PDFConsole import PDFConsole
                         console = PDFConsole(pdf, VT_KEY, args.avoidColors)
                         while not console.leaving:
                             try:
                                 console.cmdloop()
-                            except KeyboardInterrupt as e:
+                            except KeyboardInterrupt:
                                 sys.exit()
                             except:
                                 errorMessage = "[!] Error: Exception not handled using the interactive console - please report it to the author."
                                 print(
                                     f"{errorColor}{errorMessage}{resetColor}{newLine}"
                                 )
-                                traceback.print_exc(file=open(errorsFile, "a"))
+                                traceback.print_exc(
+                                    file=open(errorsFile, "a", encoding="utf-8")
+                                )
     except Exception as e:
         if len(e.args) == 2:
-            excName, excReason = e.args
+            excName, _ = e.args
         else:
-            excName = excReason = None
+            excName = _ = None
         if excName is None or excName != "PeepException":
             errorMessage = "[!] Error: Exception not handled"
-            traceback.print_exc(file=open(errorsFile, "a"))
+            traceback.print_exc(file=open(errorsFile, "a", encoding="utf-8"))
         print(f"{errorColor}{errorMessage}{resetColor}{newLine}")
     finally:
         if os.path.exists(errorsFile):
