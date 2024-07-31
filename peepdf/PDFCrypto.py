@@ -23,7 +23,12 @@
     Module to manage cryptographic operations with PDF files
 """
 
-import hashlib, struct, random, warnings, sys
+import hashlib
+import struct
+import random
+import warnings
+import sys
+from itertools import cycle
 from aespython import key_expander, aes_cipher, cbc_mode
 
 warnings.filterwarnings("ignore")
@@ -32,16 +37,16 @@ paddingString = b"\x28\xBF\x4E\x5E\x4E\x75\x8A\x41\x64\x00\x4E\x56\xFF\xFA\x01\x
 
 
 def computeEncryptionKey(
-    password,
-    dictOwnerPass,
-    dictUserPass,
-    dictOE,
-    dictUE,
-    fileID,
-    pElement,
-    dictKeyLength=128,
-    revision=3,
-    encryptMetadata=False,
+    password: bytes,
+    dictOwnerPass: bytes,
+    dictUserPass: str,
+    dictOE: str,
+    dictUE: str,
+    fileID: bytes,
+    pElement: int,
+    dictKeyLength: int = 128,
+    revision: int = 3,
+    encryptMetadata: bool = False,
     passwordType=None,
 ):
     """
@@ -61,8 +66,9 @@ def computeEncryptionKey(
     @return: A tuple (status,statusContent), where statusContent is the encryption key in case status = 0 or an error message in case status = -1
     """
     try:
+        ret = None
         if revision != 5:
-            keyLength = dictKeyLength / 8
+            keyLength = int(dictKeyLength / 8)
             lenPass = len(password)
             if lenPass > 32:
                 password = password[:32]
@@ -83,20 +89,17 @@ def computeEncryptionKey(
             elif revision == 2:
                 key = key[:5]
             return (0, key)
-        else:
-            if passwordType == "USER":
-                password = password[:127]
-                kSalt = dictUserPass[40:48]
-                intermediateKey = hashlib.sha256(password + kSalt).digest()
-                ret = decryptData(b"\0" * 16 + dictUE, intermediateKey)
-            elif passwordType == "OWNER":
-                password = password[:127]
-                kSalt = dictOwnerPass[40:48]
-                intermediateKey = hashlib.sha256(
-                    password + kSalt + dictUserPass
-                ).digest()
-                ret = decryptData(b"\0" * 16 + dictOE, intermediateKey)
-            return ret
+        if passwordType == "USER":
+            password = password[:127]
+            kSalt = dictUserPass[40:48]
+            intermediateKey = hashlib.sha256(password + kSalt).digest()
+            ret = decryptData(b"\0" * 16 + dictUE, intermediateKey)
+        elif passwordType == "OWNER":
+            password = password[:127]
+            kSalt = dictOwnerPass[40:48]
+            intermediateKey = hashlib.sha256(password + kSalt + dictUserPass).digest()
+            ret = decryptData(b"\0" * 16 + dictOE, intermediateKey)
+        return ret
     except:
         return (
             -1,
@@ -104,11 +107,17 @@ def computeEncryptionKey(
         )
 
 
-def computeObjectKey(id, generationNum, encryptionKey, keyLengthBytes, algorithm="RC4"):
+def computeObjectKey(
+    thisId: int,
+    generationNum: int,
+    encryptionKey: bytes,
+    keyLengthBytes: int,
+    algorithm: str = "RC4",
+):
     """
     Compute the key necessary to encrypt each object, depending on the id and generation number. Only necessary with /V < 5.
 
-    @param id: The object id
+    @param thisId: The object id
     @param generationNum: The generation number of the object
     @param encryptionKey: The encryption key
     @param keyLengthBytes: The length of the encryption key in bytes
@@ -118,7 +127,7 @@ def computeObjectKey(id, generationNum, encryptionKey, keyLengthBytes, algorithm
     try:
         key = (
             encryptionKey
-            + struct.pack("<i", id)[:3]
+            + struct.pack("<i", thisId)[:3]
             + struct.pack("<i", generationNum)[:2]
         )
         if algorithm == "AES":
@@ -137,7 +146,9 @@ def computeObjectKey(id, generationNum, encryptionKey, keyLengthBytes, algorithm
         )
 
 
-def computeOwnerPass(ownerPassString, userPassString, keyLength=128, revision=3):
+def computeOwnerPass(
+    ownerPassString: str, userPassString: str, keyLength: int = 128, revision: int = 3
+):
     """
     Compute the owner password necessary to compute the encryption key of the PDF file
 
@@ -172,8 +183,8 @@ def computeOwnerPass(ownerPassString, userPassString, keyLength=128, revision=3)
             counter = 1
             while counter <= 19:
                 newKey = ""
-                for i in range(len(rc4Key)):
-                    newKey += chr(ord(rc4Key[i]) ^ counter)
+                for _, eachChar in enumerate(rc4Key):
+                    newKey += chr(eachChar ^ counter)
                 ownerPass = RC4(ownerPass, newKey)
                 counter += 1
         return (0, ownerPass)
@@ -185,19 +196,18 @@ def computeOwnerPass(ownerPassString, userPassString, keyLength=128, revision=3)
 
 
 def computeUserPass(
-    userPassString,
+    userPassString: str,
     dictO,
     fileID,
     pElement,
-    keyLength=128,
-    revision=3,
-    encryptMetadata=False,
+    keyLength: int = 128,
+    revision: int = 3,
+    encryptMetadata: bool = False,
 ):
     """
     Compute the user password of the PDF file
 
     @param userPassString: The user password entered by the user
-    @param ownerPass: The computed owner password
     @param fileID: The /ID element in the trailer dictionary of the PDF file
     @param pElement: The /P element of the /Encryption dictionary
     @param keyLength: The length of the key
@@ -236,13 +246,16 @@ def computeUserPass(
             userPass = RC4(hashResult, rc4Key)
             while counter <= 19:
                 newKey = ""
-                for i in range(len(rc4Key)):
-                    newKey += chr(ord(rc4Key[i]) ^ counter)
+                for _, eachChar in enumerate(rc4Key):
+                    newKey += chr(eachChar ^ counter)
                 userPass = RC4(userPass, newKey)
                 counter += 1
             counter = 0
             while counter < 16:
-                userPass += chr(random.randint(32, 255))
+                if isinstance(userPass, bytes):
+                    userPass += chr(random.randint(32, 255)).encode()
+                else:
+                    userPass += chr(random.randint(32, 255))
                 counter += 1
         else:
             # This should not be possible or the PDF specification does not say anything about it
@@ -269,20 +282,11 @@ def isUserPass(password, computedUserPass, dictU, revision):
     if revision == 5:
         vSalt = dictU[32:40]
         inputHash = hashlib.sha256(password + vSalt).digest()
-        if inputHash == dictU[:32]:
-            return True
-        else:
-            return False
-    elif revision == 3 or revision == 4:
-        if computedUserPass[:16] == dictU[:16]:
-            return True
-        else:
-            return False
-    elif revision < 3:
-        if computedUserPass == dictU:
-            return True
-        else:
-            return False
+        return bool(inputHash == dictU[:32])
+    if revision in {3, 4}:
+        return bool(computedUserPass[:16] == dictU[:16])
+    if revision < 3:
+        return bool(computedUserPass == dictU)
 
 
 def isOwnerPass(password, dictO, dictU, computedUserPass, keyLength, revision):
@@ -300,39 +304,35 @@ def isOwnerPass(password, dictO, dictU, computedUserPass, keyLength, revision):
     if revision == 5:
         vSalt = dictO[32:40]
         inputHash = hashlib.sha256(password + vSalt + dictU).digest()
-        if inputHash == dictO[:32]:
-            return True
-        else:
-            return False
+        return bool(inputHash == dictO[:32])
+    keyLength = int(keyLength / 8)
+    lenPass = len(password)
+    if lenPass > 32:
+        password = password[:32]
+    elif lenPass < 32:
+        password += paddingString[: 32 - lenPass]
+    rc4Key = hashlib.md5(password).digest()
+    if revision > 2:
+        counter = 0
+        while counter < 50:
+            rc4Key = hashlib.md5(rc4Key).digest()
+            counter += 1
+    rc4Key = rc4Key[:keyLength]
+    if revision == 2:
+        userPass = RC4(dictO, rc4Key)
+    elif revision > 2:
+        counter = 19
+        while counter >= 0:
+            newKey = ""
+            for _, eachChar in enumerate(rc4Key):
+                newKey += chr(eachChar ^ counter)
+            dictO = RC4(dictO, newKey)
+            counter -= 1
+        userPass = dictO
     else:
-        keyLength = int(keyLength / 8)
-        lenPass = len(password)
-        if lenPass > 32:
-            password = password[:32]
-        elif lenPass < 32:
-            password += paddingString[: 32 - lenPass]
-        rc4Key = hashlib.md5(password).digest()
-        if revision > 2:
-            counter = 0
-            while counter < 50:
-                rc4Key = hashlib.md5(rc4Key).digest()
-                counter += 1
-        rc4Key = rc4Key[:keyLength]
-        if revision == 2:
-            userPass = RC4(dictO, rc4Key)
-        elif revision > 2:
-            counter = 19
-            while counter >= 0:
-                newKey = ""
-                for i in range(len(rc4Key)):
-                    newKey += chr(ord(rc4Key[i]) ^ counter)
-                dictO = RC4(dictO, newKey)
-                counter -= 1
-            userPass = dictO
-        else:
-            # Is it possible??
-            userPass = ""
-        return isUserPass(userPass, computedUserPass, dictU, revision)
+        # Is it possible??
+        userPass = ""
+    return isUserPass(userPass, computedUserPass, dictU, revision)
 
 
 def RC4(data, key):
@@ -344,18 +344,20 @@ def RC4(data, key):
     @return: The encrypted/decrypted bytes
     """
     y = 0
-    hash = {}
+    hashValue = {}
     box = {}
     ret = ""
     keyLength = len(key)
     dataLength = len(data)
 
     # Initialization
+    if not isinstance(key, bytes):
+        key = key.encode()
     for x in range(256):
-        hash[x] = key[x % keyLength]
+        hashValue[x] = key[x % keyLength]
         box[x] = x
     for x in range(256):
-        y = (y + int(box[x]) + int(hash[x])) % 256
+        y = (y + int(box[x]) + int(hashValue[x])) % 256
         tmp = box[x]
         box[x] = box[y]
         box[y] = tmp
@@ -370,38 +372,41 @@ def RC4(data, key):
         k = box[((box[z] + box[y]) % 256)]
         ret += chr(data[x] ^ k)
     if isinstance(ret, str):
-        ret = ret.encode('latin-1')
+        ret = ret.encode("latin-1")
     return ret
 
-def xor(bytes, key):
+
+def xor(byteVal, key):
     """
     Simple XOR implementation
     Author: Evan Fosmark (http://www.evanfosmark.com/2008/06/xor-encryption-with-python/)
-    @param bytes: Bytes to be xored
+    @param byteVal: Bytes to be xored
     @param key: Key used for the operation, it's cycled.
     @return: The xored bytes
     """
     key = cycle(key)
-    return "".join(chr(ord(x) ^ ord(y)) for (x, y) in zip(bytes, key))
+    return "".join(chr(ord(x) ^ ord(y)) for (x, y) in zip(byteVal, key))
+
 
 def decryptData(data, password=None, keyLength=None, mode="CBC"):
     """
     Created from the demonstration of the pythonaes package.
-    
+
     Copyright (c) 2010, Adam Newman http://www.caller9.com/
     Licensed under the MIT license http://www.opensource.org/licenses/mit-license.php
     """
     decryptedData = ""
-    if keyLength == None:
+    aesMode = None
+    if keyLength is None:
         keyLength = len(password) * 8
-    if keyLength not in [128, 192, 256]:
+    if keyLength not in {128, 192, 256}:
         return (-1, "Bad length key in AES decryption process")
     try:
-        iv = list(map(ord, data[:16]))
+        iv = [ord(x) for x in data[:16]]
     except:
         iv = list(data[:16])
     try:
-        key = list(map(ord, password))
+        key = [ord(x) for x in password]
     except:
         key = list(password)
     data = data[16:]
@@ -415,7 +420,7 @@ def decryptData(data, password=None, keyLength=None, mode="CBC"):
     aesMode.set_iv(iv)
     for i in range(0, len(data), 16):
         try:
-            ciphertext = list(map(ord, data[i : i + 16]))
+            ciphertext = [ord(x) for x in data[i : i + 16]]
         except:
             ciphertext = list(data[i : i + 16])
         decryptedBytes = aesMode.decrypt_block(ciphertext)

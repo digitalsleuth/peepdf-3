@@ -23,11 +23,12 @@
     This module contains some functions to analyse Javascript code inside the PDF file
 """
 
-import jsbeautifier
 import os
 import re
 import sys
 import traceback
+from datetime import datetime as dt
+import jsbeautifier
 
 try:
     from peepdf.PDFUtils import unescapeHTMLEntities, escapeString
@@ -38,35 +39,40 @@ try:
     import STPyV8
 
     class Global(STPyV8.JSClass):
+        """Identifies the STPyV8 JSClass and sets the evalOverride function"""
+
         evalCode = ""
 
         def evalOverride(self, expression):
+            """Sets how the JS code will be evaluated"""
             self.evalCode += f"\n\n// New evaluated code\n{expression}"
-            return
 
     JS_MODULE = True
 
-except:
+except ModuleNotFoundError:
     JS_MODULE = False
 
-
-errorsFile = "errors.txt"
+DTFMT = "%Y%m%d-%H%M%S"
+ERROR_LOG = f"peepdf_jserrors-{dt.now().strftime(DTFMT)}.txt"
+currentDir = os.getcwd()
+errorsFile = os.path.join(currentDir, ERROR_LOG)
 newLine = os.linesep
 reJSscript = "<script[^>]*?contentType\s*?=\s*?['\"]application/x-javascript['\"][^>]*?>(.*?)</script>"
 preDefinedCode = "var app = this;"
 
 
-def analyseJS(code, context=None, manualAnalysis=False):
+def analyseJS(code: str, context=None, manualAnalysis: bool = False):
     """
     Hooks the eval function and search for obfuscated elements in the Javascript code
 
     @param code: The Javascript code (string)
+    @param context: Context of execution for the JS code
+    @param manualAnalysis: Indication if manual analysis is desired (bool)
     @return: List with analysis information of the Javascript code: [JSCode,unescapedBytes,urlsFound,errors,context], where
             JSCode is a list with the several stages Javascript code,
             unescapedBytes is a list with the parameters of unescape functions,
             urlsFound is a list with the URLs found in the unescaped bytes,
             errors is a list of errors,
-            context is the context of execution of the Javascript code.
     """
     errors = []
     jsCode = []
@@ -95,14 +101,15 @@ def analyseJS(code, context=None, manualAnalysis=False):
                     context.eval(code)
                     evalCode = context.eval("evalCode")
                     evalCode = jsbeautifier.beautify(evalCode)
-                    if evalCode != "" and evalCode != code:
+                    if evalCode not in ("", code):
                         code = evalCode
                         jsCode.append(code)
                     else:
                         break
                 except:
                     error = str(sys.exc_info()[1])
-                    open("jserror.log", "a").write(f"{error}{newLine}")
+                    with open(errorsFile, "a", encoding="latin-1") as log_file:
+                        log_file.write(f"{error}{newLine}")
                     errors.append(error)
                     break
 
@@ -111,34 +118,35 @@ def analyseJS(code, context=None, manualAnalysis=False):
                     "(\w*?)\s*?=\s*?(unescape\((.*?)\))", code, re.DOTALL
                 )
                 for var in escapedVars:
-                    bytes = var[2]
-                    if bytes.find("+") != -1 or bytes.find("%") == -1:
-                        varContent = getVarContent(code, bytes)
+                    bytesVal = var[2]
+                    if bytesVal.find("+") != -1 or bytesVal.find("%") == -1:
+                        varContent = getVarContent(code, bytesVal)
                         if len(varContent) > 150:
                             ret = unescape(varContent)
                             if ret[0] != -1:
-                                bytes = ret[1]
-                                urls = re.findall("https?://.*$", bytes, re.DOTALL)
-                                if bytes not in unescapedBytes:
-                                    unescapedBytes.append(bytes)
+                                bytesVal = ret[1]
+                                urls = re.findall("https?://.*$", bytesVal, re.DOTALL)
+                                if bytesVal not in unescapedBytes:
+                                    unescapedBytes.append(bytesVal)
                                 for url in urls:
                                     if url not in urlsFound:
                                         urlsFound.append(url)
                     else:
-                        bytes = bytes[1:-1]
-                        if len(bytes) > 150:
-                            ret = unescape(bytes)
+                        bytesVal = bytesVal[1:-1]
+                        if len(bytesVal) > 150:
+                            ret = unescape(bytesVal)
                             if ret[0] != -1:
-                                bytes = ret[1]
-                                urls = re.findall("https?://.*$", bytes, re.DOTALL)
-                                if bytes not in unescapedBytes:
-                                    unescapedBytes.append(bytes)
+                                bytesVal = ret[1]
+                                urls = re.findall("https?://.*$", bytesVal, re.DOTALL)
+                                if bytesVal not in unescapedBytes:
+                                    unescapedBytes.append(bytesVal)
                                 for url in urls:
                                     if url not in urlsFound:
                                         urlsFound.append(url)
     except:
-        traceback.print_exc(file=open(errorsFile, "a"))
-        errors.append("Unexpected error in the JSAnalysis module!!")
+        with open(errorsFile, "a", encoding="latin-1") as log_file:
+            traceback.print_exc(file=log_file)
+        errors.append("Unexpected error in the JSAnalysis module!")
     finally:
         for js in jsCode:
             if js is None or js == "":
@@ -146,7 +154,7 @@ def analyseJS(code, context=None, manualAnalysis=False):
     return [jsCode, unescapedBytes, urlsFound, errors, context]
 
 
-def getVarContent(jsCode, varContent):
+def getVarContent(jsCode: str, varContent: str):
     """
     Given the Javascript code and the content of a variable this method tries to obtain the real value of the variable, cleaning expressions like "a = eval; a(js_code);"
 
@@ -171,9 +179,9 @@ def getVarContent(jsCode, varContent):
     return clearBytes
 
 
-def isJavascript(content):
+def isJavascript(content: str):
     """
-    Given an string this method looks for typical Javscript strings and try to identify if the string contains Javascrit code or not.
+    Given a string this method looks for typical Javscript strings and try to identify if the string contains Javascript code or not.
 
     @param content: A string
     @return: A boolean, True if it seems to contain Javascript code or False in the other case
@@ -189,14 +197,17 @@ def isJavascript(content):
         "}",
         "if(",
         "if (",
+        "if ",
         "else {",
         "else{",
         "else if",
         "return",
         "while(",
         "while (",
+        "while ",
         "for(",
         "for (",
+        "for ",
         ",",
         "eval",
     ]
@@ -213,10 +224,16 @@ def isJavascript(content):
         return True
 
     contentAlphaNumeric = any(
-        any(char.isalnum() and char.isascii() for char in item) for item in content
+        any(char.isalnum() or char.isascii() for char in item) for item in content
     )
+
     if not contentAlphaNumeric:
         return False
+    for char in content:
+        if (ord(char) < 32 and char not in ["\n", "\r", "\t", "\f", "\x00"]) or ord(
+            char
+        ) >= 127:
+            return False
     for string in jsStrings:
         cont = content.count(string)
         results += cont
@@ -232,15 +249,12 @@ def isJavascript(content):
         return False
     numDistinctStringsFound = len(stringsFound)
     ratio = (results * 100.0) / length
-    if (results > limit and numDistinctStringsFound >= minDistinctStringsFound) or (
-        length < smallScriptLength and ratio > minRatio
-    ):
-        return True
-    else:
-        return False
+    return bool(
+        results > limit and numDistinctStringsFound >= minDistinctStringsFound
+    ) or (length < smallScriptLength and ratio > minRatio)
 
 
-def searchObfuscatedFunctions(jsCode, function):
+def searchObfuscatedFunctions(jsCode: str, function: str):
     """
     Search for obfuscated functions in the Javascript code
 
@@ -270,11 +284,12 @@ def searchObfuscatedFunctions(jsCode, function):
     return obfuscatedFunctionsInfo
 
 
-def unescape(escapedBytes, unicode=True):
+def unescape(escapedBytes: str, unicode: bool = True):
     """
     This method unescapes the given string
 
     @param escapedBytes: A string to unescape
+    @param unicode: Bool, if the provided value should be interpreted as unicode
     @return: A tuple (status,statusContent), where statusContent is an unescaped string in case status = 0 or an error in case status = -1
     """
     # TODO: modify to accept a list of escaped strings?
@@ -293,8 +308,8 @@ def unescape(escapedBytes, unicode=True):
                 splitBytes = escapedBytes.split("\\")
             else:
                 splitBytes = escapedBytes.split("%")
-            for i in range(len(splitBytes)):
-                splitByte = splitBytes[i]
+            for k, v in enumerate(splitBytes):
+                splitByte = v
                 if splitByte == "":
                     continue
                 if len(splitByte) > 4 and re.match(
@@ -316,10 +331,10 @@ def unescape(escapedBytes, unicode=True):
                         for j in range(2, len(splitByte)):
                             unescapedBytes += splitByte[j] + unicodePadding
                 else:
-                    if i != 0:
+                    if k != 0:
                         unescapedBytes += "%" + unicodePadding
-                    for j in range(len(splitByte)):
-                        unescapedBytes += splitByte[j] + unicodePadding
+                    for _, v in enumerate(splitByte):
+                        unescapedBytes += v + unicodePadding
         else:
             unescapedBytes = escapedBytes
     except:

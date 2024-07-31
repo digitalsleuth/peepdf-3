@@ -23,14 +23,22 @@
     Module with some misc functions
 """
 
-import os, re, html.entities, json, requests
-from lxml import etree
+import os
+import sys
+import re
+import html.entities
+import json
+from pathlib import Path
 from datetime import datetime as dt
+import requests
+from lxml import etree
+
 
 try:
-    from peepdf.PDFVulns import *
+    from peepdf.PDFVulns import vulnsDict, vulnsVersion
 except ModuleNotFoundError:
-    from PDFVulns import *
+    from PDFVulns import vulnsDict, vulnsVersion
+
 
 def clearScreen():
     """
@@ -44,12 +52,12 @@ def clearScreen():
         os.system("clear")
 
 
-def countArrayElements(array):
+def countArrayElements(array: list):
     """
     Simple method to count the repetitions of elements in an array
 
-            @param array: An array of elements
-            @return: A tuple (elements,counters), where elements is a list with the distinct elements and counters is the list with the number of times they appear in the array
+    @param array: An array of elements
+    @return: A tuple (elements,counters), where elements is a list with the distinct elements and counters is the list with the number of times they appear in the array
     """
     elements = []
     counters = []
@@ -63,26 +71,26 @@ def countArrayElements(array):
     return elements, counters
 
 
-def countNonPrintableChars(string):
+def countNonPrintableChars(string: str):
     """
     Simple method to return the non printable characters found in an string
 
-            @param string: A string
-            @return: Number of non printable characters in the string
+    @param string: A string
+    @return: Number of non printable characters in the string
     """
     counter = 0
-    for i in range(len(string)):
-        if ord(string[i]) <= 31 or ord(string[i]) >= 127:
+    for _, thisString in enumerate(string):
+        if ord(thisString) <= 31 or ord(thisString) >= 127:
             counter += 1
     return counter
 
 
-def decodeName(name):
+def decodeName(name: str):
     """
     Decode the given PDF name
 
-            @param name: A PDFName string to decode
-            @return: A tuple (status,statusContent), where statusContent is the decoded PDF name in case status = 0 or an error in case status = -1
+    @param name: A PDFName string to decode
+    @return: A tuple (status,statusContent), where statusContent is the decoded PDF name in case status = 0 or an error in case status = -1
     """
     decodedName = name
     hexNumbers = re.findall("#([0-9a-f]{2})", name, re.DOTALL | re.IGNORECASE)
@@ -94,12 +102,12 @@ def decodeName(name):
     return (0, decodedName)
 
 
-def decodeString(string):
+def decodeString(string: str):
     """
     Decode the given PDF string
 
-            @param string: A PDFString to decode
-            @return A tuple (status,statusContent), where statusContent is the decoded PDF string in case status = 0 or an error in case status = -1
+    @param string: A PDFString to decode
+    @return A tuple (status,statusContent), where statusContent is the decoded PDF string in case status = 0 or an error in case status = -1
     """
     decodedString = string
     octalNumbers = re.findall("\\\\([0-7]{1-3})", decodedString, re.DOTALL)
@@ -111,12 +119,12 @@ def decodeString(string):
     return (0, decodedString)
 
 
-def encodeName(name):
+def encodeName(name: str):
     """
     Encode the given PDF name
 
-            @param name: A PDFName string to encode
-            @return: A tuple (status,statusContent), where statusContent is the encoded PDF name in case status = 0 or an error in case status = -1
+    @param name: A PDFName string to encode
+    @return: A tuple (status,statusContent), where statusContent is the encoded PDF name in case status = 0 or an error in case status = -1
     """
     encodedName = ""
     if name[0] == "/":
@@ -126,31 +134,31 @@ def encodeName(name):
             encodedName += char
         else:
             try:
-                hex = "%x" % ord(char)
-                encodedName += "#" + hex
+                hexVal = f"{ord(char):x}"
+                encodedName += f"#{hexVal}"
             except:
                 return (-1, "Error encoding name")
     return (0, "/" + encodedName)
 
 
-def encodeString(string):
+def encodeString(string: str):
     """
     Encode the given PDF string
 
-            @param string: A PDFString to encode
-            @return: A tuple (status,statusContent), where statusContent is the encoded PDF string in case status = 0 or an error in case status = -1
+    @param string: A PDFString to encode
+    @return: A tuple (status,statusContent), where statusContent is the encoded PDF string in case status = 0 or an error in case status = -1
     """
     encodedString = ""
     try:
         for char in string:
-            octal = "%o" % ord(char)
+            octal = f"{ord(char):o}"
             encodedString += "\\" + (3 - len(octal)) * "0" + octal
     except:
         return (-1, "Error encoding string")
     return (0, encodedString)
 
 
-def escapeRegExpString(string):
+def escapeRegExpString(string: str):
     """
     Escape the given string to include it as a regular expression
 
@@ -159,48 +167,48 @@ def escapeRegExpString(string):
     """
     toEscapeChars = ["\\", "(", ")", ".", "|", "^", "$", "*", "+", "?", "[", "]"]
     escapedValue = ""
-    for i in range(len(string)):
-        if string[i] in toEscapeChars:
-            escapedValue += f"\\{string[i]}"
+    for _, thisString in enumerate(string):
+        if thisString in toEscapeChars:
+            escapedValue += f"\\{thisString}"
         else:
-            escapedValue += string[i]
+            escapedValue += thisString
     return escapedValue
 
 
-def escapeString(string):
+def escapeString(string: str):
     """
     Escape the given string
 
-            @param string: A string to be escaped
-            @return: Escaped string
+    @param string: A string to be escaped
+    @return: Escaped string
     """
     toEscapeChars = ["\\", "(", ")"]
     escapedValue = ""
-    for i in range(len(string)):
-        if string[i] in toEscapeChars and (i == 0 or string[i - 1] != "\\"):
-            if string[i] == "\\":
+    for i, thisString in enumerate(string):
+        if thisString in toEscapeChars and (i == 0 or string[i - 1] != "\\"):
+            if thisString == "\\":
                 if len(string) > i + 1 and re.match("[0-7]", string[i + 1]):
-                    escapedValue += string[i]
+                    escapedValue += thisString
                 else:
-                    escapedValue += "\\" + string[i]
+                    escapedValue += "\\" + thisString
             else:
-                escapedValue += "\\" + string[i]
-        elif string[i] == "\r":
+                escapedValue += "\\" + thisString
+        elif thisString == "\r":
             escapedValue += "\\r"
-        elif string[i] == "\n":
+        elif thisString == "\n":
             escapedValue += "\\n"
-        elif string[i] == "\t":
+        elif thisString == "\t":
             escapedValue += "\\t"
-        elif string[i] == "\b":
+        elif thisString == "\b":
             escapedValue += "\\b"
-        elif string[i] == "\f":
+        elif thisString == "\f":
             escapedValue += "\\f"
         else:
-            escapedValue += string[i]
+            escapedValue += thisString
     return escapedValue
 
 
-def getBitsFromNum(num, bitsPerComponent=8):
+def getBitsFromNum(num: int, bitsPerComponent: int = 8):
     """
     Makes the conversion between number and bits
 
@@ -224,21 +232,21 @@ def getBitsFromNum(num, bitsPerComponent=8):
     return (0, bitsRepresentation)
 
 
-def getNumsFromBytes(bytes, bitsPerComponent=8):
+def getNumsFromBytes(byteStr: str, bitsPerComponent: int = 8):
     """
     Makes the conversion between bytes and numbers, depending on the number of bits used per component.
 
-    @param bytes: String representing the bytes to be converted
+    @param byteStr: String representing the bytes to be converted
     @param bitsPerComponent: Number of bits needed to represent a component
     @return: A tuple (status,statusContent), where statusContent is a list of numbers in case status = 0 or an error in case status = -1
     """
-    if not isinstance(bytes, str):
+    if not isinstance(byteStr, str):
         return (-1, "bytes must be a string")
     if not isinstance(bitsPerComponent, int):
         return (-1, "bitsPerComponent must be an integer")
     outputComponents = []
     bitsStream = ""
-    for byte in bytes:
+    for byte in byteStr:
         try:
             bitsRepresentation = bin(ord(byte))
             bitsRepresentation = bitsRepresentation.replace("0b", "")
@@ -251,7 +259,7 @@ def getNumsFromBytes(bytes, bitsPerComponent=8):
 
     try:
         for i in range(0, len(bitsStream), bitsPerComponent):
-            bytes = ""
+            byteStr = ""
             bits = bitsStream[i : i + bitsPerComponent]
             num = int(bits, 2)
             outputComponents.append(num)
@@ -260,7 +268,7 @@ def getNumsFromBytes(bytes, bitsPerComponent=8):
     return (0, outputComponents)
 
 
-def getBytesFromBits(bitsStream):
+def getBytesFromBits(bitsStream: str):
     """
     Makes the conversion between bits and bytes.
 
@@ -269,28 +277,27 @@ def getBytesFromBits(bitsStream):
     """
     if not isinstance(bitsStream, str):
         return (-1, "The bitsStream must be a string")
-    bytes = ""
+    byteStr = ""
     if re.match("[01]*$", bitsStream):
         try:
             for i in range(0, len(bitsStream), 8):
                 bits = bitsStream[i : i + 8]
                 byte = chr(int(bits, 2))
-                bytes += byte
+                byteStr += byte
         except:
             return (-1, "Error in conversion from bits to bytes")
-        return (0, bytes)
-    else:
-        return (-1, "The format of the bit stream is not correct")
+        return (0, byteStr)
+    return (-1, "The format of the bit stream is not correct")
 
 
-def getBytesFromFile(filename, offset, numBytes):
+def getBytesFromFile(filename: str, offset: int, numBytes: int):
     """
     Returns the number of bytes specified from a file, starting from the offset specified
 
-            @param filename: Name of the file
-            @param offset: Bytes offset
-            @param numBytes: Number of bytes to retrieve
-            @return: A tuple (status,statusContent), where statusContent is the bytes read in case status = 0 or an error in case status = -1
+    @param filename: Name of the file
+    @param offset: Bytes offset
+    @param numBytes: Number of bytes to retrieve
+    @return: A tuple (status,statusContent), where statusContent is the bytes read in case status = 0 or an error in case status = -1
     """
     if not isinstance(offset, int) or not isinstance(numBytes, int):
         return (-1, "The offset and the number of bytes must be integers")
@@ -304,11 +311,10 @@ def getBytesFromFile(filename, offset, numBytes):
             byteVal = bytesFile.read(numBytes)
         bytesFile.close()
         return (0, byteVal)
-    else:
-        return (-1, "File does not exist")
+    return (-1, "File does not exist")
 
 
-def hexToString(hexString):
+def hexToString(hexString: str):
     """
     Simple method to convert an hexadecimal string to ascii string
 
@@ -326,13 +332,13 @@ def hexToString(hexString):
     return (0, string)
 
 
-def numToHex(num, numBytes):
+def numToHex(num: int, numBytes: int):
     """
     Given a number returns its hexadecimal format with the specified length, adding '\0' if necessary
 
-            @param num: A number (int)
-            @param numBytes: Length of the output (int)
-            @return: A tuple (status,statusContent), where statusContent is a number in hexadecimal format in case status = 0 or an error in case status = -1
+    @param num: A number (int)
+    @param numBytes: Length of the output (int)
+    @return: A tuple (status,statusContent), where statusContent is a number in hexadecimal format in case status = 0 or an error in case status = -1
     """
     hexString = ""
     if not isinstance(num, int):
@@ -349,25 +355,25 @@ def numToHex(num, numBytes):
     return (0, hexString)
 
 
-def numToString(num, numDigits):
+def numToString(num: int, numDigits: int):
     """
     Given a number returns its string format with the specified length, adding '0' if necessary
 
-            @param num: A number (int)
-            @param numDigits: Length of the output string (int)
-            @return: A tuple (status,statusContent), where statusContent is a number in string format in case status = 0 or an error in case status = -1
+    @param num: A number (int)
+    @param numDigits: Length of the output string (int)
+    @return: A tuple (status,statusContent), where statusContent is a number in string format in case status = 0 or an error in case status = -1
     """
     if not isinstance(num, int):
         return (-1, "Bad number")
     strNum = str(num)
     if numDigits < len(strNum):
         return (-1, "Bad digit number")
-    for i in range(numDigits - len(strNum)):
+    for _ in range(numDigits - len(strNum)):
         strNum = "0" + strNum
     return (0, strNum)
 
 
-def unescapeHTMLEntities(text):
+def unescapeHTMLEntities(text: str):
     """
     Removes HTML or XML character references and entities from a text string.
 
@@ -385,8 +391,7 @@ def unescapeHTMLEntities(text):
             try:
                 if text[:3] == "&#x":
                     return chr(int(text[3:-1], 16))
-                else:
-                    return chr(int(text[2:-1]))
+                return chr(int(text[2:-1]))
             except ValueError:
                 pass
         else:
@@ -400,12 +405,12 @@ def unescapeHTMLEntities(text):
     return re.sub(r"&#?\w+;", fixup, text)
 
 
-def unescapeString(string):
+def unescapeString(string: str):
     """
     Unescape the given string
 
-            @param string: An escaped string
-            @return: Unescaped string
+    @param string: An escaped string
+    @return: Unescaped string
     """
     toUnescapeChars = ["\\", "(", ")"]
     unescapedValue = ""
@@ -441,7 +446,7 @@ def unescapeString(string):
     return unescapedValue
 
 
-def vtcheck(md5, vtKey):
+def vtcheck(md5: str, vtKey: str):
     """
     Function to check a hash on VirusTotal and get the report summary
 
@@ -452,13 +457,14 @@ def vtcheck(md5, vtKey):
     vtUrl = f"https://www.virustotal.com/api/v3/files/{md5}"
     headers = {"accept": "application/json", "x-apikey": vtKey}
     try:
-        response = requests.get(vtUrl, headers=headers)
+        response = requests.get(vtUrl, headers=headers, timeout=10)
         jsonResponse = response.json()
     except:
         return (-1, "The request to VirusTotal failed")
     if "error" in jsonResponse:
         return (-1, jsonResponse["error"]["message"])
     return (0, jsonResponse)
+
 
 def getPeepXML(statsDict, VERSION):
     root = etree.Element(
@@ -481,14 +487,18 @@ def getPeepXML(statsDict, VERSION):
     size = etree.SubElement(basicInfo, "size")
     size.text = statsDict["Size"]
     if "IDs" in statsDict and statsDict["IDs"] != "\r\n":
-        all_ids = "".join(filter(lambda ch: ch not in "\n\r\t", statsDict["IDs"])).replace("]V", "] V")
+        all_ids = "".join(
+            filter(lambda ch: ch not in "\n\r\t", statsDict["IDs"])
+        ).replace("]V", "] V")
         all_ids = all_ids.split("Version ")
         for each in all_ids:
-            if each == "":
-                all_ids.remove(each)
-        for each_id in range(len(all_ids)):
-            ids = etree.SubElement(basicInfo, f"id{each_id}")
-            ids.text = f"Version {all_ids[each_id]}"
+            all_ids[all_ids.index(each)] = each.rstrip()
+        for entry in all_ids:
+            if entry == "":
+                all_ids.remove(entry)
+        for i, each_id in enumerate(all_ids):
+            ids = etree.SubElement(basicInfo, f"id{i}")
+            ids.text = f"Version {each_id}"
     detection = etree.SubElement(basicInfo, "detection")
     if statsDict["Detection"]:
         detectionRate = etree.SubElement(detection, "rate")
@@ -542,38 +552,38 @@ def getPeepXML(statsDict, VERSION):
         objects = etree.SubElement(
             versionInfo, "objects", num=statsVersion["Objects"][0]
         )
-        for id in statsVersion["Objects"][1]:
-            object = etree.SubElement(objects, "object", id=str(id))
+        for thisId in statsVersion["Objects"][1]:
+            obj = etree.SubElement(objects, "object", thisId=str(thisId))
             if statsVersion["Compressed Objects"] is not None:
-                if id in statsVersion["Compressed Objects"][1]:
-                    object.set("compressed", "true")
+                if thisId in statsVersion["Compressed Objects"][1]:
+                    obj.set("compressed", "true")
                 else:
-                    object.set("compressed", "false")
+                    obj.set("compressed", "false")
             if statsVersion["Errors"] is not None:
-                if id in statsVersion["Errors"][1]:
-                    object.set("errors", "true")
+                if thisId in statsVersion["Errors"][1]:
+                    obj.set("errors", "true")
                 else:
-                    object.set("errors", "false")
+                    obj.set("errors", "false")
         streams = etree.SubElement(
             versionInfo, "streams", num=statsVersion["Streams"][0]
         )
-        for id in statsVersion["Streams"][1]:
-            stream = etree.SubElement(streams, "stream", id=str(id))
+        for thisId in statsVersion["Streams"][1]:
+            stream = etree.SubElement(streams, "stream", thisId=str(thisId))
             if statsVersion["Xref Streams"] is not None:
-                if id in statsVersion["Xref Streams"][1]:
+                if thisId in statsVersion["Xref Streams"][1]:
                     stream.set("xref_stream", "true")
                 else:
                     stream.set("xref_stream", "false")
             if statsVersion["Object Streams"] is not None:
-                if id in statsVersion["Object Streams"][1]:
+                if thisId in statsVersion["Object Streams"][1]:
                     stream.set("object_stream", "true")
                 else:
                     stream.set("object_stream", "false")
             if statsVersion["Encoded"] is not None:
-                if id in statsVersion["Encoded"][1]:
+                if thisId in statsVersion["Encoded"][1]:
                     stream.set("encoded", "true")
                     if statsVersion["Decoding Errors"] is not None:
-                        if id in statsVersion["Decoding Errors"][1]:
+                        if thisId in statsVersion["Decoding Errors"][1]:
                             stream.set("decoding_errors", "true")
                         else:
                             stream.set("decoding_errors", "false")
@@ -581,8 +591,8 @@ def getPeepXML(statsDict, VERSION):
                     stream.set("encoded", "false")
         jsObjects = etree.SubElement(versionInfo, "js_objects")
         if statsVersion["Objects with JS code"] is not None:
-            for id in statsVersion["Objects with JS code"][1]:
-                etree.SubElement(jsObjects, "container_object", id=str(id))
+            for thisId in statsVersion["Objects with JS code"][1]:
+                etree.SubElement(jsObjects, "container_object", thisId=str(thisId))
         actions = statsVersion["Actions"]
         events = statsVersion["Events"]
         vulns = statsVersion["Vulns"]
@@ -598,14 +608,18 @@ def getPeepXML(statsDict, VERSION):
                 triggers = etree.SubElement(suspicious, "triggers")
                 for event in events:
                     trigger = etree.SubElement(triggers, "trigger", name=event)
-                    for id in events[event]:
-                        etree.SubElement(trigger, "container_object", id=str(id))
+                    for thisId in events[event]:
+                        etree.SubElement(
+                            trigger, "container_object", thisId=str(thisId)
+                        )
             if actions:
                 actionsList = etree.SubElement(suspicious, "actions")
                 for action in actions:
                     actionInfo = etree.SubElement(actionsList, "action", name=action)
-                    for id in actions[action]:
-                        etree.SubElement(actionInfo, "container_object", id=str(id))
+                    for thisId in actions[action]:
+                        etree.SubElement(
+                            actionInfo, "container_object", thisId=str(thisId)
+                        )
             if elements:
                 elementsList = etree.SubElement(suspicious, "elements")
                 for element in elements:
@@ -618,8 +632,10 @@ def getPeepXML(statsDict, VERSION):
                         for vulnCVE in vulnCVEList:
                             cve = etree.SubElement(elementInfo, "cve")
                             cve.text = vulnCVE
-                    for id in elements[element]:
-                        etree.SubElement(elementInfo, "container_object", id=str(id))
+                    for thisId in elements[element]:
+                        etree.SubElement(
+                            elementInfo, "container_object", thisId=str(thisId)
+                        )
             if vulns:
                 vulnsList = etree.SubElement(suspicious, "js_vulns")
                 for vuln in vulns:
@@ -632,8 +648,10 @@ def getPeepXML(statsDict, VERSION):
                         for vulnCVE in vulnCVEList:
                             cve = etree.SubElement(vulnInfo, "cve")
                             cve.text = vulnCVE
-                    for id in vulns[vuln]:
-                        etree.SubElement(vulnInfo, "container_object", id=str(id))
+                    for thisId in vulns[vuln]:
+                        etree.SubElement(
+                            vulnInfo, "container_object", thisId=str(thisId)
+                        )
         urls = statsVersion["URLs"]
         suspiciousURLs = etree.SubElement(versionInfo, "suspicious_urls")
         if urls is not None:
@@ -651,43 +669,44 @@ def getPeepJSON(statsDict, VERSION):
         "url": "https://github.com/digitalsleuth/peepdf-3",
     }
     # Basic info
-    basicDict = {}
-    basicDict["filename"] = statsDict["File"]
-    basicDict["md5"] = statsDict["MD5"]
-    basicDict["sha1"] = statsDict["SHA1"]
-    basicDict["sha256"] = statsDict["SHA256"]
-    basicDict["size"] = int(statsDict["Size"])
-    if statsDict["IDs"] not in ("\r\n","\n",None):
+    basicDict = {
+        "filename": statsDict["File"],
+        "md5": statsDict["MD5"],
+        "sha1": statsDict["SHA1"],
+        "sha256": statsDict["SHA256"],
+        "size": int(statsDict["Size"]),
+        "detection": {},
+        "pdf_version": statsDict["Version"],
+        "binary": bool(statsDict["Binary"]),
+        "linearized": bool(statsDict["Linearized"]),
+        "encrypted": bool(statsDict["Encrypted"]),
+        "encryption_algorithms": [],
+        "updates": int(statsDict["Updates"]),
+        "num_objects": int(statsDict["Objects"]),
+        "num_streams": int(statsDict["Streams"]),
+        "comments": int(statsDict["Comments"]),
+        "errors": [],
+    }
+    if statsDict["IDs"] not in ("\r\n", "\n", None):
         basicDict["ids"] = {}
         ids = statsDict["IDs"].split("\r\n\t")
-        for each_id in ids:
-            if each_id == '':
-                ids.remove(each_id)
-        for idx in range(len(ids)):
-            ids[idx] = "".join(filter(lambda ch: ch not in "\n\r\t", ids[idx]))
-            ids[idx] = ids[idx].split(f"Version {idx}: ")[1]
-            basicDict["ids"][f"version_{idx}"] = ids[idx]
-    basicDict["detection"] = {}
+        for eachId in ids:
+            if eachId == "":
+                ids.remove(eachId)
+        for i, eachId in enumerate(ids):
+            eachId = "".join(filter(lambda ch: ch not in "\n\r\t", eachId))
+            eachId = eachId.split(": ")[1]
+            basicDict["ids"][f"version_{i}"] = eachId
     if statsDict["Detection"] != [] and statsDict["Detection"] is not None:
         basicDict["detection"][
             "rate"
         ] = f'{statsDict["Detection"][0]}/{statsDict["Detection"][1]}'
         basicDict["detection"]["report_link"] = statsDict["Detection report"]
-    basicDict["pdf_version"] = statsDict["Version"]
-    basicDict["binary"] = bool(statsDict["Binary"])
-    basicDict["linearized"] = bool(statsDict["Linearized"])
-    basicDict["encrypted"] = bool(statsDict["Encrypted"])
-    basicDict["encryption_algorithms"] = []
     if statsDict["Encryption Algorithms"]:
         for algorithmInfo in statsDict["Encryption Algorithms"]:
             basicDict["encryption_algorithms"].append(
                 {"bits": algorithmInfo[1], "algorithm": algorithmInfo[0]}
             )
-    basicDict["updates"] = int(statsDict["Updates"])
-    basicDict["num_objects"] = int(statsDict["Objects"])
-    basicDict["num_streams"] = int(statsDict["Streams"])
-    basicDict["comments"] = int(statsDict["Comments"])
-    basicDict["errors"] = []
     for error in statsDict["Errors"]:
         basicDict["errors"].append(error)
     # Advanced info
@@ -698,11 +717,12 @@ def getPeepJSON(statsDict, VERSION):
             versionType = "original"
         else:
             versionType = "update"
-        versionInfo = {}
-        versionInfo["version_number"] = version
-        versionInfo["version_type"] = versionType
-        versionInfo["catalog"] = statsVersion["Catalog"]
-        versionInfo["info"] = statsVersion["Info"]
+        versionInfo = {
+            "version_number": version,
+            "version_type": versionType,
+            "catalog": statsVersion["Catalog"],
+            "info": statsVersion["Info"],
+        }
         if statsVersion["Objects"] is not None:
             versionInfo["objects"] = statsVersion["Objects"][1]
         else:
@@ -777,6 +797,7 @@ def getPeepJSON(statsDict, VERSION):
     }
     return json.dumps(jsonDict, indent=4, sort_keys=True)
 
+
 def getUpdate():
     newLine = os.linesep
     branch = "main"
@@ -786,9 +807,9 @@ def getUpdate():
         f"https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/vulns-ver"
     )
     repoVulnsFile = f"https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/peepdf/PDFVulns.py"
-    print(f"[-] Checking if there are new updates to the Vulnerabilties List")
+    print("[-] Checking if there are new updates to the Vulnerabilties List")
     try:
-        remoteVersion = requests.get(repoVersionFile).text
+        remoteVersion = requests.get(repoVersionFile, timeout=10).text
         remoteVersion = remoteVersion.strip()
     except:
         sys.exit(
@@ -807,22 +828,22 @@ def getUpdate():
     else:
         print(f"[-] Current Version: {localVersion}")
         print(f"[-] Remote Version: {remoteVersion}")
-        print(f"[+] Update available")
-        print(f"[-] Fetching the update ...")
+        print("[+] Update available")
+        print("[-] Fetching the update ...")
         try:
-            updateContent = requests.get(repoVulnsFile).text
+            updateContent = requests.get(repoVulnsFile, timeout=10).text
         except:
             sys.exit(
                 f"[!] Error: Connection error while trying to fetch the updated PDFVulns.py file{newLine}"
             )
-        executingPath = pathlib.Path(__file__).parent.resolve()
+        executingPath = Path(__file__).parent.resolve()
         vulnsFile = f"{executingPath}{os.sep}PDFVulns.py"
         if os.path.exists(vulnsFile):
             print(f"[*] File {vulnsFile} exists, overwriting ...")
         else:
             print(f"[*] File {vulnsFile} does not exist, creating ...")
         try:
-            with open(vulnsFile, "w") as localVulnsFile:
+            with open(vulnsFile, "w", encoding="utf-8") as localVulnsFile:
                 localVulnsFile.write(updateContent)
                 localVulnsFile.close()
             print(

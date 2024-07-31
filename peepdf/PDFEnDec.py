@@ -103,14 +103,15 @@ __url__ = "http://www.joe-bowers.com/static/lzw"
 
 """
 
-import re, sys  ## required for jjdecode
-import struct  ## required for lzw
-import itertools  ## required for lzw
-import sys  ## required for lzw
-from io import StringIO  ## required for lzw
+import re
+import sys
+import struct
+import itertools
+from io import StringIO, BytesIO
 
 
 ## START CCITT
+
 
 class BitWriterException(Exception):
     pass
@@ -181,35 +182,49 @@ class BitReaderException(Exception):
 
 
 class BitReader:
-    """ """
+    """
+    BitReader Class
+    """
 
     def __init__(self, data):
-        """ """
+        """
+        Init
+        """
         self._data = data
         self._byte_ptr, self._bit_ptr = 0, 0
 
     def reset(self):
-        """ """
+        """
+        Set _byte_ptr and _bit_ptr back to zero
+        """
         self._byte_ptr, self._bit_ptr = 0, 0
 
     @property
     def eod_p(self):
-        """ """
+        """
+        return bool for _byte_ptr location compared to size of _data
+        """
         return self._byte_ptr >= len(self._data)
 
     @property
     def pos(self):
-        """Comment"""
+        """
+        return sum of bitshifted _byte_ptr value + _bit_ptr
+        """
         return (self._byte_ptr << 3) + self._bit_ptr
 
     @property
     def size(self):
-        """Comment"""
+        """
+        return bitshifted value of the _data length
+        """
         return len(self._data) << 3
 
     @pos.setter
     def pos(self, bits):
-        """Comment"""
+        """
+        Set _byte_ptr and _bit_ptr positions if bits is not larger than the size
+        """
         if bits > self.size:
             raise BitReaderException("Pointer position out of data")
 
@@ -218,10 +233,12 @@ class BitReader:
         self._byte_ptr, self._bit_ptr = pbyte, pbit
 
     def peek(self, length):
-        """Comment"""
+        """
+        Read provided length of data provided it fits within readable boundaries
+        """
         if length <= 0:
             raise BitReaderException("Invalid read length")
-        elif (self.pos + length) > self.size:
+        if (self.pos + length) > self.size:
             raise BitReaderException("Insufficient data")
 
         n = 0
@@ -243,7 +260,9 @@ class BitReader:
         return n
 
     def read(self, length):
-        """Comment"""
+        """
+        Return data read and adjust position forward
+        """
         n = self.peek(length)
         self.pos += length
 
@@ -256,7 +275,9 @@ def codeword(bits):
 
 
 class CCITTFax:
-    """Comment"""
+    """
+    CCITTFax Class
+    """
 
     EOL = codeword("000000000001")
     RTC = codeword("000000000001" * 6)
@@ -500,7 +521,9 @@ class CCITTFax:
     def __init__(
         self,
     ):
-        """Comment"""
+        """
+        Init
+        """
         self._decoded = []
 
     def decode(
@@ -515,7 +538,9 @@ class CCITTFax:
         blackIs1=False,
         damagedRowsBeforeError=0,
     ):
-        """Comment"""
+        """
+        Decode provided value, return the decoded BitWriter data
+        """
         # FIXME seems not stick to the spec? default is false, but if not set as true, it won't decode 6cc2a162e08836f7d50d461a9fc136fe correctly
         byteAlign = True
 
@@ -550,7 +575,7 @@ class CCITTFax:
                     bit_length = self.get_white_bits(bitr)
                 else:
                     bit_length = self.get_black_bits(bitr)
-                if bit_length == None:
+                if bit_length is None:
                     raise Exception(
                         f"Unfinished line (at bit pos {bitr.pos}/{bitr.size}), {bitw.data}"
                     )
@@ -569,7 +594,9 @@ class CCITTFax:
         return bitw.data
 
     def get_white_bits(self, bitr):
-        """Comment"""
+        """
+        Return white bits
+        """
         return self.get_color_bits(
             bitr,
             self.WHITE_CONFIGURATION_DECODE_TABLE,
@@ -577,7 +604,9 @@ class CCITTFax:
         )
 
     def get_black_bits(self, bitr):
-        """Comment"""
+        """
+        Return black bits
+        """
         return self.get_color_bits(
             bitr,
             self.BLACK_CONFIGURATION_DECODE_TABLE,
@@ -585,7 +614,9 @@ class CCITTFax:
         )
 
     def get_color_bits(self, bitr, config_words, term_words):
-        """Comment"""
+        """
+        Return color bits
+        """
         bits = 0
         check_conf = True
 
@@ -615,9 +646,11 @@ class CCITTFax:
 
         return None
 
+
 ## END CCITT
 
 ## START JJDECODE
+
 
 class JJDecoder:
     def __init__(self, jj_encoded_data):
@@ -648,7 +681,7 @@ class JJDecoder:
 
     def decode(self):
         self.clean()
-        startpos, endpos, gv, gvl = self.checkPalindrome()
+        startpos, endpos, gv, _ = self.checkPalindrome()
 
         if startpos == endpos:
             return (-1, "There is no data to decode")
@@ -699,15 +732,15 @@ class JJDecoder:
                 data = data[len(str_l) :]
                 out += "l"
                 continue
-            elif data.find(str_o) == 0:
+            if data.find(str_o) == 0:
                 data = data[len(str_o) :]
                 out += "o"
                 continue
-            elif data.find(str_t) == 0:
+            if data.find(str_t) == 0:
                 data = data[len(str_t) :]
                 out += "t"
                 continue
-            elif data.find(str_u) == 0:
+            if data.find(str_u) == 0:
                 data = data[len(str_u) :]
                 out += "u"
                 continue
@@ -716,10 +749,10 @@ class JJDecoder:
             if data.find(str_hex) == 0:
                 data = data[len(str_hex) :]
 
-                for i in range(len(b)):
-                    if data.find(b[i]) == 0:
-                        data = data[len(b[i]) :]
-                        out += "%x" % i
+                for i, entry in enumerate(b):
+                    if data.find(entry) == 0:
+                        data = data[len(entry) :]
+                        out += f"{i:x}"
                         break
                 continue
 
@@ -735,10 +768,10 @@ class JJDecoder:
                         # gv + "."+b[ c ]
                         if data.find(gvsig) == 0:
                             data = data[len(gvsig) :]
-                            for k in range(len(b)):  # for every entry in b
-                                if data.find(b[k]) == 0:
-                                    data = data[len(b[k]) :]
-                                    ch_str = "%x" % k
+                            for k, entry in enumerate(b):  # for every entry in b
+                                if data.find(entry) == 0:
+                                    data = data[len(entry) :]
+                                    ch_str = f"{k:x}"
                                     break
                         else:
                             break
@@ -746,7 +779,7 @@ class JJDecoder:
                     out += chr(int(ch_str, 16))
                     continue
 
-                elif data.find(str_lower) == 0:  # r3 check if "R // n < 128
+                if data.find(str_lower) == 0:  # r3 check if "R // n < 128
                     data = data[len(str_lower) :]  # skip sig
 
                     ch_str = ""
@@ -759,15 +792,15 @@ class JJDecoder:
                                 data = data[len(str_l) :]
                                 ch_lotux = "l"
                                 break
-                            elif data.find(str_o) == 0:
+                            if data.find(str_o) == 0:
                                 data = data[len(str_o) :]
                                 ch_lotux = "o"
                                 break
-                            elif data.find(str_t) == 0:
+                            if data.find(str_t) == 0:
                                 data = data[len(str_t) :]
                                 ch_lotux = "t"
                                 break
-                            elif data.find(str_u) == 0:
+                            if data.find(str_u) == 0:
                                 data = data[len(str_u) :]
                                 ch_lotux = "u"
                                 break
@@ -790,10 +823,10 @@ class JJDecoder:
                                 if data.find(str_hex) == 0:  # 0123456789abcdef
                                     data = data[len(str_hex) :]
                                     # check every element of hex decode string for a match
-                                    for i in range(len(b)):
-                                        if data.find(b[i]) == 0:
-                                            data = data[len(b[i]) :]
-                                            ch_lotux = "%x" % i
+                                    for i, entry in enumerate(b):
+                                        if data.find(entry) == 0:
+                                            data = data[len(entry) :]
+                                            ch_lotux = f"{i:x}"
                                             break
                                     break
                         else:
@@ -802,141 +835,142 @@ class JJDecoder:
                     out += chr(int(ch_str, 8)) + ch_lotux
                     continue
 
-                else:  # "S ----> "SR or "S+
-                    # if there is, loop s until R 0r +
-                    # if there is no matching s block, throw error
+                # "S ----> "SR or "S+
+                # if there is, loop s until R 0r +
+                # if there is no matching s block, throw error
 
-                    match = 0
-                    n = None
+                match = 0
+                n = None
 
-                    # searching for matching pure s block
-                    while True:
-                        n = ord(data[0])
-                        if data.find(str_quote) == 0:
-                            data = data[len(str_quote) :]
-                            out += '"'
-                            match += 1
-                            continue
-                        elif data.find(str_slash) == 0:
-                            data = data[len(str_slash) :]
-                            out += "\\"
-                            match += 1
-                            continue
-                        elif data.find(str_end) == 0:  # reached end off S block ? +
-                            if match == 0:
-                                return (-1, "+ No match S block")
-                            data = data[len(str_end) :]
-                            break  # step out of the while loop
-                        elif (
-                            data.find(str_upper) == 0
-                            ):  # r4 reached end off S block ? - check if "R n >= 128z
-                            if match == 0:
-                                return (-1, "No match S block n>128")
-                            data = data[len(str_upper) :]  # skip sig
+                # searching for matching pure s block
+                while True:
+                    n = ord(data[0])
+                    if data.find(str_quote) == 0:
+                        data = data[len(str_quote) :]
+                        out += '"'
+                        match += 1
+                        continue
+                    if data.find(str_slash) == 0:
+                        data = data[len(str_slash) :]
+                        out += "\\"
+                        match += 1
+                        continue
+                    if data.find(str_end) == 0:  # reached end off S block ? +
+                        if match == 0:
+                            return (-1, "+ No match S block")
+                        data = data[len(str_end) :]
+                        break  # step out of the while loop
+                    if (
+                        data.find(str_upper) == 0
+                    ):  # r4 reached end off S block ? - check if "R n >= 128z
+                        if match == 0:
+                            return (-1, "No match S block n>128")
+                        data = data[len(str_upper) :]  # skip sig
 
-                            ch_str = ""
-                            ch_lotux = ""
+                        ch_str = ""
+                        ch_lotux = ""
 
-                            for j in range(10):  # shouldn't be more than 10 hex chars
-                                if j > 1:  # lotu check
-                                    if data.find(str_l) == 0:
-                                        data = data[len(str_l) :]
-                                        ch_lotux = "l"
-                                        break
-                                    elif data.find(str_o) == 0:
-                                        data = data[len(str_o) :]
-                                        ch_lotux = "o"
-                                        break
-                                    elif data.find(str_t) == 0:
-                                        data = data[len(str_t) :]
-                                        ch_lotux = "t"
-                                        break
-                                    elif data.find(str_u) == 0:
-                                        data = data[len(str_u) :]
-                                        ch_lotux = "u"
-                                        break
-
-                                # gv + "."+b[ c ]
-                                if data.find(gvsig) == 0:
-                                    data = data[len(gvsig) :]  # skip gvsig
-                                    for k in range(len(b)):  # for every entry in b
-                                        if data.find(b[k]) == 0:
-                                            data = data[len(b[k]) :]
-                                            ch_str += "%x" % k
-                                            break
-                                else:
-                                    break  # done
-                            out += chr(int(ch_str, 16))
-                            break  # step out of the while loop
-                        elif data.find(str_lower) == 0:  # r3 check if "R // n < 128
-                            if match == 0:
-                                return (-1, "No match S block n<128!!")
-
-                            data = data[len(str_lower) :]  # skip sig
-
-                            ch_str = ""
-                            ch_lotux = ""
-                            temp = ""
-                            b_checkR1 = 0
-
-                            for j in range(3):  # shouldn't be more than 3 octal chars
-                                if j > 1:  # lotu check
-                                    if data.find(str_l) == 0:
-                                        data = data[len(str_l) :]
-                                        ch_lotux = "l"
-                                        break
-                                    elif data.find(str_o) == 0:
-                                        data = data[len(str_o) :]
-                                        ch_lotux = "o"
-                                        break
-                                    elif data.find(str_t) == 0:
-                                        data = data[len(str_t) :]
-                                        ch_lotux = "t"
-                                        break
-                                    elif data.find(str_u) == 0:
-                                        data = data[len(str_u) :]
-                                        ch_lotux = "u"
-                                        break
-
-                                # gv + "."+b[ c ]
-                                if data.find(gvsig) == 0:
-                                    temp = data[len(gvsig) :]
-                                    for k in range(8):  # for every entry in b octal
-                                        if temp.find(b[k]) == 0:
-                                            if int(ch_str + str(k), 8) > 128:
-                                                b_checkR1 = 1
-                                                break
-
-                                            ch_str += str(k)
-                                            data = data[len(gvsig) :]  # skip gvsig
-                                            data = data[len(b[k]) :]
-                                            break
-
-                                    if b_checkR1 == 1:
-                                        if data.find(str_hex) == 0:  # 0123456789abcdef
-                                            data = data[len(str_hex) :]
-                                            # check every element of hex decode string for a match
-                                            for i in range(len(b)):
-                                                if data.find(b[i]) == 0:
-                                                    data = data[len(b[i]) :]
-                                                    ch_lotux = "%x" % i
-                                                    break
-                                else:
+                        for j in range(10):  # shouldn't be more than 10 hex chars
+                            if j > 1:  # lotu check
+                                if data.find(str_l) == 0:
+                                    data = data[len(str_l) :]
+                                    ch_lotux = "l"
                                     break
-                            out += chr(int(ch_str, 8)) + ch_lotux
-                            break  # step out of the while loop
-                        elif (
-                            (0x21 <= n and n <= 0x2F)
-                            or (0x3A <= n and n <= 0x40)
-                            or (0x5B <= n and n <= 0x60)
-                            or (0x7B <= n and n <= 0x7F)
-                            ):
-                            out += data[0]
-                            data = data[1:]
-                            match += 1
-                    continue
+                                if data.find(str_o) == 0:
+                                    data = data[len(str_o) :]
+                                    ch_lotux = "o"
+                                    break
+                                if data.find(str_t) == 0:
+                                    data = data[len(str_t) :]
+                                    ch_lotux = "t"
+                                    break
+                                if data.find(str_u) == 0:
+                                    data = data[len(str_u) :]
+                                    ch_lotux = "u"
+                                    break
+
+                            # gv + "."+b[ c ]
+                            if data.find(gvsig) == 0:
+                                data = data[len(gvsig) :]  # skip gvsig
+                                for k, entry in enumerate(b):  # for every entry in b
+                                    if data.find(entry) == 0:
+                                        data = data[len(entry) :]
+                                        ch_str += f"{k:x}"
+                                        break
+                            else:
+                                break  # done
+                        out += chr(int(ch_str, 16))
+                        break  # step out of the while loop
+                    if data.find(str_lower) == 0:  # r3 check if "R // n < 128
+                        if match == 0:
+                            return (-1, "No match S block n<128!!")
+
+                        data = data[len(str_lower) :]  # skip sig
+
+                        ch_str = ""
+                        ch_lotux = ""
+                        temp = ""
+                        b_checkR1 = 0
+
+                        for j in range(3):  # shouldn't be more than 3 octal chars
+                            if j > 1:  # lotu check
+                                if data.find(str_l) == 0:
+                                    data = data[len(str_l) :]
+                                    ch_lotux = "l"
+                                    break
+                                if data.find(str_o) == 0:
+                                    data = data[len(str_o) :]
+                                    ch_lotux = "o"
+                                    break
+                                if data.find(str_t) == 0:
+                                    data = data[len(str_t) :]
+                                    ch_lotux = "t"
+                                    break
+                                if data.find(str_u) == 0:
+                                    data = data[len(str_u) :]
+                                    ch_lotux = "u"
+                                    break
+
+                            # gv + "."+b[ c ]
+                            if data.find(gvsig) == 0:
+                                temp = data[len(gvsig) :]
+                                for k in range(8):  # for every entry in b octal
+                                    if temp.find(b[k]) == 0:
+                                        if int(ch_str + str(k), 8) > 128:
+                                            b_checkR1 = 1
+                                            break
+
+                                        ch_str += str(k)
+                                        data = data[len(gvsig) :]  # skip gvsig
+                                        data = data[len(b[k]) :]
+                                        break
+
+                                if b_checkR1 == 1:
+                                    if data.find(str_hex) == 0:  # 0123456789abcdef
+                                        data = data[len(str_hex) :]
+                                        # check every element of hex decode string for a match
+                                        for i, entry in enumerate(b):
+                                            if data.find(entry) == 0:
+                                                data = data[len(entry) :]
+                                                ch_lotux = f"{i:x}"
+                                                break
+                            else:
+                                break
+                        out += chr(int(ch_str, 8)) + ch_lotux
+                        break  # step out of the while loop
+                    if (
+                        (0x21 <= n <= 0x2F)
+                        or (0x3A <= n <= 0x40)
+                        or (0x5B <= n <= 0x60)
+                        or (0x7B <= n <= 0x7F)
+                    ):
+                        out += data[0]
+                        data = data[1:]
+                        match += 1
+                continue
             return (-1, "No match in the code!!")
         return (0, out)
+
 
 ## END JJDECODE
 
@@ -944,9 +978,10 @@ class JJDecoder:
 
 CLEAR_CODE = 256
 END_OF_INFO_CODE = 257
-   
+
 DEFAULT_MIN_BITS = 9
 DEFAULT_MAX_BITS = 12
+
 
 def compress(plaintext_bytes):
     """
@@ -1022,7 +1057,9 @@ class ByteDecoder:
     """
 
     def __init__(self):
-        """ """
+        """
+        Init
+        """
 
         self._decoder = Decoder()
         self._unpacker = BitUnpacker(initial_code_size=self._decoder.code_size())
@@ -1246,12 +1283,14 @@ class Decoder:
         'gabba gabba yo gabba'
 
         """
-        codepoints = [cp for cp in codepoints]
+        # codepoints = [cp for cp in codepoints]
+        codepoints = list(codepoints)
 
         for cp in codepoints:
             decoded = self._decode_codepoint(cp)
-            for character in decoded:
-                yield character
+            yield from decoded
+            # for character in decoded:
+            #    yield character
 
     def _decode_codepoint(self, codepoint):
         """
@@ -1284,7 +1323,7 @@ class Decoder:
         else:
             if codepoint in self._codepoints:
                 ret = self._codepoints[codepoint]
-                if None != self._prefix:
+                if self._prefix is not None:
                     self._codepoints[len(self._codepoints)] = self._prefix + ret[0]
 
             else:
@@ -1323,9 +1362,7 @@ class Encoder:
 
         if max_code_size < self.code_size():
             raise ValueError(
-                "Max code size too small, (must be at least {0})".format(
-                    self.code_size()
-                )
+                f"Max code size too small, (must be at least {self.code_size()})"
             )
 
     def code_size(self):
@@ -1341,9 +1378,6 @@ class Encoder:
         Yields any buffered codepoints, followed by a CLEAR_CODE, and
         clears the codebook as a side effect.
         """
-
-        flushed = []
-
         if self._buffer:
             yield self._prefixes[self._buffer]
             self._buffer = ""
@@ -1366,12 +1400,14 @@ class Encoder:
         """
         yield CLEAR_CODE
         for b in bytesource:
-            for point in self._encode_byte(b):
-                yield point
+            yield from self._encode_byte(b)
+            # for point in self._encode_byte(b):
+            #    yield point
 
             if self.code_size() >= self._max_code_size:
-                for pt in self.flush():
-                    yield pt
+                yield from self.flush()
+                # for pt in self.flush():
+                #    yield pt
 
         yield self._prefixes[self._buffer]
         yield END_OF_INFO_CODE
@@ -1451,9 +1487,9 @@ class PagingEncoder:
 
             packer = BitPacker(initial_code_size=encoder.code_size())
             packed = packer.pack(codes_and_eoi)
-
-            for byte in packed:
-                yield byte
+            yield from packed
+            # for byte in packed:
+            #    yield byte
 
 
 class PagingDecoder:
@@ -1521,18 +1557,15 @@ class PagingDecoder:
 
         self._remains = codepoints
         while self._remains:
-            nextpoints = self.next_page(self._remains)
-            nextpoints = [nx for nx in nextpoints]
+            nextpoints = list(self.next_page(self._remains))
 
             decoder = Decoder()
-            decoded = decoder.decode(nextpoints)
-            decoded = [dec for dec in decoded]
+            decoded = list(decoder.decode(nextpoints))
 
             yield decoded
 
 
 #########################################
-# Conveniences.
 
 
 def unpackbyte(b):
@@ -1551,8 +1584,9 @@ def filebytes(fileobj, buffersize=1024):
     """
     buff = fileobj.read(buffersize)
     while buff:
-        for byte in buff:
-            yield byte
+        yield from buff
+        # for byte in buff:
+        #    yield byte
         buff = fileobj.read(buffersize)
 
 
@@ -1561,9 +1595,10 @@ def readbytes(filename, buffersize=1024):
     Opens a file named by filename and iterates over the L{filebytes}
     found therein.  Will close the file when the bytes run out.
     """
-    infile = open(filename, "rb")
-    for byte in filebytes(infile, buffersize):
-        yield byte
+    with open(filename, "rb") as infile:
+        yield from filebytes(infile, buffersize)
+    # for byte in filebytes(infile, buffersize):
+    #    yield byte
 
 
 def writebytes(filename, bytesource):
@@ -1572,10 +1607,10 @@ def writebytes(filename, bytesource):
     filename, opens and truncates the file, dumps the bytes
     from bytesource into it, and closes it
     """
-
-    outfile = open(filename, "wb")
-    for bt in bytesource:
-        outfile.write(bt)
+    with open(filename, "wb") as outfile:
+        # outfile = open(filename, "wb")
+        for bt in bytesource:
+            outfile.write(bt)
 
 
 def inttobits(anint, width=None):
@@ -1599,7 +1634,7 @@ def inttobits(anint, width=None):
     retreverse.reverse()
 
     ret = retreverse
-    if None != width:
+    if width is not None:
         ret_head = [0] * (width - len(ret))
         ret = ret_head + ret
 
@@ -1617,11 +1652,11 @@ def intfrombits(bits):
     304
     """
     ret = 0
-    lsb_first = [b for b in bits]
+    lsb_first = list(bits)
     lsb_first.reverse()
 
-    for bit_index in range(len(lsb_first)):
-        if lsb_first[bit_index]:
+    for bit_index, bit in enumerate(lsb_first):
+        if bit:
             ret = ret | (1 << bit_index)
 
     return ret
@@ -1680,22 +1715,30 @@ def bitstobytes(bits):
     return ret
 
 
-"""
-The code below is part of pdfminer (http://pypi.python.org/pypi/pdfminer/)
-
-Copyright (c) 2004-2010 Yusuke Shinyama <yusuke at cs dot nyu dot edu>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. 
-"""
-
-
 ##  LZWDecoder
 
+
 class LZWDecoder:
+    """
+    The code below is part of pdfminer (http://pypi.python.org/pypi/pdfminer/)
+
+    Copyright (c) 2004-2010 Yusuke Shinyama <yusuke at cs dot nyu dot edu>
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+    and associated documentation files (the "Software"), to deal in the Software without
+    restriction, including without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+    BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+    DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+    """
+
     debug = 0
 
     def __init__(self, fp):
@@ -1705,7 +1748,6 @@ class LZWDecoder:
         self.nbits = 9
         self.table = None
         self.prevbuf = None
-        return
 
     def readbits(self, bits):
         v = 0
@@ -1719,17 +1761,16 @@ class LZWDecoder:
                 v = (v << bits) | ((self.buff >> (r - bits)) & ((1 << bits) - 1))
                 self.bpos += bits
                 break
-            else:
-                # |-----8-bits-----|
-                # |-bpos-|---bits----...
-                # |      |----r----|
-                v = (v << r) | (self.buff & ((1 << r) - 1))
-                bits -= r
-                x = self.fp.read(1)
-                if not x:
-                    raise EOFError
-                self.buff = ord(x)
-                self.bpos = 0
+            # |-----8-bits-----|
+            # |-bpos-|---bits----...
+            # |      |----r----|
+            v = (v << r) | (self.buff & ((1 << r) - 1))
+            bits -= r
+            x = self.fp.read(1)
+            if not x:
+                raise EOFError
+            self.buff = ord(x)
+            self.bpos = 0
         return v
 
     def feed(self, code):
@@ -1769,12 +1810,6 @@ class LZWDecoder:
                 break
             x = self.feed(code)
             yield x
-            if self.debug:
-                print(
-                    f"nbits={self.nbits}, code={code}, output={x}, table=self.table[258:]",
-                    file=sys.stderr,
-                )
-        return
 
 
 def lzwdecode(data):
@@ -1784,5 +1819,6 @@ def lzwdecode(data):
     """
     fp = StringIO(data)
     return "".join(LZWDecoder(fp).run())
+
 
 ## END LZW
