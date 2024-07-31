@@ -36,7 +36,6 @@ from builtins import input
 import jsbeautifier
 from prettytable import PrettyTable, SINGLE_BORDER
 
-
 try:
     from peepdf.PDFUtils import (
         getBytesFromFile,
@@ -4411,6 +4410,7 @@ class PDFConsole(cmd.Cmd):
         # Checks the MD5 on VirusTotal
         ret = vtcheck(md5Hash, self.variables["vt_key"][0])
         if ret[0] == -1:
+
             message = f"[!] Error: {ret[1]} on VirusTotal"
             self.log_output("vtcheck " + argv, message)
             return False
@@ -4449,6 +4449,7 @@ class PDFConsole(cmd.Cmd):
                 f"{selfLink}{newLine}"
             )
             if maliciousCount > 0:
+
                 if len(jsonDict["data"]["attributes"]["names"]) > 0:
                     output += f"{self.staticColor}Names: {self.resetColor}{', '.join(jsonDict['data']['attributes']['names'])}{newLine}"
                 output += (
@@ -4463,6 +4464,7 @@ class PDFConsole(cmd.Cmd):
                         f"{self.staticColor}Result{self.resetColor}",
                     ]
                 )
+
                 for engine in scanResults:
                     engineResults = scanResults[engine]
                     if (
