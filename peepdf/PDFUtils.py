@@ -31,9 +31,11 @@ import json
 from pathlib import Path
 from datetime import datetime as dt
 import requests
-from lxml import etree
-
-
+try:
+    LXML_LOADED = True
+    from lxml import etree
+except Exception:
+    LXML_LOADED = False
 try:
     from peepdf.PDFVulns import vulnsDict, vulnsVersion
 except ModuleNotFoundError:
@@ -467,6 +469,8 @@ def vtcheck(md5: str, vtKey: str):
 
 
 def getPeepXML(statsDict, VERSION):
+    if not LXML_LOADED:
+        raise "lxml library couldn't be loaded and it is necessary"
     root = etree.Element(
         "peepdf_analysis",
         version=f"{VERSION}",
