@@ -320,7 +320,7 @@ def main():
                         COLORIZED_OUTPUT = False
                 if args.scriptFile is not None:
                     if os.path.exists(args.scriptFile):
-                        scriptFileObject = open(args.scriptFile, "rb")
+                        scriptFileObject = open(args.scriptFile, "r")
                     else:
                         sys.exit(
                             f"[*] Warning: The file {args.scriptFile} cannot be found - check your path and try again!"
