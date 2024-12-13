@@ -1,3 +1,11 @@
+## peepdf 4.1.0, 2024-12-13  
+
+
+	* Fixes:
+
+		- Merged [PR 23](https://github.com/digitalsleuth/peepdf-3/pull/23) from @certxlm to fix an issue encountered when using `-s SCRIPTFILE`.
+
+
 
 ## peepdf 4.0.0, 2024-07-30
 
