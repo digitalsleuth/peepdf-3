@@ -259,7 +259,7 @@ def main():
                     sys.stdout.write(f"Text content of: {fileName}{newLine}")
                     sys.stdout.write(output)
                     raise SystemExit(0)
-                if args.checkOnVT and not "vt_key" in args.vtApiKey:
+                if args.checkOnVT and "vt_key" not in args.vtApiKey:
                     # Checks the MD5 on VirusTotal
                     vtKey = args.vtApiKey
                     md5Hash = pdf.getMD5()

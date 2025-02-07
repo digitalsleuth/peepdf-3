@@ -7250,7 +7250,7 @@ class PDFFile:
                 prevXrefSectionOffset = lastXrefSectionOffset
                 self.body[v].setObjects(indirectObjects)
                 offset = len(outputFileContent)
-            if not os.sep in filename:
+            if os.sep not in filename:
                 outputPath = f"{pdfPath}{os.sep}{filename}"
             else:
                 outputPath = filename
