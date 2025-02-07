@@ -34,7 +34,7 @@ from base64 import b64encode, b64decode
 from datetime import datetime as dt
 from builtins import input
 import jsbeautifier
-from prettytable import PrettyTable, SINGLE_BORDER
+from prettytable import PrettyTable, TableStyle
 
 try:
     from peepdf.PDFUtils import (
@@ -2798,7 +2798,7 @@ class PDFConsole(cmd.Cmd):
         content = ""
         unescapedOutput = ""
         byteVal = ""
-        reUnicodeChars = "([%\]u[0-9a-f]{4})+"
+        reUnicodeChars = r"([%\]u[0-9a-f]{4})+"
         reHexChars = "(%[0-9a-f]{2})+"
         validTypes = ["variable", "file", "string"]
         args = self.parseArgs(argv)
@@ -3755,7 +3755,7 @@ class PDFConsole(cmd.Cmd):
                 else:
                     varContent = self.printResult(str(self.variables[var][0]))
                     if varContent == str(self.variables[var][0]):
-                        if varContent != "None" and not re.match("\[.*\]", varContent):
+                        if varContent != "None" and not re.match(r"\[.*\]", varContent):
                             message = f'{var} = "{varContent}"'
                         else:
                             message = f"{var} = {varContent}"
@@ -4052,7 +4052,7 @@ class PDFConsole(cmd.Cmd):
                 if varContent == str(self.variables[var][0]):
                     if (
                         varContent != "None"
-                        and not re.match("\[.*\]", varContent)
+                        and not re.match(r"\[.*\]", varContent)
                         and not varContent.isdigit()
                     ):
                         consoleOutput += f'{var} = "{varContent}" {newLine}'
@@ -4482,7 +4482,7 @@ class PDFConsole(cmd.Cmd):
                             ]
                         )
                 table = PrettyTable(scan_list[0])
-                table.set_style(SINGLE_BORDER)
+                table.set_style(TableStyle.SINGLE_BORDER)
                 table.align = "l"
                 table.sortby = f"{self.staticColor}Engine{self.resetColor}"
                 if len(scan_list) > 1:
@@ -4997,7 +4997,7 @@ class PDFConsole(cmd.Cmd):
             except:
                 return None
         elif objectType == "string":
-            octalNumbers = re.findall("\\\\(\d{1,3})", objectContent, re.DOTALL)
+            octalNumbers = re.findall(r"\\(\d{1,3})", objectContent, re.DOTALL)
             for octal in octalNumbers:
                 try:
                     chr(int(octal, 8))
@@ -5027,7 +5027,7 @@ class PDFConsole(cmd.Cmd):
                     return None
             objectContent = "/" + objectContent
         elif objectType == "reference":
-            if not re.match("\d{1,10}\s\d{1,10}\sR", objectContent, re.IGNORECASE):
+            if not re.match(r"\d{1,10}\s\d{1,10}\sR", objectContent, re.IGNORECASE):
                 return None
             objectContent = objectContent.replace("r", "R")
         elif objectType == "null":
