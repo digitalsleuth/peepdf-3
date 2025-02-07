@@ -431,7 +431,7 @@ class Decoder:
         else:
             if codepoint in self._codepoints:
                 ret = self._codepoints[codepoint]
-                if self._prefix is None:
+                if None != self._prefix:
                     self._codepoints[len(self._codepoints)] = self._prefix + ret[0]
 
             else:
@@ -488,6 +488,8 @@ class Encoder:
         Yields any buffered codepoints, followed by a CLEAR_CODE, and
         clears the codebook as a side effect.
         """
+
+        flushed = []
 
         if self._buffer:
             yield self._prefixes[self._buffer]
@@ -744,7 +746,7 @@ def inttobits(anint, width=None):
     retreverse.reverse()
 
     ret = retreverse
-    if width is None:
+    if None != width:
         ret_head = [0] * (width - len(ret))
         ret = ret_head + ret
 
@@ -834,7 +836,7 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. 
 """
 
 

@@ -26,7 +26,6 @@
 import sys
 import os
 import re
-import random
 import hashlib
 import logging
 import pypdf
