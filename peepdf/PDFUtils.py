@@ -507,10 +507,10 @@ def getPeepXML(statsDict, VERSION):
         detectionReport.text = statsDict["Detection report"]
     version = etree.SubElement(basicInfo, "pdf_version")
     version.text = statsDict["Version"]
-    binary = etree.SubElement(basicInfo, "binary", status=statsDict["Binary"].lower())
-    linearized = etree.SubElement(
-        basicInfo, "linearized", status=statsDict["Linearized"].lower()
-    )
+    # binary = etree.SubElement(basicInfo, "binary", status=statsDict["Binary"].lower())
+    # linearized = etree.SubElement(
+    #    basicInfo, "linearized", status=statsDict["Linearized"].lower()
+    #)
     encrypted = etree.SubElement(
         basicInfo, "encrypted", status=statsDict["Encrypted"].lower()
     )
@@ -627,7 +627,7 @@ def getPeepXML(statsDict, VERSION):
                         elementsList, "element", name=element
                     )
                     if element in vulnsDict:
-                        vulnName = vulnsDict[element][0]
+                        # vulnName = vulnsDict[element][0]
                         vulnCVEList = vulnsDict[element][1]
                         for vulnCVE in vulnCVEList:
                             cve = etree.SubElement(elementInfo, "cve")
@@ -643,7 +643,7 @@ def getPeepXML(statsDict, VERSION):
                         vulnsList, "vulnerable_function", name=vuln
                     )
                     if vuln in vulnsDict:
-                        vulnName = vulnsDict[vuln][0]
+                        # vulnName = vulnsDict[vuln][0]
                         vulnCVEList = vulnsDict[vuln][1]
                         for vulnCVE in vulnCVEList:
                             cve = etree.SubElement(vulnInfo, "cve")

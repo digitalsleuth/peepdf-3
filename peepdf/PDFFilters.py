@@ -405,10 +405,12 @@ def lzwDecode(stream, parameters):
             bits = 8
     else:
         bits = 8
+    """
     if "/EarlyChange" in parameters:
         earlyChange = parameters["/EarlyChange"].getRawValue()
     else:
         earlyChange = 1
+    """
     if predictor is not None and predictor != 1:
         ret = post_prediction(decodedStream, predictor, columns, colors, bits)
         return ret

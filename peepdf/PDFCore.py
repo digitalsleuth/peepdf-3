@@ -26,6 +26,7 @@
 import sys
 import os
 import re
+import random
 import hashlib
 import logging
 import pypdf
@@ -89,28 +90,6 @@ except ModuleNotFoundError:
         monitorizedActions,
         monitorizedElements,
     )
-
-try:
-    from PIL import Image
-
-    PIL_MODULE = True
-except ModuleNotFoundError:
-    PIL_MODULE = False
-
-try:
-    import pylibemu
-
-    EMU_MODULE = True
-except ModuleNotFoundError:
-    EMU_MODULE = False
-
-try:
-    import STPyV8
-
-    JS_MODULE = True
-except ModuleNotFoundError:
-    JS_MODULE = False
-
 
 MAL_ALL = 1
 MAL_HEAD = 2
@@ -8520,7 +8499,7 @@ class PDFParser:
                         ret = self.readUntilSymbol(content, "stream")
                         if ret[0] == -1:
                             return ret
-                        auxDict = ret[1]
+                        # auxDict = ret[1]
                         self.readSymbol(content, "stream", False)
                         self.readUntilEndOfLine(content)
                         self.readSymbol(content, "\r", False)

@@ -544,9 +544,9 @@ class CCITTFax:
         byteAlign = True
 
         if blackIs1:
-            white, black = 0, 1
+            white = 0
         else:
-            white, black = 1, 0
+            white = 1
 
         bitr = BitReader(stream)
         bitw = BitWriter()
