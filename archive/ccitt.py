@@ -441,9 +441,9 @@ class CCITTFax:
         byteAlign = True
 
         if blackIs1:
-            white = 0
+            white, black = 0, 1
         else:
-            white = 1
+            white, black = 1, 0
 
         bitr = BitReader(stream)
         bitw = BitWriter()
@@ -471,7 +471,7 @@ class CCITTFax:
                     bit_length = self.get_white_bits(bitr)
                 else:
                     bit_length = self.get_black_bits(bitr)
-                if bit_length is None:
+                if bit_length == None:
                     raise Exception(
                         f"Unfinished line (at bit pos {bitr.pos}/{bitr.size}), {bitw.data}"
                     )
