@@ -26,6 +26,7 @@ Copyright (c) 2010, Adam Newman http://www.caller9.com/
 Licensed under the MIT license http://www.opensource.org/licenses/mit-license.php
 """
 
+import sys
 from aespython import key_expander, aes_cipher, cbc_mode
 
 
@@ -34,7 +35,7 @@ def decryptData(data, password=None, keyLength=None, mode="CBC"):
     Method added for peepdf
     """
     decryptedData = ""
-    if keyLength is None:
+    if keyLength == None:
         keyLength = len(password) * 8
     if keyLength not in [128, 192, 256]:
         return (-1, "Bad length key in AES decryption process")

@@ -1917,7 +1917,7 @@ class PDFConsole(cmd.Cmd):
             if xrefArray[1] is not None:
                 statsStream = xrefArray[1].getStats()
                 for key in statsStream:
-                    if key not in statsDict:
+                    if not key in statsDict:
                         statsDict[key] = statsStream[key]
             if statsDict["Offset"] is not None:
                 stats += f'{beforeStaticLabel}Offset: {self.resetColor}{statsDict["Offset"]}{newLine}'
@@ -1951,7 +1951,7 @@ class PDFConsole(cmd.Cmd):
             if trailerArray[1] is not None:
                 statsStream = trailerArray[1].getStats()
                 for key in statsStream:
-                    if key not in statsDict:
+                    if not key in statsDict:
                         statsDict[key] = statsStream[key]
             if statsDict["Offset"] is not None:
                 stats += f'{beforeStaticLabel}Offset: {self.resetColor}{statsDict["Offset"]}{newLine}'
@@ -2088,7 +2088,7 @@ class PDFConsole(cmd.Cmd):
             self.help_js_analyse()
             return False
         if srcType == "variable":
-            if src not in self.variables:
+            if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_analyse " + argv, message)
                 return False
@@ -2248,7 +2248,7 @@ class PDFConsole(cmd.Cmd):
             self.help_js_beautify()
             return False
         if srcType == "variable":
-            if src not in self.variables:
+            if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_beautify " + argv, message)
                 return False
@@ -2448,7 +2448,7 @@ class PDFConsole(cmd.Cmd):
             self.help_js_eval()
             return False
         if srcType == "variable":
-            if src not in self.variables:
+            if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_eval " + argv, message)
                 return False
@@ -2604,7 +2604,7 @@ class PDFConsole(cmd.Cmd):
             self.help_js_jjdecode()
             return False
         if srcType == "variable":
-            if src not in self.variables:
+            if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_jjdecode " + argv, message)
                 return False
@@ -2757,7 +2757,7 @@ class PDFConsole(cmd.Cmd):
             self.help_js_join()
             return False
         if srcType == "variable":
-            if src not in self.variables:
+            if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_join " + argv, message)
                 return False
@@ -2815,7 +2815,7 @@ class PDFConsole(cmd.Cmd):
             self.help_js_unescape()
             return False
         if srcType == "variable":
-            if src not in self.variables:
+            if not src in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_unescape " + argv, message)
                 return False
@@ -4111,7 +4111,7 @@ class PDFConsole(cmd.Cmd):
             self.help_show()
             return False
         var = args[0]
-        if var not in self.variables:
+        if not var in self.variables:
             print(f"{newLine}[!] Error: The variable {var} does not exist.{newLine}")
             return False
         if var == "output":

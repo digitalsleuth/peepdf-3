@@ -27,7 +27,7 @@
 #
 # Modified to integrate it with peepdf
 
-import re
+import re, sys
 
 
 class JJDecoder:
@@ -35,7 +35,7 @@ class JJDecoder:
         self.encoded_str = jj_encoded_data
 
     def clean(self):
-        self.encoded_str = re.sub(r"^\s+|\s+$", "", self.encoded_str)
+        self.encoded_str = re.sub("^\s+|\s+$", "", self.encoded_str)
 
     def checkPalindrome(self):
         startpos = -1

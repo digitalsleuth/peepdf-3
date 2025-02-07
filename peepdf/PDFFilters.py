@@ -765,7 +765,7 @@ def crypt(stream, parameters):
     """
     if not parameters:
         return (0, stream)
-    if "/Name" not in parameters or parameters["/Name"] is None:
+    if not "/Name" in parameters or parameters["/Name"] is None:
         return (0, stream)
     cryptFilterName = parameters["/Name"].getValue()
     if cryptFilterName == "Identity":
@@ -783,7 +783,7 @@ def decrypt(stream, parameters):
     """
     if not parameters:
         return (0, stream)
-    if "/Name" not in parameters or parameters["/Name"] is None:
+    if not "/Name" in parameters or parameters["/Name"] is None:
         return (0, stream)
     cryptFilterName = parameters["/Name"].getValue()
     if cryptFilterName == "Identity":

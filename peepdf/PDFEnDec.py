@@ -104,9 +104,10 @@ __url__ = "http://www.joe-bowers.com/static/lzw"
 """
 
 import re
+import sys
 import struct
 import itertools
-from io import StringIO
+from io import StringIO, BytesIO
 
 
 ## START CCITT
