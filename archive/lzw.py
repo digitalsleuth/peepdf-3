@@ -431,7 +431,7 @@ class Decoder:
         else:
             if codepoint in self._codepoints:
                 ret = self._codepoints[codepoint]
-                if self._prefix is None:
+                if self._prefix is not None:
                     self._codepoints[len(self._codepoints)] = self._prefix + ret[0]
 
             else:
@@ -744,7 +744,7 @@ def inttobits(anint, width=None):
     retreverse.reverse()
 
     ret = retreverse
-    if width is None:
+    if width is not None:
         ret_head = [0] * (width - len(ret))
         ret = ret_head + ret
 
