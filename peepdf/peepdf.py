@@ -32,35 +32,14 @@ import traceback
 from datetime import datetime as dt
 from operator import attrgetter
 
-try:
-    from PIL import Image
-
-    PIL_MODULE = True
-except ModuleNotFoundError:
-    PIL_MODULE = False
 
 try:
-    import pylibemu
-
-    EMU_MODULE = True
-except ModuleNotFoundError:
-    EMU_MODULE = False
-
-try:
-    import STPyV8
-
-    JS_MODULE = True
-except ModuleNotFoundError:
-    JS_MODULE = False
-
-
-try:
-    from peepdf.PDFCore import PDFParser, VERSION
+    from peepdf.PDFCore import PDFParser, VERSION, PIL_MODULE, EMU_MODULE, JS_MODULE
     from peepdf.PDFUtils import vtcheck, getPeepJSON, getPeepXML, getUpdate
     from peepdf.PDFVulns import vulnsDict
     from peepdf.PDFConsole import PDFConsole
 except ModuleNotFoundError:
-    from PDFCore import PDFParser, VERSION
+    from PDFCore import PDFParser, VERSION, PIL_MODULE, EMU_MODULE, JS_MODULE
     from PDFUtils import vtcheck, getPeepJSON, getPeepXML, getUpdate
     from PDFVulns import vulnsDict
     from PDFConsole import PDFConsole
