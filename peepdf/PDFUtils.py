@@ -39,6 +39,8 @@ try:
 except ModuleNotFoundError:
     from PDFVulns import vulnsDict, vulnsVersion
 
+DTFMT = "%Y%m%d-%H%M%S"
+
 
 def clearScreen():
     """
@@ -303,14 +305,14 @@ def getBytesFromFile(filename: str, offset: int, numBytes: int):
         return (-1, "The offset and the number of bytes must be integers")
     if os.path.exists(filename):
         fileSize = os.path.getsize(filename)
-        bytesFile = open(filename, "rb")
-        bytesFile.seek(offset)
-        if offset + numBytes > fileSize:
-            byteVal = bytesFile.read()
-        else:
-            byteVal = bytesFile.read(numBytes)
-        bytesFile.close()
-        return (0, byteVal)
+        with open(filename, "rb") as bytesFile:
+            bytesFile.seek(offset)
+            if offset + numBytes > fileSize:
+                byteVal = bytesFile.read()
+            else:
+                byteVal = bytesFile.read(numBytes)
+            bytesFile.close()
+            return (0, byteVal)
     return (-1, "File does not exist")
 
 
@@ -646,6 +648,10 @@ def getPeepXML(statsDict, VERSION):
                         vulnName = vulnsDict[vuln][0]
                         vulnCVEList = vulnsDict[vuln][1]
                         for vulnCVE in vulnCVEList:
+                            vulnerability = etree.SubElement(
+                                vulnInfo, "vulnerability_name"
+                            )
+                            vulnerability.text = vulnName
                             cve = etree.SubElement(vulnInfo, "cve")
                             cve.text = vulnCVE
                     for thisId in vulns[vuln]:

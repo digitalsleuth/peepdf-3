@@ -31,7 +31,7 @@ import hashlib
 import traceback
 import pathlib
 from base64 import b64encode, b64decode
-from datetime import datetime as dt
+from datetime import datetime as dt, timezone
 from builtins import input
 import jsbeautifier
 from prettytable import PrettyTable, TableStyle
@@ -47,9 +47,10 @@ try:
         countNonPrintableChars,
         getPeepXML,
         getPeepJSON,
+        DTFMT,
     )
     from peepdf.PDFCrypto import xor
-    from peepdf.JSAnalysis import isJavascript, analyseJS, unescape
+    from peepdf.JSAnalysis import isJavascript, analyseJS, unescape, JS_MODULE
     from peepdf.PDFCore import (
         PDFFile,
         PDFHexString,
@@ -70,6 +71,7 @@ try:
     from peepdf.PDFFilters import decodeStream, encodeStream
     from peepdf.PDFVulns import vulnsDict
     from peepdf.PDFEnDec import JJDecoder
+
 except ModuleNotFoundError:
     from PDFUtils import (
         getBytesFromFile,
@@ -81,9 +83,10 @@ except ModuleNotFoundError:
         countNonPrintableChars,
         getPeepXML,
         getPeepJSON,
+        DTFMT,
     )
     from PDFCrypto import xor
-    from JSAnalysis import isJavascript, analyseJS, unescape
+    from JSAnalysis import isJavascript, analyseJS, unescape, JS_MODULE
     from PDFCore import (
         PDFFile,
         PDFHexString,
@@ -113,17 +116,6 @@ except ModuleNotFoundError:
     COLORIZED_OUTPUT = False
 
 try:
-    import STPyV8
-    try:
-        from peepdf.JSAnalysis import Global
-    except ModuleNotFoundError:
-        from JSAnalysis import Global
-        
-    JS_MODULE = True
-except ModuleNotFoundError:
-    JS_MODULE = False
-
-try:
     import pylibemu
 
     EMU_MODULE = True
@@ -144,7 +136,6 @@ FILE_WRITE = 1
 FILE_ADD = 2
 VAR_WRITE = 3
 VAR_ADD = 4
-DTFMT = "%Y%m%d-%H%M%S"
 newLine = os.linesep
 filter2RealFilterDict = {
     "b64": "base64",
@@ -418,17 +409,16 @@ class PDFConsole(cmd.Cmd):
                             return False
                         with open(jsFile, "rb") as thisJsFile:
                             content = thisJsFile.read()
+                    elif self.use_rawinput:
+                        content = input(
+                            f"{newLine}Please specify the Javascript code you want to include "
+                            f"in the file (if the code includes EOL character s"
+                            f"use a js_file instead): {newLine * 2}"
+                        )
                     else:
-                        if self.use_rawinput:
-                            content = input(
-                                f"{newLine}Please specify the Javascript code you want to include "
-                                f"in the file (if the code includes EOL character s"
-                                f"use a js_file instead): {newLine * 2}"
-                            )
-                        else:
-                            message = "[!] Error: You must specify a Javascript file in script mode"
-                            self.log_output("create " + argv, message)
-                            return False
+                        message = "[!] Error: You must specify a Javascript file in script mode"
+                        self.log_output("create " + argv, message)
+                        return False
                 elif pdfType == "simple":
                     if numArgs > 2:
                         self.help_create()
@@ -1564,6 +1554,7 @@ class PDFConsole(cmd.Cmd):
             "rawstream",
             "string",
         ]
+        version = None
         args = self.parseArgs(argv)
         if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
@@ -1592,7 +1583,6 @@ class PDFConsole(cmd.Cmd):
         else:
             self.help_hash()
             return False
-
         srcType = args[0]
         if srcType not in validTypes:
             self.help_hash()
@@ -1917,7 +1907,7 @@ class PDFConsole(cmd.Cmd):
             if xrefArray[1] is not None:
                 statsStream = xrefArray[1].getStats()
                 for key in statsStream:
-                    if not key in statsDict:
+                    if key not in statsDict:
                         statsDict[key] = statsStream[key]
             if statsDict["Offset"] is not None:
                 stats += f'{beforeStaticLabel}Offset: {self.resetColor}{statsDict["Offset"]}{newLine}'
@@ -1951,7 +1941,7 @@ class PDFConsole(cmd.Cmd):
             if trailerArray[1] is not None:
                 statsStream = trailerArray[1].getStats()
                 for key in statsStream:
-                    if not key in statsDict:
+                    if key not in statsDict:
                         statsDict[key] = statsStream[key]
             if statsDict["Offset"] is not None:
                 stats += f'{beforeStaticLabel}Offset: {self.resetColor}{statsDict["Offset"]}{newLine}'
@@ -2088,7 +2078,7 @@ class PDFConsole(cmd.Cmd):
             self.help_js_analyse()
             return False
         if srcType == "variable":
-            if not src in self.variables:
+            if src not in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_analyse " + argv, message)
                 return False
@@ -2248,7 +2238,7 @@ class PDFConsole(cmd.Cmd):
             self.help_js_beautify()
             return False
         if srcType == "variable":
-            if not src in self.variables:
+            if src not in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_beautify " + argv, message)
                 return False
@@ -2448,7 +2438,7 @@ class PDFConsole(cmd.Cmd):
             self.help_js_eval()
             return False
         if srcType == "variable":
-            if not src in self.variables:
+            if src not in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_eval " + argv, message)
                 return False
@@ -2604,7 +2594,7 @@ class PDFConsole(cmd.Cmd):
             self.help_js_jjdecode()
             return False
         if srcType == "variable":
-            if not src in self.variables:
+            if src not in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_jjdecode " + argv, message)
                 return False
@@ -2741,7 +2731,7 @@ class PDFConsole(cmd.Cmd):
     def do_js_join(self, argv):
         content = ""
         finalString = ""
-        reSeparatedStrings = "[\"'](.*?)[\"']"
+        reSeparatedStrings = r"[\"'](.*?)[\"']"
         validTypes = ["variable", "file", "string"]
         args = self.parseArgs(argv)
         if args is None:
@@ -2757,7 +2747,7 @@ class PDFConsole(cmd.Cmd):
             self.help_js_join()
             return False
         if srcType == "variable":
-            if not src in self.variables:
+            if src not in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_join " + argv, message)
                 return False
@@ -2815,7 +2805,7 @@ class PDFConsole(cmd.Cmd):
             self.help_js_unescape()
             return False
         if srcType == "variable":
-            if not src in self.variables:
+            if src not in self.variables:
                 message = "[!] Error: The variable does not exist"
                 self.log_output("js_unescape " + argv, message)
                 return False
@@ -2840,7 +2830,7 @@ class PDFConsole(cmd.Cmd):
         if ret[0] != -1:
             unescapedBytes = ret[1]
             byteVal = ret[1]
-            urlsFound = re.findall("https?://.*$", unescapedBytes, re.DOTALL)
+            urlsFound = re.findall(r"https?://.*$", unescapedBytes, re.DOTALL)
             if unescapedBytes != "":
                 unescapedOutput += f"{newLine}Unescaped bytes:{newLine * 2}{self.printBytes(unescapedBytes)}"
             if urlsFound != []:
@@ -3178,17 +3168,16 @@ class PDFConsole(cmd.Cmd):
             if contentFile is not None:
                 with open(contentFile, "rb") as streamOut:
                     streamContent = streamOut.read()
+            elif self.use_rawinput:
+                streamContent = input(
+                    f"{newLine}Please, specify the stream content"
+                    f"(if the content includes EOL characters use a file instead): "
+                    f"{newLine * 2}"
+                )
             else:
-                if self.use_rawinput:
-                    streamContent = input(
-                        f"{newLine}Please, specify the stream content"
-                        f"(if the content includes EOL characters use a file instead): "
-                        f"{newLine * 2}"
-                    )
-                else:
-                    message = "[!] Error: In script mode you must specify a file storing the stream content"
-                    self.log_output("modify " + argv, message)
-                    return False
+                message = "[!] Error: In script mode you must specify a file storing the stream content"
+                self.log_output("modify " + argv, message)
+                return False
             obj.setDecodedStream(streamContent)
         ret = self.pdfFile.setObject(thisId, obj, version, mod=True)
         if ret[0] == -1:
@@ -3710,16 +3699,15 @@ class PDFConsole(cmd.Cmd):
                     message = "[+] The string has been replaced correctly"
                 else:
                     message = "String not found"
-            else:
-                if src in self.variables:
-                    if self.variables[src][0].find(string1) != -1:
-                        replaceOutput = self.variables[src][0].replace(string1, string2)
-                        self.variables[src][0] = replaceOutput
-                        message = "[+] The string has been replaced correctly"
-                    else:
-                        message = "String not found"
+            elif src in self.variables:
+                if self.variables[src][0].find(string1) != -1:
+                    replaceOutput = self.variables[src][0].replace(string1, string2)
+                    self.variables[src][0] = replaceOutput
+                    message = "[+] The string has been replaced correctly"
                 else:
-                    message = "[!] Error: The variable does not exist"
+                    message = "String not found"
+            else:
+                message = "[!] Error: The variable does not exist"
         self.log_output("replace " + argv, message)
 
     def help_replace(self):
@@ -3906,17 +3894,16 @@ class PDFConsole(cmd.Cmd):
                 return False
             offset = int(offset)
             size = int(size)
+        elif verboseMode:
+            if len(args) != 3:
+                self.help_sctest()
+                return False
+            src = args[2]
         else:
-            if verboseMode:
-                if len(args) != 3:
-                    self.help_sctest()
-                    return False
-                src = args[2]
-            else:
-                if len(args) != 2:
-                    self.help_sctest()
-                    return False
-                src = args[1]
+            if len(args) != 2:
+                self.help_sctest()
+                return False
+            src = args[1]
 
         if srcType == "variable":
             if src not in self.variables:
@@ -3987,7 +3974,7 @@ class PDFConsole(cmd.Cmd):
                 self.help_search()
                 return False
             toSearch = args[1]
-            if re.match("(\\\\x[0-9a-f]{1,2})+", toSearch):
+            if re.match(r"(\\\\x[0-9a-f]{1,2})+", toSearch):
                 hexChars = toSearch.split("\\x")
                 hexChars.remove("")
                 toSearch = ""
@@ -4009,22 +3996,19 @@ class PDFConsole(cmd.Cmd):
         objects = self.pdfFile.getObjectsByString(toSearch)
         if objects == []:
             output = "Not found"
-        else:
-            if len(objects) == 1:
-                if objects[0] == []:
-                    output = "Not found"
-                else:
-                    output = str(objects[0])
+        elif len(objects) == 1:
+            if objects[0] == []:
+                output = "Not found"
             else:
-                for version, result in enumerate(objects):
-                    if result:
-                        output += (
-                            f"{newLine}Version {str(version)}: {str(result)}{newLine}"
-                        )
-                if output == "":
-                    output = "Not found"
-                else:
-                    output = output[1:-1]
+                output = str(objects[0])
+        else:
+            for version, result in enumerate(objects):
+                if result:
+                    output += f"{newLine}Version {str(version)}: {str(result)}{newLine}"
+            if output == "":
+                output = "Not found"
+            else:
+                output = output[1:-1]
         self.log_output("search " + argv, output)
 
     def help_search(self):
@@ -4111,19 +4095,18 @@ class PDFConsole(cmd.Cmd):
             self.help_show()
             return False
         var = args[0]
-        if not var in self.variables:
+        if var not in self.variables:
             print(f"{newLine}[!] Error: The variable {var} does not exist.{newLine}")
             return False
         if var == "output":
             if self.variables[var][0] == "stdout":
                 print(f'{newLine}output = "stdout" {newLine}')
+            elif self.variables[var][0] == "file":
+                print(f'{newLine}output = "file"')
+                print(f'fileName = "{self.output}" {newLine}')
             else:
-                if self.variables[var][0] == "file":
-                    print(f'{newLine}output = "file"')
-                    print(f'fileName = "{self.output}" {newLine}')
-                else:
-                    print(f'{newLine}output = "variable"')
-                    print(f'varName = "{self.output}" {newLine}')
+                print(f'{newLine}output = "variable"')
+                print(f'varName = "{self.output}" {newLine}')
         else:
             varContent = self.printResult(str(self.variables[var][0]))
             print(f"{newLine}{varContent}{newLine}")
@@ -4297,6 +4280,7 @@ class PDFConsole(cmd.Cmd):
             "stream",
             "rawstream",
         ]
+        version = None
         # Checking if a VirusTotal API key has been defined
         if "yourAPIkey" in self.variables["vt_key"][0]:
             message = (
@@ -4429,7 +4413,7 @@ class PDFConsole(cmd.Cmd):
             unixEpoch = jsonDict["data"]["attributes"]["last_analysis_date"]
             scanResults = jsonDict["data"]["attributes"]["last_analysis_results"]
             selfLink = f'https://www.virustotal.com/gui/file/{jsonDict["data"]["attributes"]["sha256"]}'
-            lastAnalysisDate = dt.utcfromtimestamp(unixEpoch).strftime(DTFMT)
+            lastAnalysisDate = dt.fromtimestamp(unixEpoch, timezone.utc).strftime(DTFMT)
             detectionColor = ""
             if args == []:
                 self.pdfFile.setDetectionRate([maliciousCount, totalCount])
@@ -4557,6 +4541,7 @@ class PDFConsole(cmd.Cmd):
         content = ""
         srcName = ""
         thisId = ""
+        version = None
         validTypes = ["variable", "file", "raw", "stream", "rawstream"]
         args = self.parseArgs(argv)
         if not args:
@@ -4716,6 +4701,7 @@ class PDFConsole(cmd.Cmd):
         successfullKeys = {}
         caseSensitive = True
         validTypes = ["variable", "file", "raw", "stream", "rawstream"]
+        version = None
         args = self.parseArgs(argv)
         if not args:
             message = "[!] Error: The command line arguments have not been parsed successfully"
@@ -5209,80 +5195,79 @@ class PDFConsole(cmd.Cmd):
                         obj.setValue(content)
                 else:
                     obj.setRawValue(content)
-        else:
-            if objectType == "array":
-                newElements = []
-                elements = obj.getElements()
-                for element in elements:
-                    ret = self.modifyObject(element, iteration + 1, maxDepth=maxDepth)
+        elif objectType == "array":
+            newElements = []
+            elements = obj.getElements()
+            for element in elements:
+                ret = self.modifyObject(element, iteration + 1, maxDepth=maxDepth)
+                if ret[0] == -1:
+                    return ret
+                newObject = ret[1]
+                if newObject is not None:
+                    newElements.append(newObject)
+            while True:
+                res = self.additionRequest()
+                if res is None:
+                    return (-1, "Option not valid")
+                if res == "y":
+                    ret = self.addObject(iteration + 1)
                     if ret[0] == -1:
                         return ret
-                    newObject = ret[1]
-                    if newObject is not None:
-                        newElements.append(newObject)
-                while True:
-                    res = self.additionRequest()
-                    if res is None:
-                        return (-1, "Option not valid")
-                    if res == "y":
-                        ret = self.addObject(iteration + 1)
-                        if ret[0] == -1:
-                            return ret
-                        newElements.append(ret[1])
-                    else:
-                        break
-                obj.setElements(newElements)
-            elif objectType in {"dictionary", "stream"}:
-                newElements = {}
-                elements = obj.getElements()
-                if objectType == "stream":
-                    if iteration == 0:
-                        value = obj.getStream()
-                        rawValue = ""
-                        ret = self.modifyRequest(value, rawValue, stream=True)
-                        if ret == "d":
-                            obj.setDecodedStream("")
-                        elif ret == "m":
-                            if contentFile is not None:
-                                with open(contentFile, "rb") as fileContent:
-                                    streamContent = fileContent.read()
-                            else:
-                                streamContent = input(
-                                    f"{newLine}Please specify the stream content "
-                                    f"(if the content includes EOL characters use a file instead): {newLine * 2}"
-                                )
-                            obj.setDecodedStream(streamContent)
-                    else:
-                        return (-1, "Nested streams are not permitted")
-                for element in elements:
-                    valueObject = elements[element]
-                    value = valueObject.getValue()
-                    rawValue = valueObject.getRawValue()
-                    ret = self.modifyRequest(value, rawValue, element)
-                    if ret == "n":
-                        newElements[element] = valueObject
+                    newElements.append(ret[1])
+                else:
+                    break
+            obj.setElements(newElements)
+        elif objectType in {"dictionary", "stream"}:
+            newElements = {}
+            elements = obj.getElements()
+            if objectType == "stream":
+                if iteration == 0:
+                    value = obj.getStream()
+                    rawValue = ""
+                    ret = self.modifyRequest(value, rawValue, stream=True)
+                    if ret == "d":
+                        obj.setDecodedStream("")
                     elif ret == "m":
-                        nestRet = self.modifyObject(
-                            valueObject, iteration + 1, maxDepth=maxDepth
-                        )
-                        if nestRet[0] == -1:
-                            return nestRet
-                        newObject = nestRet[1]
-                        newElements[element] = newObject
-                while True:
-                    res = self.additionRequest(isDict=True)
-                    if res is None:
-                        return (-1, "Option not valid")
-                    if res == "y":
-                        key = input("Name object: ")
-                        key = self.checkInputContent("name", key)
-                        ret = self.addObject(iteration + 1)
-                        if ret[0] == -1:
-                            return ret
-                        newElements[key] = ret[1]
-                    else:
-                        break
-                obj.setElements(newElements)
+                        if contentFile is not None:
+                            with open(contentFile, "rb") as fileContent:
+                                streamContent = fileContent.read()
+                        else:
+                            streamContent = input(
+                                f"{newLine}Please specify the stream content "
+                                f"(if the content includes EOL characters use a file instead): {newLine * 2}"
+                            )
+                        obj.setDecodedStream(streamContent)
+                else:
+                    return (-1, "Nested streams are not permitted")
+            for element in elements:
+                valueObject = elements[element]
+                value = valueObject.getValue()
+                rawValue = valueObject.getRawValue()
+                ret = self.modifyRequest(value, rawValue, element)
+                if ret == "n":
+                    newElements[element] = valueObject
+                elif ret == "m":
+                    nestRet = self.modifyObject(
+                        valueObject, iteration + 1, maxDepth=maxDepth
+                    )
+                    if nestRet[0] == -1:
+                        return nestRet
+                    newObject = nestRet[1]
+                    newElements[element] = newObject
+            while True:
+                res = self.additionRequest(isDict=True)
+                if res is None:
+                    return (-1, "Option not valid")
+                if res == "y":
+                    key = input("Name object: ")
+                    key = self.checkInputContent("name", key)
+                    ret = self.addObject(iteration + 1)
+                    if ret[0] == -1:
+                        return ret
+                    newElements[key] = ret[1]
+                else:
+                    break
+            obj.setElements(newElements)
         return (0, obj)
 
     def modifyRequest(self, value, rawValue, key=None, stream: bool = False):

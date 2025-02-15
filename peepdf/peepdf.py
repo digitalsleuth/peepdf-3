@@ -34,15 +34,19 @@ from operator import attrgetter
 
 
 try:
-    from peepdf.PDFCore import PDFParser, VERSION, PIL_MODULE, EMU_MODULE, JS_MODULE
-    from peepdf.PDFUtils import vtcheck, getPeepJSON, getPeepXML, getUpdate
+    from peepdf.PDFCore import PDFParser, VERSION
+    from peepdf.PDFUtils import vtcheck, getPeepJSON, getPeepXML, getUpdate, DTFMT
     from peepdf.PDFVulns import vulnsDict
-    from peepdf.PDFConsole import PDFConsole
+    from peepdf.PDFConsole import PDFConsole, EMU_MODULE
+    from peepdf.JSAnalysis import JS_MODULE
+    from peepdf.PDFFilters import PIL_MODULE
 except ModuleNotFoundError:
-    from PDFCore import PDFParser, VERSION, PIL_MODULE, EMU_MODULE, JS_MODULE
-    from PDFUtils import vtcheck, getPeepJSON, getPeepXML, getUpdate
+    from PDFCore import PDFParser, VERSION
+    from PDFUtils import vtcheck, getPeepJSON, getPeepXML, getUpdate, DTFMT
     from PDFVulns import vulnsDict
-    from PDFConsole import PDFConsole
+    from PDFConsole import PDFConsole, EMU_MODULE, DTFMT
+    from JSAnalysis import JS_MODULE
+    from PDFFilters import PIL_MODULE
 
 try:
     from colorama import init, Fore, Style
@@ -51,8 +55,7 @@ try:
 except ModuleNotFoundError:
     COLORIZED_OUTPUT = False
 
-VT_KEY = f"YOUR KEY GOES ON LINE 54 OF {__file__}, USE set vt_key yourAPIkey in interactive mode instead of -c, OR use -k yourAPIkey with -c"
-DTFMT = "%Y%m%d-%H%M%S"
+VT_KEY = f"YOUR KEY GOES ON LINE 58 OF {__file__}, USE set vt_key yourAPIkey in interactive mode instead of -c, OR use -k yourAPIkey with -c"
 ERROR_LOG = f"peepdf_errors-{dt.now().strftime(DTFMT)}.txt"
 
 
@@ -233,7 +236,8 @@ def main():
                     console.cmdloop()
                 except Exception as exc:
                     errorMessage = "[!] Error: Exception while launching Interactive mode without a PDF file"
-                    traceback.print_exc(file=open(errorsFile, "a", encoding="utf-8"))
+                    with open(errorsFile, "a", encoding="utf-8") as errorLog:
+                        traceback.print_exc(file=errorLog)
                     raise Exception("PeepException", "Open an Issue on GitHub") from exc
             elif (numArgs > 4 and not fileName) or (
                 numArgs == 0 and not args.isInteractive
@@ -259,7 +263,7 @@ def main():
                     sys.stdout.write(f"Text content of: {fileName}{newLine}")
                     sys.stdout.write(output)
                     raise SystemExit(0)
-                if args.checkOnVT and not "vt_key" in args.vtApiKey:
+                if args.checkOnVT and "vt_key" not in args.vtApiKey:
                     # Checks the MD5 on VirusTotal
                     vtKey = args.vtApiKey
                     md5Hash = pdf.getMD5()
@@ -300,7 +304,8 @@ def main():
                     sys.stdout.write(xml)
                 except Exception as exc:
                     errorMessage = "[!] Error: Exception while generating the XML file"
-                    traceback.print_exc(file=open(errorsFile, "a", encoding="utf-8"))
+                    with open(errorsFile, "a", encoding="utf-8") as errorLog:
+                        traceback.print_exc(file=errorLog)
                     raise Exception("PeepException", "Open an Issue on GitHub") from exc
             elif args.jsonOutput and not args.commands:
                 try:
@@ -310,7 +315,8 @@ def main():
                     errorMessage = (
                         "[!] Error: Exception while generating the JSON report"
                     )
-                    traceback.print_exc(file=open(errorsFile, "a", encoding="utf-8"))
+                    with open(errorsFile, "a", encoding="utf-8") as errorLog:
+                        traceback.print_exc(file=errorLog)
                     raise Exception("PeepException", "Open an Issue on GitHub") from exc
             else:
                 if COLORIZED_OUTPUT and not args.avoidColors:
@@ -335,9 +341,8 @@ def main():
                             "[!] Error: Exception not handled using the script mode"
                         )
                         scriptFileObject.close()
-                        traceback.print_exc(
-                            file=open(errorsFile, "a", encoding="utf-8")
-                        )
+                        with open(errorsFile, "a", encoding="utf-8") as errorLog:
+                            traceback.print_exc(file=errorLog)
                         raise Exception(
                             "PeepException", "Open an Issue on GitHub"
                         ) from exc
@@ -350,9 +355,8 @@ def main():
                         errorMessage = (
                             "[!] Error: Exception not handled using the script commands"
                         )
-                        traceback.print_exc(
-                            file=open(errorsFile, "a", encoding="utf-8")
-                        )
+                        with open(errorsFile, "a", encoding="utf-8") as errorLog:
+                            traceback.print_exc(file=errorLog)
                         raise Exception(
                             "PeepException", "Open an Issue on GitHub"
                         ) from exc
@@ -599,9 +603,10 @@ def main():
                                 print(
                                     f"{errorColor}{errorMessage}{resetColor}{newLine}"
                                 )
-                                traceback.print_exc(
-                                    file=open(errorsFile, "a", encoding="utf-8")
-                                )
+                                with open(
+                                    errorsFile, "a", encoding="utf-8"
+                                ) as errorLog:
+                                    traceback.print_exc(file=errorLog)
     except Exception as e:
         if len(e.args) == 2:
             excName, _ = e.args
@@ -609,7 +614,8 @@ def main():
             excName = _ = None
         if excName is None or excName != "PeepException":
             errorMessage = "[!] Error: Exception not handled"
-            traceback.print_exc(file=open(errorsFile, "a", encoding="utf-8"))
+            with open(errorsFile, "a", encoding="utf-8") as errorLog:
+                traceback.print_exc(file=errorLog)
         print(f"{errorColor}{errorMessage}{resetColor}{newLine}")
     finally:
         if os.path.exists(errorsFile):
