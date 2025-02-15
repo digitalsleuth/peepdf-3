@@ -31,9 +31,9 @@ from datetime import datetime as dt
 import jsbeautifier
 
 try:
-    from peepdf.PDFUtils import unescapeHTMLEntities, escapeString
+    from peepdf.PDFUtils import unescapeHTMLEntities, escapeString, DTFMT
 except ModuleNotFoundError:
-    from PDFUtils import unescapeHTMLEntities, escapeString
+    from PDFUtils import unescapeHTMLEntities, escapeString, DTFMT
 
 try:
     import STPyV8
@@ -52,12 +52,11 @@ try:
 except ModuleNotFoundError:
     JS_MODULE = False
 
-DTFMT = "%Y%m%d-%H%M%S"
 ERROR_LOG = f"peepdf_jserrors-{dt.now().strftime(DTFMT)}.txt"
 currentDir = os.getcwd()
 errorsFile = os.path.join(currentDir, ERROR_LOG)
 newLine = os.linesep
-reJSscript = "<script[^>]*?contentType\s*?=\s*?['\"]application/x-javascript['\"][^>]*?>(.*?)</script>"
+reJSscript = r"<script[^>]*?contentType\s*?=\s*?['\"]application/x-javascript['\"][^>]*?>(.*?)</script>"
 preDefinedCode = "var app = this;"
 
 
@@ -115,7 +114,7 @@ def analyseJS(code: str, context=None, manualAnalysis: bool = False):
 
             if code != "":
                 escapedVars = re.findall(
-                    "(\w*?)\s*?=\s*?(unescape\((.*?)\))", code, re.DOTALL
+                    r"(\w*?)\s*?=\s*?(unescape\((.*?)\))", code, re.DOTALL
                 )
                 for var in escapedVars:
                     bytesVal = var[2]
@@ -125,7 +124,7 @@ def analyseJS(code: str, context=None, manualAnalysis: bool = False):
                             ret = unescape(varContent)
                             if ret[0] != -1:
                                 bytesVal = ret[1]
-                                urls = re.findall("https?://.*$", bytesVal, re.DOTALL)
+                                urls = re.findall(r"https?://.*$", bytesVal, re.DOTALL)
                                 if bytesVal not in unescapedBytes:
                                     unescapedBytes.append(bytesVal)
                                 for url in urls:
@@ -137,7 +136,7 @@ def analyseJS(code: str, context=None, manualAnalysis: bool = False):
                             ret = unescape(bytesVal)
                             if ret[0] != -1:
                                 bytesVal = ret[1]
-                                urls = re.findall("https?://.*$", bytesVal, re.DOTALL)
+                                urls = re.findall(r"https?://.*$", bytesVal, re.DOTALL)
                                 if bytesVal not in unescapedBytes:
                                     unescapedBytes.append(bytesVal)
                                 for url in urls:
@@ -169,11 +168,11 @@ def getVarContent(jsCode: str, varContent: str):
     varContent = varContent.replace(" ", "")
     parts = varContent.split("+")
     for part in parts:
-        if re.match("[\"'].*?[\"']", part, re.DOTALL):
+        if re.match(r"[\"'].*?[\"']", part, re.DOTALL):
             clearBytes += part[1:-1]
         else:
             part = escapeString(part)
-            varContent = re.findall(part + "\s*?=\s*?(.*?)[,;]", jsCode, re.DOTALL)
+            varContent = re.findall(part + r"\s*?=\s*?(.*?)[,;]", jsCode, re.DOTALL)
             if varContent:
                 clearBytes += getVarContent(jsCode, varContent[0])
     return clearBytes
@@ -265,7 +264,7 @@ def searchObfuscatedFunctions(jsCode: str, function: str):
     obfuscatedFunctionsInfo = []
     if jsCode is not None:
         match = re.findall(
-            "\W(" + function + "\s{0,5}?\((.*?)\)\s{0,5}?;)", jsCode, re.DOTALL
+            r"\W(" + function + r"\s{0,5}?\((.*?)\)\s{0,5}?;)", jsCode, re.DOTALL
         )
         if match:
             for m in match:
@@ -274,7 +273,7 @@ def searchObfuscatedFunctions(jsCode: str, function: str):
                 else:
                     obfuscatedFunctionsInfo.append([function, m, False])
         obfuscatedFunctions = re.findall(
-            "\s*?((\w*?)\s*?=\s*?" + function + ")\s*?;", jsCode, re.DOTALL
+            r"\s*?((\w*?)\s*?=\s*?" + function + r")\s*?;", jsCode, re.DOTALL
         )
         for obfuscatedFunction in obfuscatedFunctions:
             obfuscatedElement = obfuscatedFunction[1]

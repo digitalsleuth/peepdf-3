@@ -104,10 +104,9 @@ __url__ = "http://www.joe-bowers.com/static/lzw"
 """
 
 import re
-import sys
 import struct
 import itertools
-from io import StringIO, BytesIO
+from io import StringIO
 
 
 ## START CCITT
@@ -544,11 +543,7 @@ class CCITTFax:
         # FIXME seems not stick to the spec? default is false, but if not set as true, it won't decode 6cc2a162e08836f7d50d461a9fc136fe correctly
         byteAlign = True
 
-        if blackIs1:
-            white, black = 0, 1
-        else:
-            white, black = 1, 0
-
+        white = int(not blackIs1)
         bitr = BitReader(stream)
         bitw = BitWriter()
 
@@ -624,8 +619,8 @@ class CCITTFax:
             check_conf = False
 
             for i in range(2, 14):
-                codeword = bitr.peek(i)
-                config_value = config_words.get((codeword, i), None)
+                code = bitr.peek(i)
+                config_value = config_words.get((code, i), None)
 
                 if config_value is not None:
                     bitr.pos += i
@@ -635,8 +630,8 @@ class CCITTFax:
                     break
 
             for i in range(2, 14):
-                codeword = bitr.peek(i)
-                term_value = term_words.get((codeword, i), None)
+                code = bitr.peek(i)
+                term_value = term_words.get((code, i), None)
 
                 if term_value is not None:
                     bitr.pos += i
@@ -657,7 +652,7 @@ class JJDecoder:
         self.encoded_str = jj_encoded_data
 
     def clean(self):
-        self.encoded_str = re.sub("^\s+|\s+$", "", self.encoded_str)
+        self.encoded_str = re.sub(r"^\s+|\s+$", "", self.encoded_str)
 
     def checkPalindrome(self):
         startpos = -1

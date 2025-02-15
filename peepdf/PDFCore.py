@@ -28,8 +28,8 @@ import os
 import re
 import hashlib
 import logging
+import random
 import pypdf
-
 
 try:
     from peepdf.PDFUtils import (
@@ -90,27 +90,6 @@ except ModuleNotFoundError:
         monitorizedElements,
     )
 
-try:
-    from PIL import Image
-
-    PIL_MODULE = True
-except ModuleNotFoundError:
-    PIL_MODULE = False
-
-try:
-    import pylibemu
-
-    EMU_MODULE = True
-except ModuleNotFoundError:
-    EMU_MODULE = False
-
-try:
-    import STPyV8
-
-    JS_MODULE = True
-except ModuleNotFoundError:
-    JS_MODULE = False
-
 
 MAL_ALL = 1
 MAL_HEAD = 2
@@ -118,7 +97,7 @@ MAL_EOBJ = 3
 MAL_ESTREAM = 4
 MAL_XREF = 5
 MAL_BAD_HEAD = 6
-VERSION = "4.1.0"
+VERSION = "5.0.0"
 IS_ID_1 = False
 IS_ID_2 = False
 pdfFile = None
@@ -1784,33 +1763,29 @@ class PDFStream(PDFDictionary):
                 elif length.getType() == "reference":
                     self.updateNeeded = True
                     self.referencesInElements["/Length"] = [length.getId(), ""]
+                elif isForceMode:
+                    self.addError("No permitted type for /Length element")
                 else:
-                    if isForceMode:
-                        self.addError("No permitted type for /Length element")
-                    else:
-                        return (-1, "No permitted type for /Length element")
+                    return (-1, "No permitted type for /Length element")
+            elif isForceMode:
+                self.addError("None /Length element")
             else:
-                if isForceMode:
-                    self.addError("None /Length element")
-                else:
-                    return (-1, "None /Length element")
+                return (-1, "None /Length element")
+        elif isForceMode:
+            self.addError("Missing /Length in stream object")
         else:
-            if isForceMode:
-                self.addError("Missing /Length in stream object")
-            else:
-                return (-1, "Missing /Length in stream object")
+            return (-1, "Missing /Length in stream object")
 
         if "/F" in self.elements:
             self.file = self.elements["/F"].getValue()
             if os.path.exists(self.file):
                 with open(self.file, "rb") as rawStreamFile:
                     self.rawStream = rawStreamFile.read()
+            elif isForceMode:
+                self.addError(f'File "{self.file}" does not exist (/F)')
+                self.rawStream = ""
             else:
-                if isForceMode:
-                    self.addError(f'File "{self.file}" does not exist (/F)')
-                    self.rawStream = ""
-                else:
-                    return (-1, f'File "{self.file}" does not exist (/F)')
+                return (-1, f'File "{self.file}" does not exist (/F)')
 
         if "/Filter" in self.elements:
             self.thisFilter = self.elements["/Filter"]
@@ -1935,7 +1910,7 @@ class PDFStream(PDFDictionary):
                             self.size = len(self.encodedStream)
                 elif self.modifiedStream:
                     refs = re.findall(
-                        "(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream
+                        r"(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream
                     )
                     if refs != []:
                         self.references += refs
@@ -1979,21 +1954,18 @@ class PDFStream(PDFDictionary):
                                 self.size = len(self.rawStream)
                             else:
                                 self.size = len(self.encodedStream)
+                    elif self.encrypted:
+                        try:
+                            self.rawStream = RC4(self.decodedStream, self.encryptionKey)
+                        except:
+                            errorMessage = "[!] Error encrypting stream with RC4"
+                            if isForceMode:
+                                self.addError(errorMessage)
+                            else:
+                                return (-1, errorMessage)
+                        self.size = len(self.rawStream)
                     else:
-                        if self.encrypted:
-                            try:
-                                self.rawStream = RC4(
-                                    self.decodedStream, self.encryptionKey
-                                )
-                            except:
-                                errorMessage = "[!] Error encrypting stream with RC4"
-                                if isForceMode:
-                                    self.addError(errorMessage)
-                                else:
-                                    return (-1, errorMessage)
-                            self.size = len(self.rawStream)
-                        else:
-                            self.size = len(self.decodedStream)
+                        self.size = len(self.decodedStream)
                 elif self.modifiedRawStream:
                     if len(self.encodedStream) > 0 or len(self.decodedStream) > 0:
                         self.cleanStream()
@@ -2058,9 +2030,8 @@ class PDFStream(PDFDictionary):
                                         self.addError(errorMessage)
                                     else:
                                         return (-1, errorMessage)
-                        else:
-                            if self.isEncodedStream:
-                                self.decode()
+                        elif self.isEncodedStream:
+                            self.decode()
                         self.size = len(self.rawStream)
                         if not self.isFaultyDecoding():
                             if isinstance(self.decodedStream, bytes):
@@ -2068,7 +2039,7 @@ class PDFStream(PDFDictionary):
                                     "latin-1"
                                 )
                             refs = re.findall(
-                                "(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream
+                                r"(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream
                             )
                             if refs != []:
                                 self.references += refs
@@ -2098,110 +2069,102 @@ class PDFStream(PDFDictionary):
                                             self.addError(errorMessage)
                                         else:
                                             return (-1, errorMessage)
+                elif not decrypt:
+                    try:
+                        if self.isEncodedStream:
+                            self.rawStream = RC4(self.encodedStream, self.encryptionKey)
+                        else:
+                            self.rawStream = RC4(self.decodedStream, self.encryptionKey)
+                    except:
+                        errorMessage = "[!] Error encrypting stream with RC4"
+                        if isForceMode:
+                            self.addError(errorMessage)
+                        else:
+                            return (-1, errorMessage)
+                    self.size = len(self.rawStream)
                 else:
-                    if not decrypt:
+                    if self.isEncodedStream:
                         try:
-                            if self.isEncodedStream:
-                                self.rawStream = RC4(
+                            if algorithm == "RC4":
+                                self.encodedStream = RC4(
                                     self.encodedStream, self.encryptionKey
                                 )
-                            else:
-                                self.rawStream = RC4(
-                                    self.decodedStream, self.encryptionKey
+                            elif algorithm == "AES":
+                                ret = decryptData(
+                                    self.encodedStream, self.encryptionKey
                                 )
+                                if ret[0] != -1:
+                                    self.encodedStream = ret[1]
+                                else:
+                                    errorMessage = f"AES decryption error: {ret[1]}"
+                                    if isForceMode:
+                                        self.addError(errorMessage)
+                                    else:
+                                        return (-1, errorMessage)
                         except:
-                            errorMessage = "[!] Error encrypting stream with RC4"
+                            errorMessage = (
+                                f"[!] Error decrypting stream with {str(algorithm)}"
+                            )
                             if isForceMode:
                                 self.addError(errorMessage)
                             else:
                                 return (-1, errorMessage)
-                        self.size = len(self.rawStream)
+                        self.decode()
                     else:
-                        if self.isEncodedStream:
-                            try:
-                                if algorithm == "RC4":
-                                    self.encodedStream = RC4(
-                                        self.encodedStream, self.encryptionKey
-                                    )
-                                elif algorithm == "AES":
-                                    ret = decryptData(
-                                        self.encodedStream, self.encryptionKey
-                                    )
-                                    if ret[0] != -1:
-                                        self.encodedStream = ret[1]
-                                    else:
-                                        errorMessage = f"AES decryption error: {ret[1]}"
-                                        if isForceMode:
-                                            self.addError(errorMessage)
-                                        else:
-                                            return (-1, errorMessage)
-                            except:
-                                errorMessage = (
-                                    f"[!] Error decrypting stream with {str(algorithm)}"
+                        try:
+                            if algorithm == "RC4":
+                                self.decodedStream = RC4(
+                                    self.decodedStream, self.encryptionKey
                                 )
-                                if isForceMode:
-                                    self.addError(errorMessage)
-                                else:
-                                    return (-1, errorMessage)
-                            self.decode()
-                        else:
-                            try:
-                                if algorithm == "RC4":
-                                    self.decodedStream = RC4(
-                                        self.decodedStream, self.encryptionKey
-                                    )
-                                elif algorithm == "AES":
-                                    ret = decryptData(
-                                        self.decodedStream, self.encryptionKey
-                                    )
-                                    if ret[0] != -1:
-                                        self.decodedStream = ret[1]
-                                    else:
-                                        errorMessage = f"AES decryption error: {ret[1]}"
-                                        if isForceMode:
-                                            self.addError(errorMessage)
-                                        else:
-                                            return (-1, errorMessage)
-                            except:
-                                errorMessage = (
-                                    f"[!] Error decrypting stream with {str(algorithm)}"
+                            elif algorithm == "AES":
+                                ret = decryptData(
+                                    self.decodedStream, self.encryptionKey
                                 )
-                                if isForceMode:
-                                    self.addError(errorMessage)
+                                if ret[0] != -1:
+                                    self.decodedStream = ret[1]
                                 else:
-                                    return (-1, errorMessage)
-                        if not self.isFaultyDecoding():
-                            refs = re.findall(
-                                "(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream
+                                    errorMessage = f"AES decryption error: {ret[1]}"
+                                    if isForceMode:
+                                        self.addError(errorMessage)
+                                    else:
+                                        return (-1, errorMessage)
+                        except:
+                            errorMessage = (
+                                f"[!] Error decrypting stream with {str(algorithm)}"
                             )
-                            if refs != []:
-                                self.references += refs
-                                self.references = list(set(self.references))
-                            if (
-                                isJavascript(self.decodedStream)
-                                or self.referencedJSObject
-                            ):
-                                self.containsJScode = True
-                                (
-                                    self.JSCode,
-                                    self.unescapedBytes,
-                                    self.urlsFound,
-                                    jsErrors,
-                                    jsContexts["global"],
-                                ) = analyseJS(
-                                    self.decodedStream,
-                                    jsContexts["global"],
-                                    isManualAnalysis,
-                                )
-                                if jsErrors:
-                                    for jsError in jsErrors:
-                                        errorMessage = (
-                                            f"[!] Error analysing Javascript: {jsError}"
-                                        )
-                                        if isForceMode:
-                                            self.addError(errorMessage)
-                                        else:
-                                            return (-1, errorMessage)
+                            if isForceMode:
+                                self.addError(errorMessage)
+                            else:
+                                return (-1, errorMessage)
+                    if not self.isFaultyDecoding():
+                        refs = re.findall(
+                            r"(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream
+                        )
+                        if refs != []:
+                            self.references += refs
+                            self.references = list(set(self.references))
+                        if isJavascript(self.decodedStream) or self.referencedJSObject:
+                            self.containsJScode = True
+                            (
+                                self.JSCode,
+                                self.unescapedBytes,
+                                self.urlsFound,
+                                jsErrors,
+                                jsContexts["global"],
+                            ) = analyseJS(
+                                self.decodedStream,
+                                jsContexts["global"],
+                                isManualAnalysis,
+                            )
+                            if jsErrors:
+                                for jsError in jsErrors:
+                                    errorMessage = (
+                                        f"[!] Error analysing Javascript: {jsError}"
+                                    )
+                                    if isForceMode:
+                                        self.addError(errorMessage)
+                                    else:
+                                        return (-1, errorMessage)
                 if not self.modifiedRawStream:
                     self.modifiedStream = False
                     self.newFilters = False
@@ -2274,6 +2237,7 @@ class PDFStream(PDFDictionary):
         @return: A tuple (status,statusContent), where statusContent is empty in case status = 0 or an error message in case status = -1
         """
         errorMessage = ""
+        filterParamsType = ""
         if len(self.rawStream) > 0:
             if self.isEncodedStream:
                 if self.thisFilter is None:
@@ -2332,13 +2296,12 @@ class PDFStream(PDFDictionary):
                             self.decodedStream = ret[1]
                         else:
                             self.decodedStream = ret[1]
+                    elif isForceMode:
+                        errorMessage = "Filter parameters type is not valid"
+                        self.addError(errorMessage)
+                        self.decodedStream = ""
                     else:
-                        if isForceMode:
-                            errorMessage = "Filter parameters type is not valid"
-                            self.addError(errorMessage)
-                            self.decodedStream = ""
-                        else:
-                            return (-1, "Filter parameters type is not valid")
+                        return (-1, "Filter parameters type is not valid")
                 elif filterType == "array":
                     self.decodedStream = self.encodedStream
                     filterElements = self.thisFilter.getElements()
@@ -2420,37 +2383,34 @@ class PDFStream(PDFDictionary):
                                     self.decodedStream = ret[1]
                                 else:
                                     self.decodedStream = ret[1]
-                            else:
-                                if isForceMode:
-                                    errorMessage = "One of the filters parameters type is not valid"
-                                    self.addError(errorMessage)
-                                    self.decodedStream = ""
-                                else:
-                                    return (
-                                        -1,
-                                        "One of the filters parameters type is not valid",
-                                    )
-                        else:
-                            if isForceMode:
-                                errorMessage = "One of the filters type is not valid"
+                            elif isForceMode:
+                                errorMessage = (
+                                    "One of the filters parameters type is not valid"
+                                )
                                 self.addError(errorMessage)
                                 self.decodedStream = ""
                             else:
-                                return (-1, "One of the filters type is not valid")
+                                return (
+                                    -1,
+                                    "One of the filters parameters type is not valid",
+                                )
+                        elif isForceMode:
+                            errorMessage = "One of the filters type is not valid"
+                            self.addError(errorMessage)
+                            self.decodedStream = ""
+                        else:
+                            return (-1, "One of the filters type is not valid")
+                elif isForceMode:
+                    errorMessage = "Filter type is not valid"
+                    self.addError(errorMessage)
+                    self.decodedStream = ""
                 else:
-                    if isForceMode:
-                        errorMessage = "Filter type is not valid"
-                        self.addError(errorMessage)
-                        self.decodedStream = ""
-                    else:
-                        return (-1, "Filter type is not valid")
+                    return (-1, "Filter type is not valid")
                 if errorMessage != "":
                     return (-1, errorMessage)
                 return (0, "")
-            else:
-                return (-1, "Not encoded stream")
-        else:
-            return (-1, "Empty stream")
+            return (-1, "Not encoded stream")
+        return (-1, "Empty stream")
 
     def decrypt(self, password=None, strAlgorithm="RC4", altAlgorithm="RC4"):
         """
@@ -2496,6 +2456,7 @@ class PDFStream(PDFDictionary):
         Encode the decoded stream and update the content of rawStream
         """
         errorMessage = ""
+        filterParamsType = ""
         if len(self.decodedStream) > 0:
             if self.thisFilter is None:
                 return (-1, "Bad /Filter element")
@@ -2533,13 +2494,12 @@ class PDFStream(PDFDictionary):
                             return (-1, errorMessage)
                     else:
                         self.rawStream = ret[1]
+                elif isForceMode:
+                    errorMessage = "Filter parameters type is not valid"
+                    self.addError(errorMessage)
+                    self.encodedStream = ""
                 else:
-                    if isForceMode:
-                        errorMessage = "Filter parameters type is not valid"
-                        self.addError(errorMessage)
-                        self.encodedStream = ""
-                    else:
-                        return (-1, "Filter parameters type is not valid")
+                    return (-1, "Filter parameters type is not valid")
             elif filterType == "array":
                 self.rawStream = self.decodedStream
                 filterElements = list(self.thisFilter.getElements())
@@ -2600,38 +2560,34 @@ class PDFStream(PDFDictionary):
                                     return (-1, errorMessage)
                             else:
                                 self.rawStream = ret[1]
-                        else:
-                            if isForceMode:
-                                errorMessage = (
-                                    "One of the filters parameters type is not valid"
-                                )
-                                self.addError(errorMessage)
-                                self.encodedStream = ""
-                            else:
-                                return (
-                                    -1,
-                                    "One of the filters parameters type is not valid",
-                                )
-                    else:
-                        if isForceMode:
-                            errorMessage = "One of the filters type is not valid"
+                        elif isForceMode:
+                            errorMessage = (
+                                "One of the filters parameters type is not valid"
+                            )
                             self.addError(errorMessage)
                             self.encodedStream = ""
                         else:
-                            return (-1, "One of the filters type is not valid")
+                            return (
+                                -1,
+                                "One of the filters parameters type is not valid",
+                            )
+                    elif isForceMode:
+                        errorMessage = "One of the filters type is not valid"
+                        self.addError(errorMessage)
+                        self.encodedStream = ""
+                    else:
+                        return (-1, "One of the filters type is not valid")
+            elif isForceMode:
+                errorMessage = "Filter type is not valid"
+                self.addError(errorMessage)
+                self.encodedStream = ""
             else:
-                if isForceMode:
-                    errorMessage = "Filter type is not valid"
-                    self.addError(errorMessage)
-                    self.encodedStream = ""
-                else:
-                    return (-1, "Filter type is not valid")
+                return (-1, "Filter type is not valid")
             self.encodedStream = self.rawStream
             if errorMessage != "":
                 return (-1, errorMessage)
             return (0, "")
-        else:
-            return (-1, "Empty stream")
+        return (-1, "Empty stream")
 
     def encrypt(self, password=None):
         self.encrypted = True
@@ -2824,7 +2780,7 @@ class PDFStream(PDFDictionary):
             errorMessage = ret[1]
         if isinstance(self.decodedStream, bytes):
             self.decodedStream = self.decodedStream.decode("latin-1")
-        refs = re.findall("(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream)
+        refs = re.findall(r"(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream)
         if refs:
             self.references += refs
             self.references = list(set(self.references))
@@ -3007,18 +2963,16 @@ class PDFObjectStream(PDFStream):
         # Dictionary
         if "/First" in self.elements and self.elements["/First"] is not None:
             self.firstObjectOffset = self.elements["/First"].getRawValue()
+        elif isForceMode:
+            self.addError("No /First element in the object stream or it's None")
         else:
-            if isForceMode:
-                self.addError("No /First element in the object stream or it's None")
-            else:
-                return (-1, "No /First element in the object stream or it's None")
+            return (-1, "No /First element in the object stream or it's None")
         if "/N" in self.elements and self.elements["/N"] is not None:
             self.numCompressedObjects = self.elements["/N"].getRawValue()
+        elif isForceMode:
+            self.addError("No /N element in the object stream or it's None")
         else:
-            if isForceMode:
-                self.addError("No /N element in the object stream or it's None")
-            else:
-                return (-1, "No /N element in the object stream or it's None")
+            return (-1, "No /N element in the object stream or it's None")
 
         if "/Extends" in self.elements and self.elements["/Extends"] is not None:
             self.extends = self.elements["/Extends"].getValue()
@@ -3031,33 +2985,29 @@ class PDFObjectStream(PDFStream):
                 elif length.getType() == "reference":
                     self.updateNeeded = True
                     self.referencesInElements["/Length"] = [length.getId(), ""]
+                elif isForceMode:
+                    self.addError("No permitted type for /Length element")
                 else:
-                    if isForceMode:
-                        self.addError("No permitted type for /Length element")
-                    else:
-                        return (-1, "No permitted type for /Length element")
+                    return (-1, "No permitted type for /Length element")
+            elif isForceMode:
+                self.addError("None /Length element")
             else:
-                if isForceMode:
-                    self.addError("None /Length element")
-                else:
-                    return (-1, "None /Length element")
+                return (-1, "None /Length element")
+        elif isForceMode:
+            self.addError("Missing /Length in stream object")
         else:
-            if isForceMode:
-                self.addError("Missing /Length in stream object")
-            else:
-                return (-1, "Missing /Length in stream object")
+            return (-1, "Missing /Length in stream object")
 
         if "/F" in self.elements:
             self.file = self.elements["/F"].getValue()
             if os.path.exists(self.file):
                 with open(self.file, "rb") as rawStreamFile:
                     self.rawStream = rawStreamFile.read()
+            elif isForceMode:
+                self.addError(f'File "{self.file}" does not exist (/F)')
+                self.rawStream = ""
             else:
-                if isForceMode:
-                    self.addError(f'File "{self.file}" does not exist (/F)')
-                    self.rawStream = ""
-                else:
-                    return (-1, f'File "{self.file}" does not exist (/F)')
+                return (-1, f'File "{self.file}" does not exist (/F)')
 
         if "/Filter" in self.elements:
             self.thisFilter = self.elements["/Filter"]
@@ -3206,23 +3156,22 @@ class PDFObjectStream(PDFStream):
                                         self.size = len(self.rawStream)
                                     else:
                                         self.size = len(self.encodedStream)
+                            elif self.encrypted:
+                                try:
+                                    self.rawStream = RC4(
+                                        self.decodedStream, self.encryptionKey
+                                    )
+                                except:
+                                    errorMessage = (
+                                        "[!] Error encrypting stream with RC4"
+                                    )
+                                    if isForceMode:
+                                        self.addError(errorMessage)
+                                    else:
+                                        return (-1, errorMessage)
+                                self.size = len(self.rawStream)
                             else:
-                                if self.encrypted:
-                                    try:
-                                        self.rawStream = RC4(
-                                            self.decodedStream, self.encryptionKey
-                                        )
-                                    except:
-                                        errorMessage = (
-                                            "[!] Error encrypting stream with RC4"
-                                        )
-                                        if isForceMode:
-                                            self.addError(errorMessage)
-                                        else:
-                                            return (-1, errorMessage)
-                                    self.size = len(self.rawStream)
-                                else:
-                                    self.size = len(self.decodedStream)
+                                self.size = len(self.decodedStream)
                         elif self.modifiedRawStream:
                             if len(self.rawStream) > 0:
                                 self.cleanStream()
@@ -3281,9 +3230,8 @@ class PDFObjectStream(PDFStream):
                                                 self.addError(errorMessage)
                                             else:
                                                 return (-1, errorMessage)
-                                else:
-                                    if self.isEncodedStream:
-                                        self.decode()
+                                elif self.isEncodedStream:
+                                    self.decode()
                                 self.size = len(self.rawStream)
                         if not self.updateNeeded:
                             offsetsSection = self.decodedStream[
@@ -3292,7 +3240,7 @@ class PDFObjectStream(PDFStream):
                             objectsSection = self.decodedStream[
                                 self.firstObjectOffset :
                             ]
-                            numbers = re.findall("\d{1,10}", offsetsSection)
+                            numbers = re.findall(r"\d{1,10}", offsetsSection)
                             if numbers != [] and len(numbers) % 2 == 0:
                                 for i in range(0, len(numbers), 2):
                                     thisId = int(numbers[i])
@@ -3310,11 +3258,10 @@ class PDFObjectStream(PDFStream):
                                         obj = ret[1]
                                     self.compressedObjectsDict[thisId] = [offset, obj]
                                     self.indexes.append(thisId)
+                            elif isForceMode:
+                                self.addError("Missing offsets in object stream")
                             else:
-                                if isForceMode:
-                                    self.addError("Missing offsets in object stream")
-                                else:
-                                    return (-1, "Missing offsets in object stream")
+                                return (-1, "Missing offsets in object stream")
                     elif modifiedCompressedObjects:
                         tmpStreamObjects = ""
                         tmpStreamObjectsInfo = ""
@@ -3334,110 +3281,102 @@ class PDFObjectStream(PDFStream):
                             self.size = len(self.encodedStream)
                         else:
                             self.size = len(self.decodedStream)
+                    elif not decrypt:
+                        try:
+                            if self.isEncodedStream:
+                                self.rawStream = RC4(
+                                    self.encodedStream, self.encryptionKey
+                                )
+                            else:
+                                self.rawStream = RC4(
+                                    self.decodedStream, self.encryptionKey
+                                )
+                        except:
+                            errorMessage = "[!] Error encrypting stream with RC4"
+                            if isForceMode:
+                                self.addError(errorMessage)
+                            else:
+                                return (-1, errorMessage)
+                        self.size = len(self.rawStream)
                     else:
-                        if not decrypt:
+                        if self.isEncodedStream:
                             try:
-                                if self.isEncodedStream:
-                                    self.rawStream = RC4(
-                                        self.encodedStream, self.encryptionKey
+                                if algorithm == "RC4":
+                                    self.encodedStream = RC4(
+                                        self.rawStream, self.encryptionKey
                                     )
-                                else:
-                                    self.rawStream = RC4(
-                                        self.decodedStream, self.encryptionKey
+                                elif algorithm == "AES":
+                                    ret = decryptData(
+                                        self.rawStream, self.encryptionKey
                                     )
+                                    if ret[0] != -1:
+                                        self.encodedStream = ret[1]
+                                    else:
+                                        errorMessage = f"AES decryption error: {ret[1]}"
+                                        if isForceMode:
+                                            self.addError(errorMessage)
+                                        else:
+                                            return (-1, errorMessage)
                             except:
-                                errorMessage = "[!] Error encrypting stream with RC4"
+                                errorMessage = (
+                                    f"[!] Error decrypting stream with {str(algorithm)}"
+                                )
                                 if isForceMode:
                                     self.addError(errorMessage)
                                 else:
                                     return (-1, errorMessage)
-                            self.size = len(self.rawStream)
+                            self.decode()
                         else:
-                            if self.isEncodedStream:
-                                try:
-                                    if algorithm == "RC4":
-                                        self.encodedStream = RC4(
-                                            self.rawStream, self.encryptionKey
-                                        )
-                                    elif algorithm == "AES":
-                                        ret = decryptData(
-                                            self.rawStream, self.encryptionKey
-                                        )
-                                        if ret[0] != -1:
-                                            self.encodedStream = ret[1]
-                                        else:
-                                            errorMessage = (
-                                                f"AES decryption error: {ret[1]}"
-                                            )
-                                            if isForceMode:
-                                                self.addError(errorMessage)
-                                            else:
-                                                return (-1, errorMessage)
-                                except:
-                                    errorMessage = f"[!] Error decrypting stream with {str(algorithm)}"
-                                    if isForceMode:
-                                        self.addError(errorMessage)
-                                    else:
-                                        return (-1, errorMessage)
-                                self.decode()
-                            else:
-                                try:
-                                    if algorithm == "RC4":
-                                        self.decodedStream = RC4(
-                                            self.rawStream, self.encryptionKey
-                                        )
-                                    elif algorithm == "AES":
-                                        ret = decryptData(
-                                            self.rawStream, self.encryptionKey
-                                        )
-                                        if ret[0] != -1:
-                                            self.decodedStream = ret[1]
-                                        else:
-                                            errorMessage = (
-                                                f"AES decryption error: {ret[1]}"
-                                            )
-                                            if isForceMode:
-                                                self.addError(errorMessage)
-                                            else:
-                                                return (-1, errorMessage)
-                                except:
-                                    errorMessage = f"[!] Error decrypting stream with {str(algorithm)}"
-                                    if isForceMode:
-                                        self.addError(errorMessage)
-                                    else:
-                                        return (-1, errorMessage)
-                            offsetsSection = self.decodedStream[
-                                : self.firstObjectOffset
-                            ]
-                            objectsSection = self.decodedStream[
-                                self.firstObjectOffset :
-                            ]
-                            numbers = re.findall("\d{1,10}", offsetsSection)
-                            if numbers != [] and len(numbers) % 2 == 0:
-                                for i in range(0, len(numbers), 2):
-                                    thisId = int(numbers[i])
-                                    offset = int(numbers[i + 1])
-                                    ret = PDFParser().readObject(
-                                        objectsSection[offset:]
+                            try:
+                                if algorithm == "RC4":
+                                    self.decodedStream = RC4(
+                                        self.rawStream, self.encryptionKey
                                     )
-                                    if ret[0] == -1:
-                                        if isForceMode:
-                                            obj = None
-                                            self.addError(ret[1])
-                                        else:
-                                            return ret
+                                elif algorithm == "AES":
+                                    ret = decryptData(
+                                        self.rawStream, self.encryptionKey
+                                    )
+                                    if ret[0] != -1:
+                                        self.decodedStream = ret[1]
                                     else:
-                                        obj = ret[1]
-                                    self.compressedObjectsDict[thisId] = [offset, obj]
-                                    self.indexes.append(thisId)
-                            else:
+                                        errorMessage = f"AES decryption error: {ret[1]}"
+                                        if isForceMode:
+                                            self.addError(errorMessage)
+                                        else:
+                                            return (-1, errorMessage)
+                            except:
+                                errorMessage = (
+                                    f"[!] Error decrypting stream with {str(algorithm)}"
+                                )
                                 if isForceMode:
-                                    self.addError("Missing offsets in object stream")
+                                    self.addError(errorMessage)
                                 else:
-                                    return (-1, "Missing offsets in object stream")
+                                    return (-1, errorMessage)
+                        offsetsSection = self.decodedStream[: self.firstObjectOffset]
+                        objectsSection = self.decodedStream[self.firstObjectOffset :]
+                        numbers = re.findall(r"\d{1,10}", offsetsSection)
+                        if numbers != [] and len(numbers) % 2 == 0:
+                            for i in range(0, len(numbers), 2):
+                                thisId = int(numbers[i])
+                                offset = int(numbers[i + 1])
+                                ret = PDFParser().readObject(objectsSection[offset:])
+                                if ret[0] == -1:
+                                    if isForceMode:
+                                        obj = None
+                                        self.addError(ret[1])
+                                    else:
+                                        return ret
+                                else:
+                                    obj = ret[1]
+                                self.compressedObjectsDict[thisId] = [offset, obj]
+                                self.indexes.append(thisId)
+                        elif isForceMode:
+                            self.addError("Missing offsets in object stream")
+                        else:
+                            return (-1, "Missing offsets in object stream")
                     if not self.isFaultyDecoding():
                         refs = re.findall(
-                            "(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream
+                            r"(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream
                         )
                         if refs != []:
                             self.references += refs
@@ -3566,14 +3505,16 @@ class PDFObjectStream(PDFStream):
             if ret[0] == -1:
                 return ret
             if not self.isFaultyDecoding():
-                refs = re.findall("(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream)
+                refs = re.findall(
+                    r"(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream
+                )
                 if refs != []:
                     self.references += refs
                     self.references = list(set(self.references))
                 # Extracting the compressed objects
                 offsetsSection = self.decodedStream[: self.firstObjectOffset]
                 objectsSection = self.decodedStream[self.firstObjectOffset :]
-                numbers = re.findall("\d{1,10}", offsetsSection)
+                numbers = re.findall(r"\d{1,10}", offsetsSection)
                 if numbers != [] and len(numbers) % 2 == 0:
                     for i in range(0, len(numbers), 2):
                         thisId = int(numbers[i])
@@ -4021,11 +3962,10 @@ class PDFCrossRefEntry:
         elif objType == 2:
             self.objectStream = int(firstValue)
             self.indexObject = int(secondValue)
+        elif isForceMode:
+            self.addError("[!] Error parsing xref entry")
         else:
-            if isForceMode:
-                self.addError("[!] Error parsing xref entry")
-            else:
-                return (-1, "[!] Error parsing xref entry")
+            return (-1, "[!] Error parsing xref entry")
 
     def addError(self, errorMessage):
         if errorMessage not in self.errors:
@@ -4456,43 +4396,40 @@ class PDFBody:
             errorMessage = ret[1]
         if pdfObject.updateNeeded:
             self.toUpdate.append(thisId)
-        else:
-            if objectType == "stream":
-                self.numStreams += 1
-                self.streams.append(thisId)
-                if pdfObject.isEncoded():
-                    self.encodedStreams.append(thisId)
-                    self.numEncodedStreams += 1
-                    if pdfObject.isFaultyDecoding():
-                        self.faultyStreams.append(thisId)
-                        self.numDecodingErrors += 1
-                if pdfObject.hasElement("/Type"):
-                    typeObject = pdfObject.getElementByName("/Type")
-                    if typeObject is None:
-                        errorMessage = "/Type element is None"
-                        if isForceMode:
-                            pdfFile.addError(errorMessage)
-                        else:
-                            return (-1, errorMessage)
+        elif objectType == "stream":
+            self.numStreams += 1
+            self.streams.append(thisId)
+            if pdfObject.isEncoded():
+                self.encodedStreams.append(thisId)
+                self.numEncodedStreams += 1
+                if pdfObject.isFaultyDecoding():
+                    self.faultyStreams.append(thisId)
+                    self.numDecodingErrors += 1
+            if pdfObject.hasElement("/Type"):
+                typeObject = pdfObject.getElementByName("/Type")
+                if typeObject is None:
+                    errorMessage = "/Type element is None"
+                    if isForceMode:
+                        pdfFile.addError(errorMessage)
                     else:
-                        objType = typeObject.getValue()
-                        if objType == "/XRef":
-                            self.addXrefStream(thisId)
-                        elif objType == "/ObjStm":
-                            self.addObjectStream(thisId)
-                            pdfObject.setCompressedObjectId(thisId)
-                            compressedObjectsDict = pdfObject.getCompressedObjects()
-                            for compressedId in compressedObjectsDict:
-                                self.addCompressedObject(compressedId)
-                                offset = compressedObjectsDict[compressedId][0]
-                                compressedObject = compressedObjectsDict[compressedId][
-                                    1
-                                ]
-                                self.setObject(compressedId, compressedObject, offset)
-                            del compressedObjectsDict
-            elif objectType == "dictionary":
-                self.referencedJSObjects += pdfObject.getReferencedJSObjectIds()
-                self.referencedJSObjects = list(set(self.referencedJSObjects))
+                        return (-1, errorMessage)
+                else:
+                    objType = typeObject.getValue()
+                    if objType == "/XRef":
+                        self.addXrefStream(thisId)
+                    elif objType == "/ObjStm":
+                        self.addObjectStream(thisId)
+                        pdfObject.setCompressedObjectId(thisId)
+                        compressedObjectsDict = pdfObject.getCompressedObjects()
+                        for compressedId in compressedObjectsDict:
+                            self.addCompressedObject(compressedId)
+                            offset = compressedObjectsDict[compressedId][0]
+                            compressedObject = compressedObjectsDict[compressedId][1]
+                            self.setObject(compressedId, compressedObject, offset)
+                        del compressedObjectsDict
+        elif objectType == "dictionary":
+            self.referencedJSObjects += pdfObject.getReferencedJSObjectIds()
+            self.referencedJSObjects = list(set(self.referencedJSObjects))
         pdfIndirectObject.setObject(pdfObject)
         self.objects[thisId] = pdfIndirectObject
         self.errors += pdfObject.getErrors()
@@ -4517,27 +4454,24 @@ class PDFBody:
                 12 + 3 * len(newLine) + len(str(obj.getRawValue())) + len(str(thisId))
             )
             pdfIndirectObject.setSize(size)
-        else:
-            if modification:
-                errorMessage = "Object not found"
-                if isForceMode:
-                    pdfFile.addError(errorMessage)
-                else:
-                    return (-1, errorMessage)
-            if thisId is None:
-                thisId = self.numObjects + 1
-            if offset is None:
-                offset = self.getNextOffset()
-            pdfIndirectObject = PDFIndirectObject()
-            pdfIndirectObject.setId(thisId)
-            pdfIndirectObject.setObject(obj)
-            pdfIndirectObject.setGenerationNumber(0)
-            pdfIndirectObject.setOffset(offset)
-            size = (
-                12 + 3 * len(newLine) + len(str(obj.getRawValue())) + len(str(thisId))
-            )
-            pdfIndirectObject.setSize(size)
-            self.setNextOffset(offset + size)
+        elif modification:
+            errorMessage = "Object not found"
+            if isForceMode:
+                pdfFile.addError(errorMessage)
+            else:
+                return (-1, errorMessage)
+        if thisId is None:
+            thisId = self.numObjects + 1
+        if offset is None:
+            offset = self.getNextOffset()
+        pdfIndirectObject = PDFIndirectObject()
+        pdfIndirectObject.setId(thisId)
+        pdfIndirectObject.setObject(obj)
+        pdfIndirectObject.setGenerationNumber(0)
+        pdfIndirectObject.setOffset(offset)
+        size = 12 + 3 * len(newLine) + len(str(obj.getRawValue())) + len(str(thisId))
+        pdfIndirectObject.setSize(size)
+        self.setNextOffset(offset + size)
         ret = self.registerObject(pdfIndirectObject)
         if ret[0] == 0:
             if errorMessage != "":
@@ -4802,13 +4736,12 @@ class PDFTrailer:
                     self.addError(errorMessage)
                 else:
                     return (-1, errorMessage)
-        else:
-            if not streamPresent:
-                errorMessage = "Missing /Root element"
-                if isForceMode:
-                    self.addError(errorMessage)
-                else:
-                    return (-1, errorMessage)
+        elif not streamPresent:
+            errorMessage = "Missing /Root element"
+            if isForceMode:
+                self.addError(errorMessage)
+            else:
+                return (-1, errorMessage)
         if self.trailerDict.hasElement("/Size"):
             size = self.trailerDict.getElementByName("/Size")
             if size is not None:
@@ -4826,13 +4759,12 @@ class PDFTrailer:
                     self.addError(errorMessage)
                 else:
                     return (-1, errorMessage)
-        else:
-            if not streamPresent:
-                errorMessage = "Missing /Size element"
-                if isForceMode:
-                    self.addError(errorMessage)
-                else:
-                    return (-1, errorMessage)
+        elif not streamPresent:
+            errorMessage = "Missing /Size element"
+            if isForceMode:
+                self.addError(errorMessage)
+            else:
+                return (-1, errorMessage)
         if self.trailerDict.hasElement("/Info"):
             info = self.trailerDict.getElementByName("/Info")
             if info is not None:
@@ -6004,6 +5936,8 @@ class PDFFile:
         permissionNum = 1073741823
         dictOE = ""
         dictUE = ""
+        dictO = ""
+        dictU = ""
         ret = self.getTrailer()
         if ret is not None:
             trailer, trailerStream = ret[1]
@@ -6037,22 +5971,20 @@ class PDFFile:
             ret = computeOwnerPass(password, password, 128, revision=3)
             if ret[0] != -1:
                 dictO = ret[1]
+            elif isForceMode:
+                self.addError(ret[1])
             else:
-                if isForceMode:
-                    self.addError(ret[1])
-                else:
-                    return (-1, ret[1])
+                return (-1, ret[1])
             self.setOwnerPass(dictO)
             ret = computeUserPass(
                 password, dictO, fileId, permissionNum, 128, revision=3
             )
             if ret[0] != -1:
                 dictU = ret[1]
+            elif isForceMode:
+                self.addError(ret[1])
             else:
-                if isForceMode:
-                    self.addError(ret[1])
-                else:
-                    return (-1, ret[1])
+                return (-1, ret[1])
             self.setUserPass(dictU)
             ret = computeEncryptionKey(
                 password,
@@ -6094,12 +6026,11 @@ class PDFFile:
                     errorMessage = "/Encrypt dictionary has not been created/modified"
                     self.addError(errorMessage)
                     return (-1, errorMessage)
+            elif trailerStream is not None:
+                trailerStream.setDictEntry("/Encrypt", encryptDict)
             else:
-                if trailerStream is not None:
-                    trailerStream.setDictEntry("/Encrypt", encryptDict)
-                else:
-                    trailer.setDictEntry("/Encrypt", encryptDict)
-                self.setTrailer([trailer, trailerStream])
+                trailer.setDictEntry("/Encrypt", encryptDict)
+            self.setTrailer([trailer, trailerStream])
 
             numKeyBytes = self.encryptionKeyLength / 8
             for v in range(self.updates + 1):
@@ -6436,12 +6367,11 @@ class PDFFile:
                     jsCode.append(self.body[version].getJSCodePerObject())
                 else:
                     jsCode.append(self.body[version].getJSCode())
-        else:
-            if version <= self.updates and not version < 0:
-                if perObject:
-                    jsCode.append(self.body[version].getJSCodePerObject())
-                else:
-                    jsCode.append(self.body[version].getJSCode())
+        elif version <= self.updates and not version < 0:
+            if perObject:
+                jsCode.append(self.body[version].getJSCodePerObject())
+            else:
+                jsCode.append(self.body[version].getJSCode())
         return jsCode
 
     def getLinearized(self):
@@ -6459,7 +6389,9 @@ class PDFFile:
         if metadataObject is not None:
             if metadataObject.getType() == "stream":
                 stream = metadataObject.getStream()
-                matches = re.findall("<" + element + ">(.*)</" + element + ">", stream)
+                matches = re.findall(
+                    r"<" + element + r">(.*)</" + element + r">", stream
+                )
                 if matches != []:
                     return matches[0]
                 return None
@@ -6610,7 +6542,8 @@ class PDFFile:
                             value = obj.getValue()
                             if (
                                 re.findall(
-                                    "\D" + str(thisId) + "\s{1,3}\d{1,3}\s{1,3}R", value
+                                    r"\D" + str(thisId) + r"\s{1,3}\d{1,3}\s{1,3}R",
+                                    value,
                                 )
                                 != []
                             ):
@@ -6626,7 +6559,7 @@ class PDFFile:
                         value = obj.getValue()
                         if (
                             re.findall(
-                                "\D" + str(thisId) + "\s{1,3}\d{1,3}\s{1,3}R", value
+                                r"\D" + str(thisId) + r"\s{1,3}\d{1,3}\s{1,3}R", value
                             )
                             != []
                         ):
@@ -6808,12 +6741,11 @@ class PDFFile:
                     continue
                 return (i, trailerArray)
             return None
-        elif version > self.updates or version < 0:
+        if version > self.updates or version < 0:
             return None
-        else:
-            trailerArray = self.trailer[version]
-            if trailerArray is None or trailerArray == []:
-                return None
+        trailerArray = self.trailer[version]
+        if trailerArray is None or trailerArray == []:
+            return None
         return (version, trailerArray)
 
     def getTree(self, version=None):
@@ -6857,9 +6789,8 @@ class PDFFile:
                             dictType = obj.getDictType()
                             if dictType != "":
                                 objType = dictType
-                            else:
-                                if objType == "dictionary" and len(elements) == 1:
-                                    objType = list(elements.keys())[0]
+                            elif objType == "dictionary" and len(elements) == 1:
+                                objType = list(elements.keys())[0]
                     references = self.getReferencesIn(thisId, version)
                     for _, reference in enumerate(references):
                         referencesIds.append(int(reference.split()[0]))
@@ -6878,9 +6809,8 @@ class PDFFile:
         if version is None:
             for version in range(self.updates + 1):
                 urls += self.body[version].getURLs()
-        else:
-            if version <= self.updates and not version < 0:
-                urls = self.body[version].getURLs()
+        elif version <= self.updates and not version < 0:
+            urls = self.body[version].getURLs()
         return urls
 
     def getURIs(self, version=None, perObject=False):
@@ -6891,12 +6821,11 @@ class PDFFile:
                     uris.append(self.body[version].getURIsPerObject())
                 else:
                     uris.append(self.body[version].getURIs())
-        else:
-            if version <= self.updates and not version < 0:
-                if perObject:
-                    uris.append(self.body[version].getURIsPerObject())
-                else:
-                    uris.append(self.body[version].getURIs())
+        elif version <= self.updates and not version < 0:
+            if perObject:
+                uris.append(self.body[version].getURIsPerObject())
+            else:
+                uris.append(self.body[version].getURIs())
         return uris
 
     def getUserPass(self):
@@ -6913,13 +6842,12 @@ class PDFFile:
                     continue
                 return (i, xrefArray)
             return None
-        elif version > self.updates or version < 0:
+        if version > self.updates or version < 0:
             return None
-        else:
-            xrefArray = self.crossRefTable[version]
-            if xrefArray is None or xrefArray == []:
-                return None
-            return (version, xrefArray)
+        xrefArray = self.crossRefTable[version]
+        if xrefArray is None or xrefArray == []:
+            return None
+        return (version, xrefArray)
 
     def headerToFile(self, malformedOptions, headerFile):
         headerGarbage = ""
@@ -7250,7 +7178,7 @@ class PDFFile:
                 prevXrefSectionOffset = lastXrefSectionOffset
                 self.body[v].setObjects(indirectObjects)
                 offset = len(outputFileContent)
-            if not os.sep in filename:
+            if os.sep not in filename:
                 outputPath = f"{pdfPath}{os.sep}{filename}"
             else:
                 outputPath = filename
@@ -7326,17 +7254,16 @@ class PDFFile:
                         self.setLinearized(True)
                     return ret
             return (-1, errorMessage)
-        else:
-            if version > self.updates or version < 0:
-                return (-1, "Bad file version")
-            ret = self.body[version].setObject(thisId, obj, modification=mod)
-            if ret[0] == -1:
-                self.addError(ret[1])
-                return (-1, ret[1])
-            objectType = obj.getType()
-            if objectType == "dictionary" and obj.hasElement("/Linearized"):
-                self.setLinearized(True)
-            return ret
+        if version > self.updates or version < 0:
+            return (-1, "Bad file version")
+        ret = self.body[version].setObject(thisId, obj, modification=mod)
+        if ret[0] == -1:
+            self.addError(ret[1])
+            return (-1, ret[1])
+        objectType = obj.getType()
+        if objectType == "dictionary" and obj.hasElement("/Linearized"):
+            self.setLinearized(True)
+        return ret
 
     def setOwnerPass(self, password):
         self.ownerPass = password
@@ -7458,42 +7385,41 @@ class PDFParser:
         isManualAnalysis = manualAnalysis
 
         # Reading the file header
-        file = open(fileName, "rb")
-        for line in file:
-            line = line.decode("latin-1")
-            if versionLine == "":
-                pdfHeaderIndex = line.find("%PDF-")
-                psHeaderIndex = line.find("%!PS-Adobe-")
-                if pdfHeaderIndex != -1 or psHeaderIndex != -1:
-                    index = line.find("\r")
-                    if (
-                        index != -1
-                        and index + 1 < len(line)
-                        and line[index + 1] != "\n"
-                    ):
-                        index += 1
-                        versionLine = line[:index]
-                        binaryLine = line[index:]
-                        break
-                    versionLine = line
-                    if pdfHeaderIndex != -1:
-                        headerOffset += pdfHeaderIndex
+        with open(fileName, "rb") as file:
+            for line in file:
+                line = line.decode("latin-1")
+                if versionLine == "":
+                    pdfHeaderIndex = line.find("%PDF-")
+                    psHeaderIndex = line.find("%!PS-Adobe-")
+                    if pdfHeaderIndex != -1 or psHeaderIndex != -1:
+                        index = line.find("\r")
+                        if (
+                            index != -1
+                            and index + 1 < len(line)
+                            and line[index + 1] != "\n"
+                        ):
+                            index += 1
+                            versionLine = line[:index]
+                            binaryLine = line[index:]
+                            break
+                        versionLine = line
+                        if pdfHeaderIndex != -1:
+                            headerOffset += pdfHeaderIndex
+                        else:
+                            headerOffset += psHeaderIndex
+                        pdfFile.setHeaderOffset(headerOffset)
                     else:
-                        headerOffset += psHeaderIndex
-                    pdfFile.setHeaderOffset(headerOffset)
+                        garbageHeader += line
                 else:
-                    garbageHeader += line
-            else:
-                binaryLine = line
-                break
-            headerOffset += len(line)
-        file.close()
+                    binaryLine = line
+                    break
+                headerOffset += len(line)
 
         # Getting the specification version
         versionLine = versionLine.replace("\r", "")
         versionLine = versionLine.replace("\n", "")
         matchVersion = re.findall(
-            "%(PDF-|!PS-Adobe-\d{1,2}\.\d{1,2}\sPDF-)(\d{1,2}\.\d{1,2})", versionLine
+            r"%(PDF-|!PS-Adobe-\d{1,2}\.\d{1,2}\sPDF-)(\d{1,2}\.\d{1,2})", versionLine
         )
         if not matchVersion:
             if forceMode:
@@ -7511,13 +7437,12 @@ class PDFParser:
         if len(binaryLine) > 3:
             if binaryLine[-2:] == "\r\n":
                 pdfFile.setEndLine("\r\n")
+            elif binaryLine[-1] == "\r":
+                pdfFile.setEndLine("\r")
+            elif binaryLine[-1] == "\n":
+                pdfFile.setEndLine("\n")
             else:
-                if binaryLine[-1] == "\r":
-                    pdfFile.setEndLine("\r")
-                elif binaryLine[-1] == "\n":
-                    pdfFile.setEndLine("\n")
-                else:
-                    pdfFile.setEndLine("\n")
+                pdfFile.setEndLine("\n")
 
             # Does it contain binary characters??
             if (
@@ -7590,18 +7515,17 @@ class PDFParser:
                 bodyContent = bodyContent.strip("\r\n")
                 xrefContent = xrefContent.strip("\r\n")
                 trailerContent = trailerContent.strip("\r\n")
+            elif trailerContent is not None:
+                xrefOffset = -1
+                trailerOffset = bodyOffset + len(bodyContent)
+                bodyContent = bodyContent.strip("\r\n")
+                trailerContent = trailerContent.strip("\r\n")
             else:
-                if trailerContent is not None:
-                    xrefOffset = -1
-                    trailerOffset = bodyOffset + len(bodyContent)
-                    bodyContent = bodyContent.strip("\r\n")
-                    trailerContent = trailerContent.strip("\r\n")
+                errorMessage = "PDF sections not found"
+                if forceMode:
+                    pdfFile.addError(errorMessage)
                 else:
-                    errorMessage = "PDF sections not found"
-                    if forceMode:
-                        pdfFile.addError(errorMessage)
-                    else:
-                        sys.exit(f"[!] Error: {errorMessage}")
+                    sys.exit(f"[!] Error: {errorMessage}")
 
             # Converting the body content in PDFObjects
             body = PDFBody()
@@ -7621,7 +7545,7 @@ class PDFParser:
                         checkHeader = bodyContent[
                             relativeOffset - 1 : relativeOffset + len(objectHeader)
                         ]
-                        if not re.match("\d{1,10}" + objectHeader, checkHeader):
+                        if not re.match(r"\d{1,10}" + objectHeader, checkHeader):
                             break
                         auxContent = auxContent[index + len(objectHeader) :]
                         relativeOffset += len(objectHeader)
@@ -7652,27 +7576,24 @@ class PDFParser:
                                     )
                                     if ret[0] != -1:
                                         xrefStreamSection = ret[1]
+                            elif not forceMode:
+                                sys.exit(
+                                    "[!] Error: An error has occurred while parsing an indirect object"
+                                )
                             else:
-                                if not forceMode:
-                                    sys.exit(
-                                        "[!] Error: An error has occurred while parsing an indirect object"
-                                    )
-                                else:
-                                    pdfFile.addError("Object is None")
+                                pdfFile.addError("Object is None")
+                        elif not forceMode:
+                            sys.exit("[!] Error: Bad indirect object")
                         else:
-                            if not forceMode:
-                                sys.exit("[!] Error: Bad indirect object")
-                            else:
-                                pdfFile.addError("Indirect object is None")
+                            pdfFile.addError("Indirect object is None")
+                    elif not forceMode:
+                        sys.exit(
+                            f"[!] Error: An error has occurred while parsing an indirect object: {str(objectHeader)} ({str(ret[1])})"
+                        )
                     else:
-                        if not forceMode:
-                            sys.exit(
-                                f"[!] Error: An error has occurred while parsing an indirect object: {str(objectHeader)} ({str(ret[1])})"
-                            )
-                        else:
-                            pdfFile.addError(
-                                f"[!] Error parsing object: {str(objectHeader)} ({str(ret[1])})"
-                            )
+                        pdfFile.addError(
+                            f"[!] Error parsing object: {str(objectHeader)} ({str(ret[1])})"
+                        )
             else:
                 pdfFile.addError("No indirect objects found in the body")
             if pdfIndirectObject is not None:
@@ -7733,9 +7654,8 @@ class PDFParser:
                     if encryptObject is not None:
                         objectType = encryptObject.getType()
                         encryptDict = encryptObject
-                    else:
-                        if i == pdfFile.updates:
-                            pdfFile.addError("/Encrypt dictionary not found")
+                    elif i == pdfFile.updates:
+                        pdfFile.addError("/Encrypt dictionary not found")
                 if objectType == "dictionary":
                     pdfFile.setEncryptDict([encryptDictId, encryptDict.getElements()])
 
@@ -8049,8 +7969,8 @@ class PDFParser:
         pdfCrossRefSection.setOffset(offset)
         pdfCrossRefSection.setSize(len(rawContent))
         pdfCrossRefSubSection = None
-        beginSubSectionRE = re.compile("(\d{1,10})\s(\d{1,10})\s*$")
-        entryRE = re.compile("(\d{10})\s(\d{5})\s([nf])")
+        beginSubSectionRE = re.compile(r"(\d{1,10})\s(\d{1,10})\s*$")
+        entryRE = re.compile(r"(\d{10})\s(\d{5})\s([nf])")
         ret = self.readSymbol(rawContent, "xref")
         if ret[0] == -1:
             return ret
@@ -8088,20 +8008,17 @@ class PDFParser:
                         except:
                             return (-1, "[!] Error creating PDFCrossRefEntry")
                         entries.append(pdfCrossRefEntry)
-                    else:
                         # TODO: comments in line or spaces/\n\r...?
-                        if isForceMode:
-                            if pdfCrossRefSubSection is not None:
-                                pdfCrossRefSubSection.addError(
-                                    f"Bad format for cross reference entry: {line}"
-                                )
-                            else:
-                                pdfCrossRefSubSection = PDFCrossRefSubSection(
-                                    0, offset=-1
-                                )
-                                pdfFile.addError("Bad xref section")
+                    elif isForceMode:
+                        if pdfCrossRefSubSection is not None:
+                            pdfCrossRefSubSection.addError(
+                                f"Bad format for cross reference entry: {line}"
+                            )
                         else:
-                            return (-1, "Bad format for cross reference entry")
+                            pdfCrossRefSubSection = PDFCrossRefSubSection(0, offset=-1)
+                            pdfFile.addError("Bad xref section")
+                    else:
+                        return (-1, "Bad format for cross reference entry")
                 auxOffset += len(line)
                 subSectionSize += len(line)
             if not pdfCrossRefSubSection:
@@ -8270,10 +8187,8 @@ class PDFParser:
                     firstEntry = numObjectsInSubsection
                     index += 2
                 return (0, pdfCrossRefSection)
-            else:
-                return (-1, "The object stream is None")
-        else:
-            return (-1, "The indirect object stream is None")
+            return (-1, "The object stream is None")
+        return (-1, "The indirect object stream is None")
 
     def createPDFTrailer(self, rawContent, offset, streamPresent=False):
         """
@@ -8410,11 +8325,11 @@ class PDFParser:
         if not isinstance(content, str):
             return matchingObjects
         if not looseMode:
-            regExp = re.compile("((\d{1,10}\s\d{1,10}\sobj).*?endobj)", re.DOTALL)
+            regExp = re.compile(r"((\d{1,10}\s\d{1,10}\sobj).*?endobj)", re.DOTALL)
             matchingObjects = regExp.findall(content)
         else:
             regExp = re.compile(
-                "((\d{1,10}\s\d{1,10}\sobj).*?)\s\d{1,10}\s\d{1,10}\sobj", re.DOTALL
+                r"((\d{1,10}\s\d{1,10}\sobj).*?)\s\d{1,10}\s\d{1,10}\sobj", re.DOTALL
             )
             matchingObjectsAux = regExp.findall(content)
             while matchingObjectsAux != []:
@@ -8425,7 +8340,7 @@ class PDFParser:
                     matchingObjectsAux = regExp.findall(content)
                 else:
                     matchingObjectsAux = []
-            lastObject = re.findall("(\d{1,5}\s\d{1,5}\sobj)", content, re.DOTALL)
+            lastObject = re.findall(r"(\d{1,5}\s\d{1,5}\sobj)", content, re.DOTALL)
             if lastObject != []:
                 content = content[content.find(lastObject[0]) :]
                 matchingObjects.append((content, lastObject[0]))
@@ -8515,12 +8430,11 @@ class PDFParser:
                     else:
                         dictContent = ret[1]
                     nonDictContent = content[self.charCounter :]
-                    streamFound = re.findall("[>\s]stream", nonDictContent)
+                    streamFound = re.findall(r"[>\s]stream", nonDictContent)
                     if streamFound:
                         ret = self.readUntilSymbol(content, "stream")
                         if ret[0] == -1:
                             return ret
-                        auxDict = ret[1]
                         self.readSymbol(content, "stream", False)
                         self.readUntilEndOfLine(content)
                         self.readSymbol(content, "\r", False)
@@ -8536,20 +8450,19 @@ class PDFParser:
                             return ret
                         pdfObject = ret[1]
                         break
+                    if ret[0] != -1:
+                        self.readSymbol(content, delim[1])
+                        ret = self.createPDFDictionary(dictContent)
+                        if ret[0] == -1:
+                            return ret
+                        pdfObject = ret[1]
                     else:
-                        if ret[0] != -1:
-                            self.readSymbol(content, delim[1])
-                            ret = self.createPDFDictionary(dictContent)
-                            if ret[0] == -1:
-                                return ret
-                            pdfObject = ret[1]
-                        else:
-                            pdfObject = PDFDictionary(content)
-                            pdfObject.addError(
-                                "Closing delimiter not found in dictionary object"
-                            )
-                        break
-                elif delim[2] == "string":
+                        pdfObject = PDFDictionary(content)
+                        pdfObject.addError(
+                            "Closing delimiter not found in dictionary object"
+                        )
+                    break
+                if delim[2] == "string":
                     ret = self.readUntilClosingDelim(content, delim)
                     if ret[0] != -1:
                         stringContent = ret[1]
@@ -8561,7 +8474,7 @@ class PDFParser:
                             "Closing delimiter not found in string object"
                         )
                     break
-                elif delim[2] == "hexadecimal":
+                if delim[2] == "hexadecimal":
                     ret = self.readUntilClosingDelim(content, delim)
                     if ret[0] != -1:
                         hexContent = ret[1]
@@ -8580,7 +8493,7 @@ class PDFParser:
                             "Closing delimiter not found in hexadecimal object"
                         )
                     break
-                elif delim[2] == "array":
+                if delim[2] == "array":
                     ret = self.readUntilClosingDelim(content, delim)
                     if ret[0] != -1:
                         arrayContent = ret[1]
@@ -8595,14 +8508,14 @@ class PDFParser:
                             "Closing delimiter not found in array object"
                         )
                     break
-                elif delim[2] == "name":
+                if delim[2] == "name":
                     ret, raw = self.readUntilNotRegularChar(content)
                     if raw == "ID":
                         IS_ID_1 = True
                         IS_ID_2 = True
                     pdfObject = PDFName(raw)
                     break
-                elif delim[2] == "comment":
+                if delim[2] == "comment":
                     ret = self.readUntilEndOfLine(content)
                     if ret[0] == 0:
                         self.comments.append(ret[1])
@@ -8621,7 +8534,7 @@ class PDFParser:
                 ret, raw = self.readUntilNotRegularChar(content)
                 pdfObject = PDFNull(raw)
             elif (
-                re.findall("^(\d{1,10}\s{1,3}\d{1,10}\s{1,3}R)", content, re.DOTALL)
+                re.findall(r"^(\d{1,10}\s{1,3}\d{1,10}\s{1,3}R)", content, re.DOTALL)
                 != []
             ):
                 ret, thisId = self.readUntilNotRegularChar(content)
@@ -8630,7 +8543,9 @@ class PDFParser:
                 if ret[0] == -1:
                     return ret
                 pdfObject = PDFReference(thisId, genNumber)
-            elif re.findall("^([-+]?\.?\d{1,15}\.?\d{0,15})", content, re.DOTALL) != []:
+            elif (
+                re.findall(r"^([-+]?\.?\d{1,15}\.?\d{0,15})", content, re.DOTALL) != []
+            ):
                 ret, num = self.readUntilNotRegularChar(content)
                 pdfObject = PDFNum(num)
             else:
@@ -8703,70 +8618,63 @@ class PDFParser:
             errorMessage = "No closing delimiter found"
             pdfFile.addError(errorMessage)
             return (-1, errorMessage)
-        elif numClosingDelims == 1:
+        if numClosingDelims == 1:
             index = newContent.rfind(delim[1])
             self.charCounter += index
             return (0, newContent[:index])
-        else:
-            indexChar = 0
-            prevChar = ""
-            while indexChar != len(newContent):
-                char = newContent[indexChar]
-                if indexChar == len(newContent) - 1:
-                    nextChar = ""
-                else:
-                    nextChar = newContent[indexChar + 1]
-                if char == delim[1] or (char + nextChar) == delim[1]:
-                    if (
-                        char != ")"
-                        or indexChar == 0
-                        or newContent[indexChar - 1] != "\\"
-                    ):
-                        return (0, output)
-                    output += char
-                    indexChar += 1
+        indexChar = 0
+        prevChar = ""
+        while indexChar != len(newContent):
+            char = newContent[indexChar]
+            if indexChar == len(newContent) - 1:
+                nextChar = ""
+            else:
+                nextChar = newContent[indexChar + 1]
+            if char == delim[1] or (char + nextChar) == delim[1]:
+                if char != ")" or indexChar == 0 or newContent[indexChar - 1] != "\\":
+                    return (0, output)
+                output += char
+                indexChar += 1
+                self.charCounter += 1
+            elif (char == "(" and prevChar != "\\") or (
+                char in {"[", "<"} and delim[0] != "("
+            ):
+                if (char + nextChar) != "<<":
+                    delimIndex = delimiterChars.index(char)
                     self.charCounter += 1
-                elif (char == "(" and prevChar != "\\") or (
-                    char in {"[", "<"} and delim[0] != "("
-                ):
-                    if (char + nextChar) != "<<":
-                        delimIndex = delimiterChars.index(char)
-                        self.charCounter += 1
-                        ret = self.readUntilClosingDelim(
-                            content, self.delimiters[delimIndex]
-                        )
-                        if ret[0] != -1:
-                            tempObject = char + ret[1]
-                        else:
-                            return ret
-                    else:
-                        delimIndex = delimiterChars.index(char + nextChar)
-                        self.charCounter += 2
-                        ret = self.readUntilClosingDelim(
-                            content, self.delimiters[delimIndex]
-                        )
-                        if ret[0] != -1:
-                            tempObject = char + nextChar + ret[1]
-                        else:
-                            return ret
-                    ret = self.readSymbol(
-                        content, self.delimiters[delimIndex][1], False
+                    ret = self.readUntilClosingDelim(
+                        content, self.delimiters[delimIndex]
                     )
                     if ret[0] != -1:
-                        tempObject += self.delimiters[delimIndex][1]
+                        tempObject = char + ret[1]
                     else:
                         return ret
-                    indexChar += len(tempObject)
-                    output += tempObject
                 else:
-                    indexChar += 1
-                    self.charCounter += 1
-                    output += char
-                    prevChar = char
+                    delimIndex = delimiterChars.index(char + nextChar)
+                    self.charCounter += 2
+                    ret = self.readUntilClosingDelim(
+                        content, self.delimiters[delimIndex]
+                    )
+                    if ret[0] != -1:
+                        tempObject = char + nextChar + ret[1]
+                    else:
+                        return ret
+                ret = self.readSymbol(content, self.delimiters[delimIndex][1], False)
+                if ret[0] != -1:
+                    tempObject += self.delimiters[delimIndex][1]
+                else:
+                    return ret
+                indexChar += len(tempObject)
+                output += tempObject
             else:
-                errorMessage = "No closing delimiter found"
-                pdfFile.addError(errorMessage)
-                return (-1, errorMessage)
+                indexChar += 1
+                self.charCounter += 1
+                output += char
+                prevChar = char
+        else:
+            errorMessage = "No closing delimiter found"
+            pdfFile.addError(errorMessage)
+            return (-1, errorMessage)
 
     def readUntilEndOfLine(self, content):
         """
