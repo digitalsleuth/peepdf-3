@@ -31,13 +31,18 @@ import json
 from pathlib import Path
 from datetime import datetime as dt
 import requests
-from lxml import etree
 
 
 try:
     from peepdf.PDFVulns import vulnsDict, vulnsVersion
 except ModuleNotFoundError:
     from PDFVulns import vulnsDict, vulnsVersion
+
+try:
+    from lxml import etree
+    LXML_MODULE = True
+except ModuleNotFoundError:
+    LXML_MODULE = False
 
 DTFMT = "%Y%m%d-%H%M%S"
 
