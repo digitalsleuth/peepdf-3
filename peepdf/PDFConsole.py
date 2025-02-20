@@ -4000,7 +4000,7 @@ class PDFConsole(cmd.Cmd):
             if objects[0] == []:
                 output = "Not found"
             else:
-                output = str(objects[0])
+                output = str(sorted(objects[0]))
         else:
             for version, result in enumerate(objects):
                 if result:
