@@ -48,6 +48,7 @@ try:
         getPeepXML,
         getPeepJSON,
         DTFMT,
+        LXML_MODULE,
     )
     from peepdf.PDFCrypto import xor
     from peepdf.JSAnalysis import isJavascript, analyseJS, unescape, JS_MODULE
@@ -84,6 +85,7 @@ except ModuleNotFoundError:
         getPeepXML,
         getPeepJSON,
         DTFMT,
+        LXML_MODULE,
     )
     from PDFCrypto import xor
     from JSAnalysis import isJavascript, analyseJS, unescape, JS_MODULE
@@ -4509,6 +4511,10 @@ class PDFConsole(cmd.Cmd):
         )
 
     def do_xml(self, argv):
+        if not LXML_MODULE:
+            message = "[!] Error: The lxml module is not installed and is required for XML output."
+            self.log_output("xml" + argv, message)
+            return False
         if self.pdfFile is None:
             message = "[!] Error: You must open a file"
             self.log_output("xml " + argv, message)
