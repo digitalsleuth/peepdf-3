@@ -7033,7 +7033,7 @@ class PDFFile:
                     self.errors.remove(error)
 
     def save(
-        self, filename, pdfPath, version=None, malformedOptions=None, headerFile=None
+        self, filename, version=None, malformedOptions=None, headerFile=None
     ):
         if malformedOptions is None:
             malformedOptions = []
@@ -7179,7 +7179,7 @@ class PDFFile:
                 self.body[v].setObjects(indirectObjects)
                 offset = len(outputFileContent)
             if os.sep not in filename:
-                outputPath = f"{pdfPath}{os.sep}{filename}"
+                outputPath = os.path.realpath(filename)
             else:
                 outputPath = filename
             if isinstance(outputFileContent, str):

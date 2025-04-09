@@ -752,7 +752,7 @@ class PDFConsole(cmd.Cmd):
             self.log_output("embed " + argv, message)
             return False
 
-        hexFileNameObject = PDFHexString(fileName.encode("hex"))
+        hexFileNameObject = PDFHexString(fileName.encode("utf-8").hex())
         md5Hash = hashlib.md5(fileContent).hexdigest()
         fileSize = len(fileContent)
         paramsDic = PDFDictionary(
