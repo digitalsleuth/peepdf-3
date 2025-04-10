@@ -16,7 +16,7 @@ dependencies = [
   "Pillow",
   "pythonaes",
   "lxml",
-  "prettytable>=3.9.0",
+  "prettytable>=3.12.0",
   "STPyV8",
 ]
 requires-python = ">=3.9"
@@ -29,7 +29,7 @@ maintainers = [
 ]
 description = "A Python 3 tool to explore, analyse, and disassemble PDF files"
 readme = "README.md"
-license = {file = "COPYING"}
+license-files = ["COPYING"]
 keywords = ["pdf", "peepdf", "forensics"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
