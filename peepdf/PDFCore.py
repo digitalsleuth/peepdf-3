@@ -747,7 +747,7 @@ class PDFHexString(PDFObject):
     Hexadecimal string object of a PDF document
     """
 
-    def __init__(self, hexData, IS_ID=False):
+    def __init__(self, hexData, IS_ID=False, IS_HASH=False):
         self.asciiValue = ""
         self.objType = "hexstring"
         self.errors = []
@@ -766,6 +766,7 @@ class PDFHexString(PDFObject):
         self.referencesInElements = {}
         self.references = []
         self.IS_ID = IS_ID
+        self.IS_HASH = IS_HASH
         ret = self.update()
         if ret[0] == -1:
             if isForceMode:
@@ -803,6 +804,8 @@ class PDFHexString(PDFObject):
                 self.encryptedValue = self.value
                 if self.IS_ID:
                     self.value = f"<{self.rawValue}>"
+                if self.IS_HASH:
+                    self.value = self.rawValue
             except:
                 errorMessage = "[!] Error in hexadecimal conversion"
                 self.addError(errorMessage)
@@ -7033,7 +7036,7 @@ class PDFFile:
                     self.errors.remove(error)
 
     def save(
-        self, filename, pdfPath, version=None, malformedOptions=None, headerFile=None
+        self, filename, version=None, malformedOptions=None, headerFile=None
     ):
         if malformedOptions is None:
             malformedOptions = []
@@ -7179,7 +7182,7 @@ class PDFFile:
                 self.body[v].setObjects(indirectObjects)
                 offset = len(outputFileContent)
             if os.sep not in filename:
-                outputPath = f"{pdfPath}{os.sep}{filename}"
+                outputPath = os.path.realpath(filename)
             else:
                 outputPath = filename
             if isinstance(outputFileContent, str):

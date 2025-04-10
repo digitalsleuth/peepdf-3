@@ -752,13 +752,13 @@ class PDFConsole(cmd.Cmd):
             self.log_output("embed " + argv, message)
             return False
 
-        hexFileNameObject = PDFHexString(fileName.encode("hex"))
+        hexFileNameObject = PDFHexString(fileName.encode().hex())
         md5Hash = hashlib.md5(fileContent).hexdigest()
         fileSize = len(fileContent)
         paramsDic = PDFDictionary(
             elements={
                 "/Size": PDFNum(str(fileSize)),
-                "/Checksum": PDFHexString(md5Hash),
+                "/Checksum": PDFHexString(md5Hash, IS_HASH=True),
             }
         )
         embeddedFileElements = {
