@@ -1521,12 +1521,13 @@ class PDFDictionary(PDFObject):
         return self.referencedJSObjects
 
     def getStats(self):
-        if isinstance(self.value, str):
-            self.value = self.value.encode()
+        value = self.value
+        if isinstance(value, str):
+            value = value.encode()
         stats = {
             "Object": self.objType,
-            "MD5": hashlib.md5(self.value).hexdigest(),
-            "SHA1": hashlib.sha1(self.value).hexdigest(),
+            "MD5": hashlib.md5(value).hexdigest(),
+            "SHA1": hashlib.sha1(value).hexdigest(),
             "References": str(
                 sorted(self.references, key=lambda x: int(refRegex.search(x).group()))
             ),
