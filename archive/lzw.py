@@ -220,7 +220,7 @@ class BitPacker:
         """
         Given an iterator of integer codepoints, returns an iterator
         over bytes containing the codepoints packed into varying
-        lengths, with bit width growing to accomodate an input code
+        lengths, with bit width growing to accommodate an input code
         that it assumes will grow by one entry per codepoint seen.
 
         Widths will be reset to the given initial_code_size when the
@@ -570,7 +570,7 @@ class PagingEncoder:
     def encodepages(self, pages):
         """
         Given an iterator of iterators of bytes, produces a single
-        iterator containing a delimited sequence of independantly
+        iterator containing a delimited sequence of independently
         compressed LZW sequences, all beginning on a byte-aligned
         spot, all beginning with a CLEAR code and all terminated with
         an END_OF_INFORMATION code (and zero to seven trailing junk
@@ -605,7 +605,7 @@ class PagingEncoder:
 
 class PagingDecoder:
     """
-    UNTESTED. Dual of PagingEncoder, knows how to handle independantly encoded,
+    UNTESTED. Dual of PagingEncoder, knows how to handle independently encoded,
     END_OF_INFO_CODE delimited chunks of an inbound byte stream
     """
 

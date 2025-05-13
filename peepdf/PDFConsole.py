@@ -458,7 +458,7 @@ class PDFConsole(cmd.Cmd):
             )
             if self.use_rawinput:
                 res = input(
-                    f"{warning}{newLine}Which objects do you want to compress? (Valid respones: all | 1-5 | 1,2,5,7,8) "
+                    f"{warning}{newLine}Which objects do you want to compress? (Valid response: all | 1-5 | 1,2,5,7,8) "
                 )
             else:
                 res = "all"
@@ -2538,7 +2538,7 @@ class PDFConsole(cmd.Cmd):
         if self.javaScriptContexts["global"] is not None:
             context = self.javaScriptContexts["global"]
         else:
-            # Using the global context to hook the eval fucntion and other definitions
+            # Using the global context to hook the eval function and other definitions
             context = STPyV8.JSContext(Global())
             self.javaScriptContexts["global"] = context
         context.enter()
@@ -3436,7 +3436,7 @@ class PDFConsole(cmd.Cmd):
         pdfParser = PDFParser()
         ret = pdfParser.parse(fileName, forceMode, looseMode)
         if ret != -1:
-            message = "[+] File opened succesfully"
+            message = "[+] File opened successfully"
             self.pdfFile = ret[1]
         else:
             message = "[!] Error: Opening document failed"
@@ -3785,7 +3785,7 @@ class PDFConsole(cmd.Cmd):
             if ret[0] == -1:
                 message = "[!] Error: Saving failed"
             else:
-                message = "[+] File saved succesfully"
+                message = "[+] File saved successfully"
             self.log_output("save " + argv, message)
         else:
             self.help_save()
@@ -3827,7 +3827,7 @@ class PDFConsole(cmd.Cmd):
             if ret[0] == -1:
                 message = "[!] Error: Saving failed"
             else:
-                message = "[+] Version saved succesfully"
+                message = "[+] Version saved successfully"
             self.log_output("save_version " + argv, message)
         else:
             self.help_save_version()
@@ -4698,7 +4698,7 @@ class PDFConsole(cmd.Cmd):
         thisId = ""
         found = False
         decValues = range(256)
-        successfullKeys = {}
+        successfulKeys = {}
         caseSensitive = True
         validTypes = ["variable", "file", "raw", "stream", "rawstream"]
         version = None
@@ -4824,12 +4824,12 @@ class PDFConsole(cmd.Cmd):
                     offsets.append(offset)
                     offset += len(m)
                     auxXored = auxXored[index + len(m) :]
-                successfullKeys[hex(i)] = offsets
+                successfulKeys[hex(i)] = offsets
         if found:
-            keys = list(successfullKeys.keys())
+            keys = list(successfulKeys.keys())
             message = f"Pattern found with the following keys: {str(keys)}{newLine * 2}"
             for key in keys:
-                message += f'Offsets for key "{str(key)}": {str(successfullKeys[key])}{newLine}'
+                message += f'Offsets for key "{str(key)}": {str(successfulKeys[key])}{newLine}'
         else:
             message = "[!] Pattern not found"
         self.log_output("xor_search " + argv, message)
@@ -5095,17 +5095,17 @@ class PDFConsole(cmd.Cmd):
                         varName = f"{self.outputVarName}_{k}"
                     if self.redirect == VAR_WRITE:
                         self.variables[varName] = [byteVal, byteVal]
-                        print(f"[+] Content has been written to varaible {varName}")
+                        print(f"[+] Content has been written to variable {varName}")
                     elif self.redirect == VAR_ADD:
                         if varName in self.variables:
                             self.variables[varName][0] += byteVal
                             print(
-                                f"[+] Content has been appended to varaible {varName}"
+                                f"[+] Content has been appended to variable {varName}"
                             )
                         else:
                             self.variables[varName] = [byteVal, byteVal]
                             print(
-                                f"[+] Content has been appended to varaible {varName}"
+                                f"[+] Content has been appended to variable {varName}"
                             )
         elif printOutput:
             if niceOutput:
@@ -5471,7 +5471,7 @@ class PDFConsole(cmd.Cmd):
         Given a tree prints the whole tree and its dependencies
 
         @param node: Root of the tree
-        @param nodesInfo: Information abour the nodes of the tree
+        @param nodesInfo: Information about the nodes of the tree
         @param expandedNodes: Already expanded nodes
         @param depth: Actual depth of the tree
         @param recursive: Boolean to specify if it's a recursive call or not

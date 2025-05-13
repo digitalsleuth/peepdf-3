@@ -60,7 +60,7 @@ In order to update the PDF Vulnerability List you can just use the -u parameter:
 ```
 $ peepdf -u
 
-[-] Checking if there are new updates to the Vulnerabilties List
+[-] Checking if there are new updates to the Vulnerabilities List
 [-] Current Version: 1.0.0
 [-] Remote Version: 1.0.1
 [+] Update available

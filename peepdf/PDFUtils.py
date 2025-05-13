@@ -813,7 +813,7 @@ def getUpdate():
         f"https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/vulns-ver"
     )
     repoVulnsFile = f"https://raw.githubusercontent.com/digitalsleuth/peepdf-3/{branch}/peepdf/PDFVulns.py"
-    print("[-] Checking if there are new updates to the Vulnerabilties List")
+    print("[-] Checking if there are new updates to the Vulnerabilities List")
     try:
         remoteVersion = requests.get(repoVersionFile, timeout=10).text
         remoteVersion = remoteVersion.strip()
