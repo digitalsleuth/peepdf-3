@@ -7,7 +7,7 @@ exclude = ["archive*"]
 
 [project]
 name = "peepdf-3"
-version = "5.1.0"
+version = "5.1.1"
 dependencies = [
   "requests",
   "pypdf",
