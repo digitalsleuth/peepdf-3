@@ -149,7 +149,7 @@ Creates an object stream choosing the objects to be compressed.
 
 PPDF> create object_stream
 
-Warning: stream objects cannot be compressed. If the Catalog object is compressed could lead to corrupted files for Adobe Reader!! Which objects do you want to compress? (Valid respones: all | 1-5 | 1,2,5,7,8) all
+Warning: stream objects cannot be compressed. If the Catalog object is compressed could lead to corrupted files for Adobe Reader!! Which objects do you want to compress? (Valid responses: all | 1-5 | 1,2,5,7,8) all
 
 [*] Warning: Stream objects cannot be compressed!
 
@@ -969,7 +969,7 @@ Usage: reset
 Cleans the console
 
 Usage: reset var_name
-Resets the variable value to the default value if applicable It's specially useful when we change the standard ouput of the console to a file or variable to restore it to the normal output. See the [set] command.
+Resets the variable value to the default value if applicable It's specially useful when we change the standard output of the console to a file or variable to restore it to the normal output. See the [set] command.
 
 PPDF> reset output
 

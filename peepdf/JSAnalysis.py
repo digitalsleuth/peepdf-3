@@ -180,7 +180,7 @@ def getVarContent(jsCode: str, varContent: str):
 
 def isJavascript(content: str):
     """
-    Given a string this method looks for typical Javscript strings and try to identify if the string contains Javascript code or not.
+    Given a string this method looks for typical Javascript strings and try to identify if the string contains Javascript code or not.
 
     @param content: A string
     @return: A boolean, True if it seems to contain Javascript code or False in the other case

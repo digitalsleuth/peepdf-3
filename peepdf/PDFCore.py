@@ -2945,7 +2945,7 @@ class PDFObjectStream(PDFStream):
         """
         Updates the object after some modification has occurred
 
-        @param modifiedCompressedObjects: A boolean indicating if the compressed objects hav been modified. By default: False.
+        @param modifiedCompressedObjects: A boolean indicating if the compressed objects have been modified. By default: False.
         @param onlyElements: A boolean indicating if it's only necessary to update the stream dictionary or also the stream itself. By default: False (stream included).
         @param decrypt: A boolean indicating if a decryption has been performed. By default: False.
         @return: A tuple (status,statusContent), where statusContent is empty in case status = 0 or an error message in case status = -1
@@ -8722,7 +8722,7 @@ class PDFParser:
 
     def readUntilNotRegularChar(self, string):
         """
-        Reads the regular chars of the string until it reachs a non-regular char. Then it removes spaces chars.
+        Reads the regular chars of the string until it reaches a non-regular char. Then it removes spaces chars.
         @param string
         @return A tuple (status,statusContent), where statusContent is the number of characters read in case status = 0 or an error in case status = -1
         """
