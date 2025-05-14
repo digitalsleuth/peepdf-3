@@ -44,7 +44,7 @@ except ModuleNotFoundError:
     from PDFCore import PDFParser, VERSION
     from PDFUtils import vtcheck, getPeepJSON, getPeepXML, getUpdate, DTFMT
     from PDFVulns import vulnsDict
-    from PDFConsole import PDFConsole, EMU_MODULE, DTFMT
+    from PDFConsole import PDFConsole, EMU_MODULE
     from JSAnalysis import JS_MODULE
     from PDFFilters import PIL_MODULE
 
