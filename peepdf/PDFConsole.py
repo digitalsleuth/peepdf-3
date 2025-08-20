@@ -367,7 +367,7 @@ class PDFConsole(cmd.Cmd):
             f"{newLine}Shows the changelog of the document or version of the document {newLine}"
         )
 
-    def do_clear(self):
+    def do_clear(self, argv):
         clearScreen()
 
     def help_clear(self):
