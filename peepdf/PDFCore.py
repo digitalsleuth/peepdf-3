@@ -8400,22 +8400,16 @@ class PDFParser:
             regExp = re.compile(r"((\d{1,10}\s\d{1,10}\sobj).*?endobj)", re.DOTALL)
             matchingObjects = regExp.findall(content)
         else:
-            regExp = re.compile(
-                r"((\d{1,10}\s\d{1,10}\sobj).*?)\s\d{1,10}\s\d{1,10}\sobj", re.DOTALL
-            )
-            matchingObjectsAux = regExp.findall(content)
-            while matchingObjectsAux != []:
-                if matchingObjectsAux[0] != []:
-                    objectBody = matchingObjectsAux[0][0]
-                    matchingObjects.append(matchingObjectsAux[0])
-                    content = content[content.find(objectBody) + len(objectBody) :]
-                    matchingObjectsAux = regExp.findall(content)
+            regExp = re.compile(r'\d{1,10}\s\d{1,10}\sobj')
+            starts = [(m.start(), m.end(), m.group(0)) for m in regExp.finditer(content)]
+            for i, (start, end, header) in enumerate(starts):
+                if i + 1 < len(starts):
+                    body = content[end:starts[i + 1][0]]
+                    if body and body[-1] in ' \t\n\r\f\v':            # Added to match the current output, but not sure if needed
+                        body = body[:-1]
                 else:
-                    matchingObjectsAux = []
-            lastObject = re.findall(r"(\d{1,5}\s\d{1,5}\sobj)", content, re.DOTALL)
-            if lastObject != []:
-                content = content[content.find(lastObject[0]) :]
-                matchingObjects.append((content, lastObject[0]))
+                    body = content[end:]
+                matchingObjects.append((header + body, header))
         return matchingObjects
 
     def getLines(self, content):
