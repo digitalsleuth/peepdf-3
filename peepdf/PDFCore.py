@@ -49,9 +49,19 @@ try:
         isOwnerPass,
         RC4,
         decryptData,
+        encryptData,
+        computeUserPassAESV3,
+        computeOwnerPassAESV3,
+        computePermsAESV3,        
     )
     from peepdf.JSAnalysis import analyseJS, isJavascript
     from peepdf.PDFFilters import decodeStream, encodeStream
+    from peepdf.PDFFontEncoding import (
+        decodeContentStreamText,
+        getBaseEncodingTable,
+        parseDifferencesTable,
+        parseToUnicodeCMap,
+    )
     from peepdf.PDFVulns import (
         jsVulns,
         singUniqueName,
@@ -78,9 +88,19 @@ except ModuleNotFoundError:
         isOwnerPass,
         RC4,
         decryptData,
+        encryptData,
+        computeUserPassAESV3,
+        computeOwnerPassAESV3,
+        computePermsAESV3,        
     )
     from JSAnalysis import analyseJS, isJavascript
     from PDFFilters import decodeStream, encodeStream
+    from PDFFontEncoding import (
+        decodeContentStreamText,
+        getBaseEncodingTable,
+        parseDifferencesTable,
+        parseToUnicodeCMap,
+    )
     from PDFVulns import (
         jsVulns,
         singUniqueName,
@@ -97,17 +117,34 @@ MAL_EOBJ = 3
 MAL_ESTREAM = 4
 MAL_XREF = 5
 MAL_BAD_HEAD = 6
-VERSION = "5.3.0"
+VERSION = "5.4.0"
 IS_ID_1 = False
 IS_ID_2 = False
 pdfFile = None
 newLine = os.linesep
 isForceMode = False
 isManualAnalysis = False
+jsErrorsFile = None
 spacesChars = ["\x00", "\x09", "\x0a", "\x0c", "\x0d", "\x20"]
 delimiterChars = ["<<", "(", "<", "[", "{", "/", "%"]
 refRegex = re.compile(r"\d+")
 jsContexts = {"global": None}
+
+
+def caseInsensitiveReplace(text, string1, string2):
+    """
+    Case-insensitive find-and-replace of string1 with string2 in text.
+    string1 is treated as a literal string rather than a regex pattern.
+    Keeping consistent with PDFObject.contains()'s case-insensitive matching,
+    which is what decides whether an object is offered up as a replace
+    candidate in the first place (PDFFile.replace() -> getObjectsByString()).
+
+    @return: A tuple (found, newText); newText is unchanged if found is False.
+    """
+    if re.search(re.escape(string1), text, re.IGNORECASE) is None:
+        return (False, text)
+    newText = re.sub(re.escape(string1), lambda m: string2, text, flags=re.IGNORECASE)
+    return (True, newText)
 
 
 class PDFObject:
@@ -153,18 +190,19 @@ class PDFObject:
         @param string: A string
         @return: A boolean to specify if the string has been found or not
         """
+        pattern = re.escape(string)
         value = str(self.value)
         rawValue = str(self.rawValue)
         encValue = str(self.encryptedValue)
         if (
-            re.findall(string, value, re.IGNORECASE) != []
-            or re.findall(string, rawValue, re.IGNORECASE) != []
-            or re.findall(string, encValue, re.IGNORECASE) != []
+            re.findall(pattern, value, re.IGNORECASE) != []
+            or re.findall(pattern, rawValue, re.IGNORECASE) != []
+            or re.findall(pattern, encValue, re.IGNORECASE) != []
         ):
             return True
         if self.containsJS():
             for js in self.JSCode:
-                if re.findall(string, js, re.IGNORECASE) != []:
+                if re.findall(pattern, js, re.IGNORECASE) != []:
                     return True
         return False
 
@@ -265,8 +303,8 @@ class PDFObject:
         """
         stats = {
             "Object": self.objType,
-            "MD5": hashlib.md5(self.value.encode()).hexdigest(),
-            "SHA1": hashlib.sha1(self.value.encode()).hexdigest(),
+            "MD5": hashlib.md5(self.value.encode("latin-1")).hexdigest(),
+            "SHA1": hashlib.sha1(self.value.encode("latin-1")).hexdigest(),
             "References": str(
                 sorted(self.references, key=lambda x: int(refRegex.search(x).group()))
             ),
@@ -339,10 +377,12 @@ class PDFObject:
 
         @return: A tuple (status,statusContent), where statusContent is empty in case status = 0 or an error message in case status = -1
         """
-        if self.value.find(string1) == -1 and self.rawValue.find(string1) == -1:
+        valueFound, self.value = caseInsensitiveReplace(self.value, string1, string2)
+        rawFound, self.rawValue = caseInsensitiveReplace(
+            self.rawValue, string1, string2
+        )
+        if not valueFound and not rawFound:
             return (-1, "String not found")
-        self.value = self.value.replace(string1, string2)
-        self.rawValue = self.rawValue.replace(string1, string2)
         ret = self.update()
         return ret
 
@@ -500,9 +540,9 @@ class PDFNum(PDFObject):
                 raise Exception(ret[1])
 
     def replace(self, string1, string2):
-        if self.value.find(string1) == -1:
+        found, self.value = caseInsensitiveReplace(self.value, string1, string2)
+        if not found:
             return (-1, "String not found")
-        self.value = self.value.replace(string1, string2)
         ret = self.update()
         return ret
 
@@ -650,15 +690,12 @@ class PDFString(PDFObject):
                 jsErrors,
                 jsContexts["global"],
             ) = analyseJS(
-                self.value, jsContexts["global"], isManualAnalysis, src=pdfFile.fileName
+                self.value, jsContexts["global"], isManualAnalysis, src=pdfFile.fileName, errorsFile=jsErrorsFile
             )
             if jsErrors:
                 for jsError in jsErrors:
                     errorMessage = f"[!] Error analysing Javascript: {jsError}"
-                    if isForceMode:
-                        self.addError(errorMessage)
-                    else:
-                        return (-1, errorMessage)
+                    self.addError(errorMessage)
         if self.encrypted and not decrypt:
             ret = self.encrypt()
             if ret[0] == -1:
@@ -673,15 +710,22 @@ class PDFString(PDFObject):
         self.rawValue = ret[1]
         return (0, "")
 
-    def encrypt(self, password: str = None):
+    def encrypt(self, password: str = None, algorithm: str = "RC4"):
         self.encrypted = True
         if password is not None:
             self.encryptionKey = password
         try:
-            self.encryptedValue = RC4(self.rawValue, self.encryptionKey)
-        except:
-            errorMessage = "[!] Error encrypting with RC4"
-            self.addError(errorMessage)
+            if algorithm == "RC4":
+                self.encryptedValue = RC4(self.rawValue, self.encryptionKey)
+            elif algorithm == "AES":
+                ret = encryptData(self.rawValue, self.encryptionKey)
+                if ret[0] == -1:
+                    errorMessage = f"AES encryption error: {ret[1]}"
+                    self.addError(errorMessage)
+                    return (-1, errorMessage)
+                self.encryptedValue = ret[1]
+        except Exception:
+            errorMessage = f"[!] Error encrypting with {algorithm}"
             return (-1, errorMessage)
         return (0, "")
 
@@ -829,30 +873,59 @@ class PDFHexString(PDFObject):
                 jsErrors,
                 jsContexts["global"],
             ) = analyseJS(
-                self.value, jsContexts["global"], isManualAnalysis, src=pdfFile.fileName
+                self.value, jsContexts["global"], isManualAnalysis, src=pdfFile.fileName, errorsFile=jsErrorsFile
             )
             if jsErrors:
                 for jsError in jsErrors:
                     errorMessage = f"[!] Error analysing Javascript: {jsError}"
-                    if isForceMode:
-                        self.addError(errorMessage)
-                    else:
-                        return (-1, errorMessage)
+                    self.addError(errorMessage)
         if self.encrypted and not decrypt:
             ret = self.encrypt()
             if ret[0] == -1:
                 return ret
         return (0, "")
 
-    def encrypt(self, password=None):
+    def replace(self, string1, string2):
+        """
+        Searches the hex string's decoded value for string1 and, if found,
+        replaces it with string2, then re-encodes the result back into
+        self.rawValue's hex digits.
+
+        @return: A tuple (status,statusContent), where statusContent is
+        empty in case status = 0 or an error message in case status = -1
+        """
+        valueFound, newValue = caseInsensitiveReplace(self.value, string1, string2)
+        if not valueFound:
+            return (-1, "String not found")
+        self.value = newValue
+        try:
+            if self.rawValue.lower().startswith("feff"):
+                self.rawValue = "feff" + self.value.encode("utf-16-be").hex()
+            else:
+                self.rawValue = self.value.encode("latin-1").hex()
+        except Exception:
+            errorMessage = "[!] Error in hexadecimal conversion"
+            self.addError(errorMessage)
+            return (-1, errorMessage)
+        return self.update(newHexValue=False)
+
+    def encrypt(self, password=None, algorithm: str = "RC4"):
         self.encrypted = True
         if password is not None:
             self.encryptionKey = password
         try:
-            self.encryptedValue = RC4(self.value, self.encryptionKey)
+            if algorithm == "RC4":
+                self.encryptedValue = RC4(self.value, self.encryptionKey)
+            elif algorithm == "AES":
+                ret = encryptData(self.value, self.encryptionKey)
+                if ret[0] == -1:
+                    errorMessage = f"AES encryption error: {ret[1]}"
+                    self.addError(errorMessage)
+                    return (-1, errorMessage)
+                self.encryptedValue = ret[1]
             self.rawValue = (self.encryptedValue).encode("latin-1").hex()
-        except:
-            errorMessage = "[!] Error encrypting with RC4"
+        except Exception:
+            errorMessage = f"[!] Error encrypting with {algorithm}"
             self.addError(errorMessage)
             return (-1, errorMessage)
         return (0, "")
@@ -1031,7 +1104,7 @@ class PDFArray(PDFObject):
             else:
                 raise Exception(ret[1])
 
-    def update(self, decrypt=False):
+    def update(self, decrypt=False, algorithm="RC4"):
         """
         Updates the object after some modification has occurred
 
@@ -1068,7 +1141,7 @@ class PDFArray(PDFObject):
                     and self.encrypted
                     and not decrypt
                 ):
-                    ret = element.encrypt(self.encryptionKey)
+                    ret = element.encrypt(self.encryptionKey, algorithm)
                     if ret[0] == -1:
                         errorMessage = "[!] Error encrypting element"
                         self.addError(errorMessage)
@@ -1140,11 +1213,11 @@ class PDFArray(PDFObject):
             return (-1, errorMessage)
         return ret
 
-    def encrypt(self, password=None):
+    def encrypt(self, password=None, algorithm="RC4"):
         self.encrypted = True
         if password is not None:
             self.encryptionKey = password
-        ret = self.update()
+        ret = self.update(algorithm=algorithm)
         return ret
 
     def getElementByName(self, name):
@@ -1235,8 +1308,8 @@ class PDFArray(PDFObject):
         errorMessage = ""
         stringFound = False
         newElements = []
-        if self.rawValue.find(string1) != -1:
-            self.rawValue = self.rawValue.replace(string1, string2)
+        rawFound, self.rawValue = caseInsensitiveReplace(self.rawValue, string1, string2)
+        if rawFound:
             stringFound = True
             if errorMessage == "String not found":
                 errorMessage = ""
@@ -1308,7 +1381,7 @@ class PDFDictionary(PDFObject):
             else:
                 raise Exception(ret[1])
 
-    def update(self, decrypt=False):
+    def update(self, decrypt=False, algorithm="RC4"):
         """
         Updates the object after some modification has occurred
 
@@ -1361,7 +1434,8 @@ class PDFDictionary(PDFObject):
             elif objType in {"dictionary", "array"}:
                 self.references += valueObject.getReferences()
             if valueObject.containsJS() or (
-                keyValue == "/JS" and objType != "reference"
+                keyValue == "/JS"
+                and objType in {"string", "hexstring", "dictionary", "stream"}
             ):
                 if not valueObject.containsJS():
                     valueObject.setReferencedJSObject(True)
@@ -1385,7 +1459,7 @@ class PDFDictionary(PDFObject):
                 and self.encrypted
                 and not decrypt
             ):
-                ret = valueObject.encrypt(self.encryptionKey)
+                ret = valueObject.encrypt(self.encryptionKey, algorithm)
                 if ret[0] == -1:
                     errorMessage = "[!] Error encrypting element"
                     self.addError(errorMessage)
@@ -1465,11 +1539,11 @@ class PDFDictionary(PDFObject):
             return (-1, errorMessage)
         return ret
 
-    def encrypt(self, password=None):
+    def encrypt(self, password=None, algorithm="RC4"):
         self.encrypted = True
         if password is not None:
             self.encryptionKey = password
-        ret = self.update()
+        ret = self.update(algorithm=algorithm)
         return ret
 
     def getDictType(self):
@@ -1548,7 +1622,7 @@ class PDFDictionary(PDFObject):
     def getStats(self):
         value = self.value
         if isinstance(value, str):
-            value = value.encode()
+            value = value.encode("latin-1")
         stats = {
             "Object": self.objType,
             "MD5": hashlib.md5(value).hexdigest(),
@@ -1885,7 +1959,7 @@ class PDFStream(PDFDictionary):
                 and self.encrypted
                 and not decrypt
             ):
-                ret = valueElement.encrypt(self.encryptionKey)
+                ret = valueElement.encrypt(self.encryptionKey, algorithm)
                 if ret[0] == -1:
                     errorMessage = f"{ret[1]} in child element"
                     self.addError(errorMessage)
@@ -1910,9 +1984,11 @@ class PDFStream(PDFDictionary):
                 if self.deletedFilters:
                     if self.encrypted:
                         try:
-                            self.rawStream = RC4(self.decodedStream, self.encryptionKey)
-                        except:
-                            errorMessage = "[!] Error encrypting stream with RC4"
+                            self.rawStream = self._encryptStreamBytes(
+                                self.decodedStream, algorithm
+                            )
+                        except Exception:
+                            errorMessage = f"[!] Error encrypting stream with {algorithm}"
                             if isForceMode:
                                 self.addError(errorMessage)
                             else:
@@ -1925,11 +2001,11 @@ class PDFStream(PDFDictionary):
                     if ret[0] != -1:
                         if self.encrypted:
                             try:
-                                self.rawStream = RC4(
-                                    self.encodedStream, self.encryptionKey
+                                self.rawStream = self._encryptStreamBytes(
+                                    self.encodedStream, algorithm
                                 )
-                            except:
-                                errorMessage = "[!] Error encrypting stream with RC4"
+                            except Exception:
+                                errorMessage = f"[!] Error encrypting stream with {algorithm}"
                                 if isForceMode:
                                     self.addError(errorMessage)
                                 else:
@@ -1937,6 +2013,12 @@ class PDFStream(PDFDictionary):
                             self.size = len(self.rawStream)
                         else:
                             self.size = len(self.encodedStream)
+                    else:
+                        errorMessage = ret[1]
+                        if isForceMode:
+                            self.addError(errorMessage)
+                        else:
+                            return (-1, errorMessage)                            
                 elif self.modifiedStream:
                     refs = re.findall(
                         r"(\d{1,5}\s{1,3}\d{1,5}\s{1,3}R)", self.decodedStream
@@ -1957,27 +2039,25 @@ class PDFStream(PDFDictionary):
                             jsContexts["global"],
                             isManualAnalysis,
                             src=pdfFile.fileName,
+                            errorsFile=jsErrorsFile,
                         )
                         if jsErrors:
                             for jsError in jsErrors:
                                 errorMessage = (
                                     f"[!] Error analysing Javascript: {jsError}"
                                 )
-                                if isForceMode:
-                                    self.addError(errorMessage)
-                                else:
-                                    return (-1, errorMessage)
+                                self.addError(errorMessage)
                     if self.isEncodedStream:
                         ret = self.encode()
                         if ret[0] != -1:
                             if self.encrypted:
                                 try:
-                                    self.rawStream = RC4(
-                                        self.encodedStream, self.encryptionKey
+                                    self.rawStream = self._encryptStreamBytes(
+                                        self.encodedStream, algorithm
                                     )
-                                except:
+                                except Exception:
                                     errorMessage = (
-                                        "[!] Error encrypting stream with RC4"
+                                        f"[!] Error encrypting stream with {algorithm}"
                                     )
                                     if isForceMode:
                                         self.addError(errorMessage)
@@ -1986,11 +2066,19 @@ class PDFStream(PDFDictionary):
                                 self.size = len(self.rawStream)
                             else:
                                 self.size = len(self.encodedStream)
+                        else:
+                            errorMessage = ret[1]
+                            if isForceMode:
+                                self.addError(errorMessage)
+                            else:
+                                return (-1, errorMessage)
                     elif self.encrypted:
                         try:
-                            self.rawStream = RC4(self.decodedStream, self.encryptionKey)
-                        except:
-                            errorMessage = "[!] Error encrypting stream with RC4"
+                            self.rawStream = self._encryptStreamBytes(
+                                self.decodedStream, algorithm
+                            )
+                        except Exception:
+                            errorMessage = f"[!] Error encrypting stream with {algorithm}"
                             if isForceMode:
                                 self.addError(errorMessage)
                             else:
@@ -2033,12 +2121,12 @@ class PDFStream(PDFDictionary):
                                 else:
                                     self.encodedStream = self.rawStream
                                     try:
-                                        self.rawStream = RC4(
-                                            self.rawStream, self.encryptionKey
+                                        self.rawStream = self._encryptStreamBytes(
+                                            self.rawStream, algorithm
                                         )
-                                    except:
+                                    except Exception:
                                         errorMessage = (
-                                            "[!] Error encrypting stream with RC4"
+                                            f"[!] Error encrypting stream with {algorithm}"
                                         )
                                         if isForceMode:
                                             self.addError(errorMessage)
@@ -2049,14 +2137,26 @@ class PDFStream(PDFDictionary):
                                 if not decrypt:
                                     self.decodedStream = self.rawStream
                                 try:
-                                    rc4Result = RC4(self.rawStream, self.encryptionKey)
                                     if decrypt:
-                                        self.decodedStream = rc4Result
+                                        if algorithm == "RC4":
+                                            self.decodedStream = RC4(
+                                                self.rawStream, self.encryptionKey
+                                            )
+                                        elif algorithm == "AES":
+                                            ret = decryptData(
+                                                self.rawStream, self.encryptionKey
+                                            )
+                                            if ret[0] == -1:
+                                                raise ValueError(ret[1])
+                                            self.decodedStream = ret[1]
                                     else:
-                                        self.rawStream = rc4Result
-                                except:
+                                        self.rawStream = self._encryptStreamBytes(
+                                            self.rawStream, algorithm
+                                        )
+                                except Exception:
+                                    verb = "decrypting" if decrypt else "encrypting"
                                     errorMessage = (
-                                        "[!] Error encrypting stream with RC4"
+                                        f"[!] Error {verb} stream with {algorithm}"
                                     )
                                     if isForceMode:
                                         self.addError(errorMessage)
@@ -2092,24 +2192,26 @@ class PDFStream(PDFDictionary):
                                     jsContexts["global"],
                                     isManualAnalysis,
                                     src=pdfFile.fileName,
+                                    errorsFile=jsErrorsFile,
                                 )
                                 if jsErrors:
                                     for jsError in jsErrors:
                                         errorMessage = (
                                             f"[!] Error analysing Javascript: {jsError}"
                                         )
-                                        if isForceMode:
-                                            self.addError(errorMessage)
-                                        else:
-                                            return (-1, errorMessage)
+                                        self.addError(errorMessage)
                 elif not decrypt:
                     try:
                         if self.isEncodedStream:
-                            self.rawStream = RC4(self.encodedStream, self.encryptionKey)
+                            self.rawStream = self._encryptStreamBytes(
+                                self.encodedStream, algorithm
+                            )
                         else:
-                            self.rawStream = RC4(self.decodedStream, self.encryptionKey)
-                    except:
-                        errorMessage = "[!] Error encrypting stream with RC4"
+                            self.rawStream = self._encryptStreamBytes(
+                                self.decodedStream, algorithm
+                            )
+                    except Exception:
+                        errorMessage = f"[!] Error encrypting stream with {algorithm}"
                         if isForceMode:
                             self.addError(errorMessage)
                         else:
@@ -2196,16 +2298,14 @@ class PDFStream(PDFDictionary):
                                 jsContexts["global"],
                                 isManualAnalysis,
                                 src=pdfFile.fileName,
+                                errorsFile=jsErrorsFile,
                             )
                             if jsErrors:
                                 for jsError in jsErrors:
                                     errorMessage = (
                                         f"[!] Error analysing Javascript: {jsError}"
                                     )
-                                    if isForceMode:
-                                        self.addError(errorMessage)
-                                    else:
-                                        return (-1, errorMessage)
+                                    self.addError(errorMessage)
                 if not self.modifiedRawStream:
                     self.modifiedStream = False
                     self.newFilters = False
@@ -2225,8 +2325,11 @@ class PDFStream(PDFDictionary):
                     self.modifiedStream = False
                     self.newFilters = False
                     self.deletedFilters = False
-        if self.errors != []:
-            return (-1, self.errors[-1])
+        fatalErrors = [
+            e for e in self.errors if not e.startswith("[!] Error analysing Javascript")
+        ]
+        if fatalErrors:
+            return (-1, fatalErrors[-1])
         return (0, "")
 
     def cleanStream(self):
@@ -2250,6 +2353,7 @@ class PDFStream(PDFDictionary):
             self.decodedStream = stream
 
     def contains(self, string):
+        pattern = re.escape(string)
         value = str(self.value)
         rawValue = str(self.rawValue)
         encValue = str(self.encryptedValue)
@@ -2257,17 +2361,17 @@ class PDFStream(PDFDictionary):
         encStream = str(self.encodedStream)
         decStream = str(self.decodedStream)
         if (
-            re.findall(string, value, re.IGNORECASE) != []
-            or re.findall(string, rawValue, re.IGNORECASE) != []
-            or re.findall(string, encValue, re.IGNORECASE) != []
-            or re.findall(string, rawStream, re.IGNORECASE) != []
-            or re.findall(string, encStream, re.IGNORECASE) != []
-            or re.findall(string, decStream, re.IGNORECASE) != []
+            re.findall(pattern, value, re.IGNORECASE) != []
+            or re.findall(pattern, rawValue, re.IGNORECASE) != []
+            or re.findall(pattern, encValue, re.IGNORECASE) != []
+            or re.findall(pattern, rawStream, re.IGNORECASE) != []
+            or re.findall(pattern, encStream, re.IGNORECASE) != []
+            or re.findall(pattern, decStream, re.IGNORECASE) != []
         ):
             return True
         if self.containsJS():
             for js in self.JSCode:
-                if re.findall(string, js, re.IGNORECASE) != []:
+                if re.findall(pattern, js, re.IGNORECASE) != []:
                     return True
         return False
 
@@ -2491,6 +2595,46 @@ class PDFStream(PDFDictionary):
                 ret = self.update(onlyElements=onlyElements)
                 return ret
         return (-1, "Element not found")
+    
+    def _getImageDictParams(self):
+        """
+        Collects /Width, /Height, /ColorSpace and /BitsPerComponent from
+        this stream's own dictionary.
+
+        @return: A dict of the PDFObjects found, keyed by element name.
+        """
+        params = {}
+        for name in ("/Width", "/Height", "/ColorSpace", "/BitsPerComponent"):
+            element = self.getElementByName(name)
+            if element:
+                params[name] = element
+        return params
+
+    def _buildEncodeParameters(self, filterName, baseParams):
+        """
+        Returns the parameters dict to pass to encodeStream() for the given
+        filter. Only DCTEncode currently needs anything beyond the filter's
+        /DecodeParms.
+        """
+        if filterName in ("/DCTDecode", "/DCT", "/JPXDecode"):
+            merged = self._getImageDictParams()
+            if baseParams:
+                merged.update(baseParams)
+            return merged
+        return baseParams
+
+    def _encryptStreamBytes(self, data, algorithm):
+        """
+        Encrypts data with self.encryptionKey using the given algorithm.
+        """
+        if algorithm == "RC4":
+            return RC4(data, self.encryptionKey)
+        if algorithm == "AES":
+            ret = encryptData(data, self.encryptionKey)
+            if ret[0] == -1:
+                raise ValueError(ret[1])
+            return ret[1]
+        raise ValueError(f"Unsupported encryption algorithm: {algorithm}")
 
     def encode(self):
         """
@@ -2509,7 +2653,9 @@ class PDFStream(PDFDictionary):
                     ret = encodeStream(
                         self.decodedStream,
                         self.thisFilter.getValue(),
-                        self.filterParams,
+                        self._buildEncodeParameters(
+                            self.thisFilter.getValue(), self.filterParams
+                        ),
                     )
                     if ret[0] == -1:
                         errorMessage = f"Encoding error: {ret[1]}"
@@ -2524,7 +2670,9 @@ class PDFStream(PDFDictionary):
                     ret = encodeStream(
                         self.decodedStream,
                         self.thisFilter.getValue(),
-                        self.filterParams.getElements(),
+                        self._buildEncodeParameters(
+                            self.thisFilter.getValue(), self.filterParams.getElements()
+                        ),
                     )
                     if ret[0] == -1:
                         errorMessage = f"Encoding error: {ret[1]}"
@@ -2562,7 +2710,11 @@ class PDFStream(PDFDictionary):
                     if thisFilter.getType() == "name":
                         if self.filterParams is None:
                             ret = encodeStream(
-                                self.rawStream, thisFilter.getValue(), self.filterParams
+                                self.rawStream,
+                                thisFilter.getValue(),
+                                self._buildEncodeParameters(
+                                    thisFilter.getValue(), self.filterParams
+                                ),
                             )
                             if ret[0] == -1:
                                 errorMessage = f"Encoding error: {ret[1]}"
@@ -2590,7 +2742,11 @@ class PDFStream(PDFDictionary):
                                 paramsDict = {}
 
                             ret = encodeStream(
-                                self.rawStream, thisFilter.getValue(), paramsDict
+                                self.rawStream,
+                                thisFilter.getValue(),
+                                self._buildEncodeParameters(
+                                    thisFilter.getValue(), paramsDict
+                                ),
                             )
                             if ret[0] == -1:
                                 errorMessage = f"Encoding error: {ret[1]}"
@@ -2630,11 +2786,11 @@ class PDFStream(PDFDictionary):
             return (0, "")
         return (-1, "Empty stream")
 
-    def encrypt(self, password=None):
+    def encrypt(self, password=None, algorithm="RC4"):
         self.encrypted = True
         if password is not None:
             self.encryptionKey = password
-        ret = self.update()
+        ret = self.update(algorithm=algorithm)
         return ret
 
     def getEncryptedValue(self):
@@ -2642,15 +2798,15 @@ class PDFStream(PDFDictionary):
 
     def getStats(self):
         if isinstance(self.value, str):
-            hashValue = self.value.encode()
+            hashValue = self.value.encode("latin-1")
         else:
             hashValue = self.value
         if isinstance(self.decodedStream, str):
-            hashDecodedStream = self.decodedStream.encode()
+            hashDecodedStream = self.decodedStream.encode("latin-1")
         else:
             hashDecodedStream = self.decodedStream
         if isinstance(self.rawStream, str):
-            hashRawStream = self.rawStream.encode()
+            hashRawStream = self.rawStream.encode("latin-1")
         else:
             hashRawStream = self.rawStream
         stats = {
@@ -2794,8 +2950,10 @@ class PDFStream(PDFDictionary):
         # Stream
         if not self.modifiedRawStream:
             oldDecodedStream = self.decodedStream
-            if self.decodedStream.find(string1) != -1:
-                self.decodedStream = self.decodedStream.replace(string1, string2)
+            streamFound, self.decodedStream = caseInsensitiveReplace(
+                self.decodedStream, string1, string2
+            )
+            if streamFound:
                 stringFound = True
                 if errorMessage == "String not found":
                     errorMessage = ""
@@ -2844,14 +3002,12 @@ class PDFStream(PDFDictionary):
                 jsContexts["global"],
                 isManualAnalysis,
                 src=pdfFile.fileName,
+                errorsFile=jsErrorsFile,
             )
             if jsErrors:
                 for jsError in jsErrors:
                     errorMessage = f"[!] Error analysing Javascript: {jsError}"
-                    if isForceMode:
-                        self.addError(errorMessage)
-                    else:
-                        return (-1, errorMessage)
+                    self.addError(errorMessage)
         if errorMessage != "":
             return (-1, errorMessage)
         return (0, "")
@@ -3133,7 +3289,7 @@ class PDFObjectStream(PDFStream):
                 and self.encrypted
                 and not decrypt
             ):
-                ret = valueElement.encrypt(self.encryptionKey)
+                ret = valueElement.encrypt(self.encryptionKey, algorithm)
                 if ret[0] == -1:
                     errorMessage = f"{ret[1]} in child element"
                     self.addError(errorMessage)
@@ -3159,9 +3315,11 @@ class PDFObjectStream(PDFStream):
                 if self.deletedFilters:
                     if self.encrypted:
                         try:
-                            self.rawStream = RC4(self.decodedStream, self.encryptionKey)
-                        except:
-                            errorMessage = "[!] Error encrypting stream with RC4"
+                            self.rawStream = self._encryptStreamBytes(
+                                self.decodedStream, algorithm
+                            )
+                        except Exception:
+                            errorMessage = f"[!] Error encrypting stream with {algorithm}"
                             if isForceMode:
                                 self.addError(errorMessage)
                             else:
@@ -3174,11 +3332,11 @@ class PDFObjectStream(PDFStream):
                     if ret[0] != -1:
                         if self.encrypted:
                             try:
-                                self.rawStream = RC4(
-                                    self.encodedStream, self.encryptionKey
+                                self.rawStream = self._encryptStreamBytes(
+                                    self.encodedStream, algorithm
                                 )
-                            except:
-                                errorMessage = "[!] Error encrypting stream with RC4"
+                            except Exception:
+                                errorMessage = f"[!] Error encrypting stream with {algorithm}"
                                 if isForceMode:
                                     self.addError(errorMessage)
                                 else:
@@ -3186,6 +3344,12 @@ class PDFObjectStream(PDFStream):
                             self.size = len(self.rawStream)
                         else:
                             self.size = len(self.encodedStream)
+                    else:
+                        errorMessage = ret[1]
+                        if isForceMode:
+                            self.addError(errorMessage)
+                        else:
+                            return (-1, errorMessage)                    
                 else:
                     if self.modifiedStream or self.modifiedRawStream:
                         if self.modifiedStream:
@@ -3194,12 +3358,12 @@ class PDFObjectStream(PDFStream):
                                 if ret[0] != -1:
                                     if self.encrypted:
                                         try:
-                                            self.rawStream = RC4(
-                                                self.encodedStream, self.encryptionKey
+                                            self.rawStream = self._encryptStreamBytes(
+                                                self.encodedStream, algorithm
                                             )
-                                        except:
+                                        except Exception:
                                             errorMessage = (
-                                                "[!] Error encrypting stream with RC4"
+                                                f"[!] Error encrypting stream with {algorithm}"
                                             )
                                             if isForceMode:
                                                 self.addError(errorMessage)
@@ -3208,14 +3372,20 @@ class PDFObjectStream(PDFStream):
                                         self.size = len(self.rawStream)
                                     else:
                                         self.size = len(self.encodedStream)
+                                else:
+                                    errorMessage = ret[1]
+                                    if isForceMode:
+                                        self.addError(errorMessage)
+                                    else:
+                                        return (-1, errorMessage)
                             elif self.encrypted:
                                 try:
-                                    self.rawStream = RC4(
-                                        self.decodedStream, self.encryptionKey
+                                    self.rawStream = self._encryptStreamBytes(
+                                        self.decodedStream, algorithm
                                     )
-                                except:
+                                except Exception:
                                     errorMessage = (
-                                        "[!] Error encrypting stream with RC4"
+                                        f"[!] Error encrypting stream with {algorithm}"
                                     )
                                     if isForceMode:
                                         self.addError(errorMessage)
@@ -3259,11 +3429,11 @@ class PDFObjectStream(PDFStream):
                                         else:
                                             self.encodedStream = self.rawStream
                                             try:
-                                                self.rawStream = RC4(
-                                                    self.rawStream, self.encryptionKey
+                                                self.rawStream = self._encryptStreamBytes(
+                                                    self.rawStream, algorithm
                                                 )
-                                            except:
-                                                errorMessage = "[!] Error encrypting stream with RC4"
+                                            except Exception:
+                                                errorMessage = f"[!] Error encrypting stream with {algorithm}"
                                                 if isForceMode:
                                                     self.addError(errorMessage)
                                                 else:
@@ -3271,13 +3441,31 @@ class PDFObjectStream(PDFStream):
                                         self.decode()
                                     else:
                                         try:
-                                            self.decodedStream = RC4(
-                                                self.rawStream, self.encryptionKey
+                                            if decrypt:
+                                                if algorithm == "RC4":
+                                                    self.decodedStream = RC4(
+                                                        self.rawStream,
+                                                        self.encryptionKey,
+                                                    )
+                                                elif algorithm == "AES":
+                                                    ret = decryptData(
+                                                        self.rawStream,
+                                                        self.encryptionKey,
+                                                    )
+                                                    if ret[0] == -1:
+                                                        raise ValueError(ret[1])
+                                                    self.decodedStream = ret[1]
+                                            else:
+                                                self.rawStream = self._encryptStreamBytes(
+                                                    self.rawStream, algorithm
+                                                )
+                                        except Exception:
+                                            verb = (
+                                                "decrypting" if decrypt else "encrypting"
                                             )
-                                        except:
                                             errorMessage = (
-                                                "[!] Error encrypting stream with RC4"
-                                            )
+                                                f"[!] Error {verb} stream with {algorithm}"
+                                            )                                            
                                             if isForceMode:
                                                 self.addError(errorMessage)
                                             else:
@@ -3336,15 +3524,15 @@ class PDFObjectStream(PDFStream):
                     elif not decrypt:
                         try:
                             if self.isEncodedStream:
-                                self.rawStream = RC4(
-                                    self.encodedStream, self.encryptionKey
+                                self.rawStream = self._encryptStreamBytes(
+                                    self.encodedStream, algorithm
                                 )
                             else:
-                                self.rawStream = RC4(
-                                    self.decodedStream, self.encryptionKey
+                                self.rawStream = self._encryptStreamBytes(
+                                    self.decodedStream, algorithm
                                 )
-                        except:
-                            errorMessage = "[!] Error encrypting stream with RC4"
+                        except Exception:
+                            errorMessage = f"[!] Error encrypting stream with {algorithm}"
                             if isForceMode:
                                 self.addError(errorMessage)
                             else:
@@ -3446,16 +3634,14 @@ class PDFObjectStream(PDFStream):
                                 jsContexts["global"],
                                 isManualAnalysis,
                                 src=pdfFile.fileName,
+                                errorsFile=jsErrorsFile,
                             )
                             if jsErrors:
                                 for jsError in jsErrors:
                                     errorMessage = (
                                         f"[!] Error analysing Javascript: {jsError}"
                                     )
-                                    if isForceMode:
-                                        self.addError(errorMessage)
-                                    else:
-                                        return (-1, errorMessage)
+                                    self.addError(errorMessage)
                 if not self.modifiedRawStream:
                     self.modifiedStream = False
                     self.newFilters = False
@@ -3475,8 +3661,11 @@ class PDFObjectStream(PDFStream):
                     self.modifiedStream = False
                     self.newFilters = False
                     self.deletedFilters = False
-        if self.errors != []:
-            return (-1, self.errors[-1])
+        fatalErrors = [
+            e for e in self.errors if not e.startswith("[!] Error analysing Javascript")
+        ]
+        if fatalErrors:
+            return (-1, fatalErrors[-1])
         return (0, "")
 
     def getCompressedObjects(self):
@@ -3529,7 +3718,7 @@ class PDFObjectStream(PDFStream):
             newElements[newKey] = newObject
         # Stream
         if not self.modifiedRawStream:
-            if self.decodedStream.find(string1) != -1:
+            if re.search(re.escape(string1), self.decodedStream, re.IGNORECASE):
                 modifiedObjects = True
                 stringFound = True
                 if errorMessage == "String not found":
@@ -3698,6 +3887,7 @@ class PDFCrossRefSection:
         for i, subsection in enumerate(self.subsections):
             ret = subsection.addEntry(newEntry, objectId)
             if ret[0] != -1:
+                errorMessage = ""
                 break
             errorMessage = ret[1]
             self.addError(errorMessage)
@@ -4021,7 +4211,7 @@ class PDFCrossRefEntry:
         elif isForceMode:
             self.addError("[!] Error parsing xref entry")
         else:
-            return (-1, "[!] Error parsing xref entry")
+            raise Exception("[!] Error parsing xref entry")
 
     def addError(self, errorMessage):
         if errorMessage not in self.errors:
@@ -5027,6 +5217,133 @@ class PDFTrailer:
         output += f"%%EOF{newLine}"
         return output
 
+def _resolvePDFReference(element, pdfFile, version):
+    """
+    Follows a PDFReference to its target object, if element is one.
+    Also normalizes PDFDictionary.getElementByName()'s "not found" result
+    to None.
+    """
+    if not element:
+        return None
+    if element.getType() == "reference":
+        return pdfFile.getObject(element.getId(), version)
+    return element
+
+def _buildFontDecodeTable(fontObj, pdfFile, version):
+    toUnicodeElement = _resolvePDFReference(
+        fontObj.getElementByName("/ToUnicode"), pdfFile, version
+    )
+    if toUnicodeElement is not None and toUnicodeElement.getType() == "stream":
+        try:
+            cmapText = toUnicodeElement.getStream()
+        except Exception:
+            cmapText = None
+        if cmapText:
+            table, byteWidth = parseToUnicodeCMap(cmapText)
+            if table:
+                return table, byteWidth
+
+    subtypeElement = fontObj.getElementByName("/Subtype")
+    if subtypeElement and subtypeElement.getValue() == "/Type0":
+        return None, 2
+
+    baseTable = getBaseEncodingTable("/StandardEncoding")
+    differences = None
+    encodingElement = _resolvePDFReference(
+        fontObj.getElementByName("/Encoding"), pdfFile, version
+    )
+    if encodingElement is not None:
+        if encodingElement.getType() == "name":
+            baseTable = getBaseEncodingTable(encodingElement.getValue())
+        elif encodingElement.getType() == "dictionary":
+            baseNameElement = encodingElement.getElementByName("/BaseEncoding")
+            if baseNameElement:
+                baseTable = getBaseEncodingTable(baseNameElement.getValue())
+            differencesElement = _resolvePDFReference(
+                encodingElement.getElementByName("/Differences"), pdfFile, version
+            )
+            if (
+                differencesElement is not None
+                and differencesElement.getType() == "array"
+            ):
+                differences = []
+                for item in differencesElement.getElements():
+                    if item is None:
+                        continue
+                    if item.getType() in ("integer", "real"):
+                        differences.append(item.getRawValue())
+                    elif item.getType() == "name":
+                        differences.append(item.getValue())
+    table = parseDifferencesTable(differences, baseTable) if differences else baseTable
+    return table, 1
+
+
+def _getInheritedResources(pageObj, pdfFile, version, maxDepth=32):
+    """Resolves /Resources"""
+    current = pageObj
+    depth = 0
+    while current is not None and depth < maxDepth:
+        resources = _resolvePDFReference(
+            current.getElementByName("/Resources"), pdfFile, version
+        )
+        if resources is not None and resources.getType() == "dictionary":
+            return resources
+        current = _resolvePDFReference(
+            current.getElementByName("/Parent"), pdfFile, version
+        )
+        depth += 1
+    return None
+
+
+def _getPageFontTables(pageObj, pdfFile, version, fontCache):
+    """Tries to get a page's fonts."""
+    fontTables = {}
+    resources = _getInheritedResources(pageObj, pdfFile, version)
+    if resources is None:
+        return fontTables
+    fontDict = _resolvePDFReference(
+        resources.getElementByName("/Font"), pdfFile, version
+    )
+    if fontDict is None or fontDict.getType() != "dictionary":
+        return fontTables
+    for fontName, fontRef in fontDict.getElements().items():
+        fontObj = _resolvePDFReference(fontRef, pdfFile, version)
+        if fontObj is None or fontObj.getType() != "dictionary":
+            continue
+        cacheKey = fontRef.getId() if fontRef.getType() == "reference" else id(fontObj)
+        if cacheKey not in fontCache:
+            try:
+                fontCache[cacheKey] = _buildFontDecodeTable(fontObj, pdfFile, version)
+            except Exception:
+                fontCache[cacheKey] = (None, 1)
+        fontTables[fontName.lstrip("/")] = fontCache[cacheKey]
+    return fontTables
+
+
+def _getPageContentStreams(pageObj, pdfFile, version):
+    """Returns a page's /Contents."""
+    streams = []
+    resolved = _resolvePDFReference(
+        pageObj.getElementByName("/Contents"), pdfFile, version
+    )
+    if resolved is None:
+        return streams
+    if resolved.getType() == "array":
+        for element in resolved.getElements():
+            if element is None:
+                continue
+            streamObj = _resolvePDFReference(element, pdfFile, version)
+            if streamObj is not None and streamObj.getType() == "stream":
+                streamId = element.getId() if element.getType() == "reference" else None
+                streams.append((streamId, streamObj))
+    elif resolved.getType() == "stream":
+        contentsElement = pageObj.getElementByName("/Contents")
+        streamId = (
+            contentsElement.getId() if contentsElement.getType() == "reference" else None
+        )
+        streams.append((streamId, resolved))
+    return streams
+
 
 class PDFFile:
     def __init__(self):
@@ -5168,6 +5485,7 @@ class PDFFile:
                         errorMessage = "Encryption dictionaries cannot be compressed"
                         self.addError(errorMessage)
                         numObjects -= 1
+                        continue
                     obj.setCompressedIn(thisId)
                     offset = len(tmpStreamObjects)
                     tmpStreamObjectsInfo += f"{str(compressedId)} {str(offset)} "
@@ -5357,6 +5675,8 @@ class PDFFile:
         sortedObjectsByOffset = self.body[version].getObjectsIds()
         sortedObjectsIds = sorted(sortedObjectsByOffset, key=lambda x: int(x))
         indirectObjects = self.body[version].getObjects()
+        lastOffset = None
+        lastRawObj = None
         for thisId in sortedObjectsIds:
             while thisId != lastId + 1:
                 lastFreeEntry = xrefEntries[lastFreeObject]
@@ -5387,11 +5707,20 @@ class PDFFile:
                         entry = PDFCrossRefEntry(offset, 0, 1)
                     xrefEntries.append(entry)
                     lastId = thisId
+                    lastOffset = indirectObject.getOffset()
+                    lastRawObj = obj
         if actualStream is None:
-            offset += len(str(obj.getRawValue()))
-            xrefEntries.append(PDFCrossRefEntry(offset, 0, 1))
-            lastId += 1
-            xrefStreamId = lastId
+            if lastOffset is None:
+                errorMessage = "Cannot compute xref stream offset: no objects found"
+                if isForceMode:
+                    self.addError(errorMessage)
+                else:
+                    return (-1, errorMessage)
+            else:
+                offset = lastOffset + len(str(lastRawObj.getRawValue()))
+                xrefEntries.append(PDFCrossRefEntry(offset, 0, 1))
+                lastId += 1
+                xrefStreamId = lastId
         subsection = PDFCrossRefSubSection(0, lastId + 1, xrefEntries)
         xrefSection = PDFCrossRefSection()
         xrefSection.addSubsection(subsection)
@@ -5647,7 +5976,7 @@ class PDFFile:
             revision = encDict["/R"]
             if revision is not None and revision.getType() == "integer":
                 revision = revision.getRawValue()
-                if revision < 2 or revision > 5:
+                if revision < 2 or revision > 6:
                     errorMessage = (
                         "[!] Decryption error: Algorithm revision not supported"
                     )
@@ -5729,7 +6058,7 @@ class PDFFile:
                 dictOE = dictOE.encode("latin-1")
         else:
             dictOE = ""
-            if revision == 5:
+            if revision in {5, 6}:
                 errorMessage = "[!] Decryption error: /OE not found"
                 if isForceMode:
                     self.addError(errorMessage)
@@ -5773,7 +6102,7 @@ class PDFFile:
                 dictUE = dictUE.encode("latin-1")
         else:
             dictUE = ""
-            if revision == 5:
+            if revision in {5, 6}:
                 errorMessage = "[!] Decryption error: /UE not found"
                 if isForceMode:
                     self.addError(errorMessage)
@@ -5795,7 +6124,7 @@ class PDFFile:
             encryptMetadata = True
         if not fatalError:
             # Checking user password
-            if revision != 5:
+            if revision not in {5, 6}:
                 ret = computeUserPass(
                     password, dictO, fileId, perm, keyLength, revision, encryptMetadata
                 )
@@ -5810,7 +6139,7 @@ class PDFFile:
             if isUserPass(password, computedUserPass, dictU, revision):
                 passType = "USER"
             elif isOwnerPass(
-                password, dictO, dictU, computedUserPass, keyLength, revision
+                password, dictO, dictU, keyLength, revision, fileId, perm, encryptMetadata
             ):
                 passType = "OWNER"
             else:
@@ -5859,7 +6188,7 @@ class PDFFile:
             self.setEncryptionKey(encryptionKey)
             self.setEncryptionKeyLength(keyLength)
             # Computing objects passwords and decryption
-            numKeyBytes = self.encryptionKeyLength / 8
+            numKeyBytes = int(self.encryptionKeyLength / 8)
             for v in range(self.updates + 1):
                 indirectObjectsIds = list(set(self.body[v].getObjectsIds()))
                 for thisId in indirectObjectsIds:
@@ -5984,8 +6313,7 @@ class PDFFile:
             return (-1, errorMessage)
         return (0, "")
 
-    def encrypt(self, password=""):
-        # TODO: AESV2 and V3
+    def encrypt(self, password="", algorithm="RC4"):
         errorMessage = ""
         encryptDictId = None
         encryptMetadata = True
@@ -5994,6 +6322,11 @@ class PDFFile:
         dictUE = ""
         dictO = ""
         dictU = ""
+        if algorithm not in ("RC4", "AES", "AES256"):
+            return (-1, f'Unsupported encryption algorithm: "{algorithm}"')
+        revision = {"RC4": 3, "AES": 4, "AES256": 6}[algorithm]       
+        if isinstance(password, str):
+            password = password.encode("latin-1")
         ret = self.getTrailer()
         if ret is not None:
             trailer, trailerStream = ret[1]
@@ -6003,10 +6336,11 @@ class PDFFile:
                     encryptDictType = encryptDict.getType()
                     if encryptDictType == "reference":
                         encryptDictId = encryptDict.getId()
-                fileId = self.getMD5()
-                if fileId == "":
-                    fileId = hashlib.md5(str(random.random())).hexdigest()
-                md5Object = PDFString(fileId)
+                fileIdHex = self.getMD5()
+                if fileIdHex == "":
+                    fileIdHex = hashlib.md5(str(random.random()).encode()).hexdigest()
+                fileId = bytes.fromhex(fileIdHex)
+                md5Object = PDFHexString(fileId.hex())
                 fileIdArray = PDFArray(elements=[md5Object, md5Object])
                 trailerStream.setDictEntry("/ID", fileIdArray)
                 self.setTrailer([trailer, trailerStream])
@@ -6016,66 +6350,160 @@ class PDFFile:
                     encryptDictType = encryptDict.getType()
                     if encryptDictType == "reference":
                         encryptDictId = encryptDict.getId()
-                fileId = self.getMD5()
-                if fileId == "":
-                    fileId = hashlib.md5(str(random.random())).hexdigest()
-                md5Object = PDFString(fileId)
+                fileIdHex = self.getMD5()
+                if fileIdHex == "":
+                    fileIdHex = hashlib.md5(str(random.random()).encode()).hexdigest()
+                fileId = bytes.fromhex(fileIdHex)
+                md5Object = PDFHexString(fileId.hex())
                 fileIdArray = PDFArray(elements=[md5Object, md5Object])
                 trailer.setDictEntry("/ID", fileIdArray)
                 self.setTrailer([trailer, trailerStream])
 
-            ret = computeOwnerPass(password, password, 128, revision=3)
-            if ret[0] != -1:
-                dictO = ret[1]
-            elif isForceMode:
-                self.addError(ret[1])
+            dictPerms = ""
+            if algorithm == "AES256":
+                encryptionKey = bytes(random.randint(0, 255) for _ in range(32))
+                ret = computeUserPassAESV3(password, encryptionKey)
+                if ret[0] == -1:
+                    if isForceMode:
+                        self.addError(ret[1])
+                    else:
+                        return (-1, ret[1])
+                dictU, dictUE = ret[1]
+                self.setUserPass(dictU)
+                ret = computeOwnerPassAESV3(password, encryptionKey, dictU)
+                if ret[0] == -1:
+                    if isForceMode:
+                        self.addError(ret[1])
+                    else:
+                        return (-1, ret[1])
+                dictO, dictOE = ret[1]
+                self.setOwnerPass(dictO)
+                ret = computePermsAESV3(permissionNum, encryptMetadata, encryptionKey)
+                if ret[0] == -1:
+                    if isForceMode:
+                        self.addError(ret[1])
+                    else:
+                        return (-1, ret[1])
+                dictPerms = ret[1]
             else:
-                return (-1, ret[1])
-            self.setOwnerPass(dictO)
-            ret = computeUserPass(
-                password, dictO, fileId, permissionNum, 128, revision=3
-            )
-            if ret[0] != -1:
-                dictU = ret[1]
-            elif isForceMode:
-                self.addError(ret[1])
-            else:
-                return (-1, ret[1])
-            self.setUserPass(dictU)
-            ret = computeEncryptionKey(
-                password,
-                dictO,
-                dictU,
-                dictOE,
-                dictUE,
-                fileId,
-                permissionNum,
-                128,
-                revision=3,
-                encryptMetadata=encryptMetadata,
-                passwordType="USER",
-            )
-            if ret[0] != -1:
-                encryptionKey = ret[1]
-            else:
-                encryptionKey = ""
-                if isForceMode:
+                ret = computeOwnerPass(password, password, 128, revision=revision)
+                if ret[0] != -1:
+                    dictO = ret[1]
+                elif isForceMode:
                     self.addError(ret[1])
                 else:
                     return (-1, ret[1])
+                self.setOwnerPass(dictO)
+                ret = computeUserPass(
+                    password,
+                    dictO,
+                    fileId,
+                    permissionNum,
+                    128,
+                    revision=revision,
+                    encryptMetadata=encryptMetadata,
+                )
+                if ret[0] != -1:
+                    dictU = ret[1]
+                elif isForceMode:
+                    self.addError(ret[1])
+                else:
+                    return (-1, ret[1])
+                self.setUserPass(dictU)
+                ret = computeEncryptionKey(
+                    password,
+                    dictO,
+                    dictU,
+                    dictOE,
+                    dictUE,
+                    fileId,
+                    permissionNum,
+                    128,
+                    revision=revision,
+                    encryptMetadata=encryptMetadata,
+                    passwordType="USER",
+                )
+                if ret[0] != -1:
+                    encryptionKey = ret[1]
+                else:
+                    encryptionKey = ""
+                    if isForceMode:
+                        self.addError(ret[1])
+                    else:
+                        return (-1, ret[1])
             self.setEncryptionKey(encryptionKey)
-            self.setEncryptionKeyLength(128)
-            encryptDict = PDFDictionary(
-                elements={
-                    "/V": PDFNum("2"),
-                    "/Length": PDFNum("128"),
-                    "/Filter": PDFName("Standard"),
-                    "/R": PDFNum("3"),
-                    "/P": PDFNum(str(permissionNum)),
-                    "/O": PDFString(dictO),
-                    "/U": PDFString(dictU),
-                }
-            )
+            self.setEncryptionKeyLength(256 if algorithm == "AES256" else 128)
+            if algorithm == "AES256":
+                encryptDict = PDFDictionary(
+                    elements={
+                        "/V": PDFNum("5"),
+                        "/Length": PDFNum("256"),
+                        "/Filter": PDFName("Standard"),
+                        "/R": PDFNum("6"),
+                        "/P": PDFNum(str(permissionNum)),
+                        "/O": PDFHexString(dictO.hex()),
+                        "/OE": PDFHexString(dictOE.hex()),
+                        "/U": PDFHexString(dictU.hex()),
+                        "/UE": PDFHexString(dictUE.hex()),
+                        "/Perms": PDFHexString(dictPerms.hex()),
+                        "/EncryptMetadata": PDFBool(
+                            "true" if encryptMetadata else "false"
+                        ),
+                        "/CF": PDFDictionary(
+                            elements={
+                                "/StdCF": PDFDictionary(
+                                    elements={
+                                        "/CFM": PDFName("AESV3"),
+                                        "/AuthEvent": PDFName("DocOpen"),
+                                        "/Length": PDFNum("32"),
+                                    }
+                                )
+                            }
+                        ),
+                        "/StmF": PDFName("StdCF"),
+                        "/StrF": PDFName("StdCF"),
+                    }
+                )
+            elif algorithm == "AES":
+                encryptDict = PDFDictionary(
+                    elements={
+                        "/V": PDFNum("4"),
+                        "/Length": PDFNum("128"),
+                        "/Filter": PDFName("Standard"),
+                        "/R": PDFNum("4"),
+                        "/P": PDFNum(str(permissionNum)),
+                        "/O": PDFHexString(dictO.hex()),
+                        "/U": PDFHexString(dictU.hex()),
+                        "/EncryptMetadata": PDFBool(
+                            "true" if encryptMetadata else "false"
+                        ),
+                        "/CF": PDFDictionary(
+                            elements={
+                                "/StdCF": PDFDictionary(
+                                    elements={
+                                        "/CFM": PDFName("AESV2"),
+                                        "/AuthEvent": PDFName("DocOpen"),
+                                        "/Length": PDFNum("16"),
+                                    }
+                                )
+                            }
+                        ),
+                        "/StmF": PDFName("StdCF"),
+                        "/StrF": PDFName("StdCF"),
+                    }
+                )
+            else:
+                encryptDict = PDFDictionary(
+                    elements={
+                        "/V": PDFNum("2"),
+                        "/Length": PDFNum("128"),
+                        "/Filter": PDFName("Standard"),
+                        "/R": PDFNum("3"),
+                        "/P": PDFNum(str(permissionNum)),
+                        "/O": PDFHexString(dictO.hex()),
+                        "/U": PDFHexString(dictU.hex()),
+                    }
+                )
             if encryptDictId is not None:
                 ret = self.setObject(encryptDictId, encryptDict)
                 if ret[0] == -1:
@@ -6088,10 +6516,10 @@ class PDFFile:
                 trailer.setDictEntry("/Encrypt", encryptDict)
             self.setTrailer([trailer, trailerStream])
 
-            numKeyBytes = self.encryptionKeyLength / 8
+            numKeyBytes = int(self.encryptionKeyLength / 8)
             for v in range(self.updates + 1):
                 indirectObjects = self.body[v].getObjects()
-                for thisId in indirectObjects:
+                for thisId in list(indirectObjects.keys()):
                     indirectObject = indirectObjects[thisId]
                     if indirectObject is not None:
                         generationNum = indirectObject.getGenerationNumber()
@@ -6118,18 +6546,27 @@ class PDFFile:
                                     )
                                 )
                             ):
-                                ret = computeObjectKey(
-                                    thisId,
-                                    generationNum,
-                                    self.encryptionKey,
-                                    numKeyBytes,
-                                )
-                                if ret[0] == -1:
-                                    errorMessage = ret[1]
-                                    self.addError(ret[1])
+                                if algorithm == "AES256":
+                                    key = self.encryptionKey
                                 else:
-                                    key = ret[1]
-                                    ret = obj.encrypt(key)
+                                    ret = computeObjectKey(
+                                        thisId,
+                                        generationNum,
+                                        self.encryptionKey,
+                                        numKeyBytes,
+                                        algorithm,
+                                    )
+                                    if ret[0] == -1:
+                                        errorMessage = ret[1]
+                                        self.addError(ret[1])
+                                        key = None
+                                    else:
+                                        key = ret[1]
+                                if key is not None:
+                                    objectAlgorithm = (
+                                        "AES" if algorithm in ("AES", "AES256") else "RC4"
+                                    )
+                                    ret = obj.encrypt(key, objectAlgorithm)
                                     if ret[0] == -1:
                                         errorMessage = ret[1]
                                         self.addError(ret[1])
@@ -6144,6 +6581,7 @@ class PDFFile:
             return (-1, errorMessage)
         self.setEncrypted(True)
         return (0, "")
+
 
     def getBomDecodedValue(self, value):
         byte_value = bytes.fromhex(value)
@@ -6509,6 +6947,48 @@ class PDFFile:
         if version > self.updates or version < 0:
             return None
         return self.body[version].getObjectsByString(toSearch)
+    
+    def getObjectsByGlyphDecodedString(self, toSearch, version=None):
+        """
+        Like getObjectsByString, but decodes each page's text-showing
+        operators through their fonts' /ToUnicode or /Differences plus 
+        AGL fallback first, so the search term can match text that's only
+        recognizable once glyph codes are translated back into characters.
+        """
+        matchedObjects = []
+        versions = range(self.updates + 1) if version is None else [version]
+        fontCache = {}
+        pattern = re.escape(toSearch)
+        for v in versions:
+            versionMatches = []
+            if v > self.updates or v < 0:
+                matchedObjects.append(versionMatches)
+                continue
+            for thisId in self.body[v].getObjectsIds():
+                pageObj = self.body[v].getObject(thisId)
+                if pageObj is None or pageObj.getType() != "dictionary":
+                    continue
+                typeElement = pageObj.getElementByName("/Type")
+                if not typeElement or typeElement.getValue() != "/Page":
+                    continue
+                fontTables = _getPageFontTables(pageObj, self, v, fontCache)
+                for streamId, streamObj in _getPageContentStreams(pageObj, self, v):
+                    try:
+                        contentText = streamObj.getStream()
+                    except Exception:
+                        continue
+                    if not contentText:
+                        continue
+                    decodedText = decodeContentStreamText(contentText, fontTables)
+                    if (
+                        decodedText
+                        and re.search(pattern, decodedText, re.IGNORECASE)
+                        and streamId is not None
+                        and streamId not in versionMatches
+                    ):
+                        versionMatches.append(streamId)
+            matchedObjects.append(versionMatches)
+        return matchedObjects
 
     def getOffsets(self, version=None):
         offsetsArray = []
@@ -7082,10 +7562,13 @@ class PDFFile:
                 obj = self.getObject(thisId, i)
                 if obj is not None:
                     ret = obj.replace(string1, string2)
-                    if ret[0] == -1 and not stringFound:
-                        errorMessage = ret[1]
+                    if ret[0] == -1:
+                        if ret[1] != "String not found" or not stringFound:
+                            errorMessage = ret[1]
                     else:
                         stringFound = True
+                        if errorMessage == "String not found":
+                            errorMessage = ""
                         ret = self.setObject(thisId, obj, i)
                         if ret[0] == -1:
                             errorMessage = ret[1]
@@ -7259,7 +7742,7 @@ class PDFFile:
             else:
                 outputPath = filename
             if isinstance(outputFileContent, str):
-                outputFileContent = outputFileContent.encode()
+                outputFileContent = outputFileContent.encode("latin-1")
             with open(outputPath, "wb") as writeOutput:
                 writeOutput.write(outputFileContent)
             self.setMD5(hashlib.md5(outputFileContent).hexdigest())
@@ -7438,7 +7921,7 @@ class PDFParser:
         self.fileParts = []
         self.charCounter = 0
 
-    def parse(self, fileName, forceMode=False, looseMode=False, manualAnalysis=False):
+    def parse(self, fileName, forceMode=False, looseMode=False, manualAnalysis=False, jsErrFile=None):
         """
         Main method to parse a PDF document
         @param fileName The name of the file to be parsed
@@ -7446,7 +7929,7 @@ class PDFParser:
         @param looseMode Boolean to set the loose mode when parsing objects. Default value: False.
         @return A PDFFile instance
         """
-        global isForceMode, pdfFile, isManualAnalysis
+        global isForceMode, pdfFile, isManualAnalysis, jsErrorsFile
         isFirstBody = True
         linearizedFound = False
         errorMessage = ""
@@ -7459,6 +7942,7 @@ class PDFParser:
         pdfFile.setFileName(os.path.basename(fileName))
         isForceMode = forceMode
         isManualAnalysis = manualAnalysis
+        jsErrorsFile = jsErrFile
 
         # Reading the file header
         with open(fileName, "rb") as file:
@@ -7716,8 +8200,9 @@ class PDFParser:
                         fileId = streamTrailer.getDictEntry("/ID")
             else:
                 ret = self.createPDFTrailer(trailerContent, trailerOffset)
-                if ret[0] != -1 and not pdfFile.isEncrypted():
+                if ret[0] != -1:
                     trailer = ret[1]
+                if trailer is not None and not pdfFile.isEncrypted():
                     encryptDict = trailer.getDictEntry("/Encrypt")
                     if encryptDict is not None:
                         pdfFile.setEncrypted(True)
@@ -7741,13 +8226,16 @@ class PDFParser:
                     fileIdElements = fileId.getElements()
                     if fileIdElements is not None and fileIdElements != []:
                         if fileIdElements[0] is not None:
-                            fileId = f"[{fileIdElements[0].getRawValue()}]"
-                            fileIdElements[0].setValue(fileIdElements[0].getRawValue())
-                            pdfFile.setFileId(fileId)
+                            rawFirstId = fileIdElements[0].getRawValue()
+                            fileIdElements[0].setValue(rawFirstId)
+                            if fileIdElements[0].getType() == "hexstring":
+                                pdfFile.setFileId(
+                                    bytes.fromhex(rawFirstId.strip("<>"))
+                                )
+                            else:
+                                pdfFile.setFileId(rawFirstId)
                         if len(fileIdElements) > 1 and fileIdElements[1] is not None:
-                            fileId += f"[{fileIdElements[1].getRawValue()}]"
                             fileIdElements[1].setValue(fileIdElements[1].getRawValue())
-                            pdfFile.setFileId(fileId)
             pdfFile.addTrailer([trailer, streamTrailer])
         if pdfFile.isEncrypted() and pdfFile.getEncryptDict() is not None:
             ret = pdfFile.decrypt()
@@ -8143,7 +8631,6 @@ class PDFParser:
                         pdfCrossRefSection.addError(errorMessage)
                     else:
                         return (-1, errorMessage)
-
                 if xrefObject.hasElement("/W"):
                     bytesPerFieldObject = xrefObject.getElementByName("/W")
                     if bytesPerFieldObject.getType() == "array":
@@ -8194,52 +8681,69 @@ class PDFParser:
 
                 pdfCrossRefSection.setBytesPerField(bytesPerField)
                 stream = xrefObject.getStream()
-                for i in range(0, len(stream), entrySize):
-                    entryBytes = stream[i : i + entrySize]
-                    try:
-                        if bytesPerField[0] == 0:
-                            f1 = 1
-                        else:
-                            f1 = int(
-                                entryBytes[: bytesPerField[0]].encode("latin-1").hex(),
-                                16,
-                            )
-                        if bytesPerField[1] == 0:
-                            f2 = 0
-                        else:
-                            f2 = int(
-                                entryBytes[
-                                    bytesPerField[0] : bytesPerField[0]
-                                    + bytesPerField[1]
-                                ]
-                                .encode("latin-1")
-                                .hex(),
-                                16,
-                            )
-                        if bytesPerField[2] == 0:
-                            f3 = 0
-                        else:
-                            f3 = int(
-                                entryBytes[bytesPerField[0] + bytesPerField[1] :]
-                                .encode("latin-1")
-                                .hex(),
-                                16,
-                            )
-                    except:
-                        errorMessage = "[!] Error in hexadecimal conversion"
-                        if isForceMode:
-                            pdfCrossRefSection.addError(errorMessage)
-                        else:
-                            return (-1, errorMessage)
-                    try:
-                        pdfCrossRefEntry = PDFCrossRefEntry(f2, f3, f1)
-                    except:
-                        errorMessage = "[!] Error creating PDFCrossRefEntry"
-                        if isForceMode:
-                            pdfCrossRefSection.addError(errorMessage)
-                        else:
-                            return (-1, errorMessage)
-                    entries.append(pdfCrossRefEntry)
+                if entrySize == 0:
+                    errorMessage = "[!] Warning: /W [0 0 0] - all cross-reference stream entries default to type 1, offset 0, generation 0"
+                    pdfCrossRefSection.addError(errorMessage)
+                    numEntries = sum(subsectionIndexes[1::2])
+                    for _ in range(numEntries):
+                        try:
+                            pdfCrossRefEntry = PDFCrossRefEntry(0, 0, 1)
+                        except:
+                            errorMessage = "[!] Error creating PDFCrossRefEntry"
+                            if isForceMode:
+                                pdfCrossRefSection.addError(errorMessage)
+                            else:
+                                return (-1, errorMessage)
+                        entries.append(pdfCrossRefEntry)
+                else:
+                    for i in range(0, len(stream), entrySize):
+                        entryBytes = stream[i : i + entrySize]
+                        try:
+                            if bytesPerField[0] == 0:
+                                f1 = 1
+                            else:
+                                f1 = int(
+                                    entryBytes[: bytesPerField[0]]
+                                    .encode("latin-1")
+                                    .hex(),
+                                    16,
+                                )
+                            if bytesPerField[1] == 0:
+                                f2 = 0
+                            else:
+                                f2 = int(
+                                    entryBytes[
+                                        bytesPerField[0] : bytesPerField[0]
+                                        + bytesPerField[1]
+                                    ]
+                                    .encode("latin-1")
+                                    .hex(),
+                                    16,
+                                )
+                            if bytesPerField[2] == 0:
+                                f3 = 0
+                            else:
+                                f3 = int(
+                                    entryBytes[bytesPerField[0] + bytesPerField[1] :]
+                                    .encode("latin-1")
+                                    .hex(),
+                                    16,
+                                )
+                        except:
+                            errorMessage = "[!] Error in hexadecimal conversion"
+                            if isForceMode:
+                                pdfCrossRefSection.addError(errorMessage)
+                            else:
+                                return (-1, errorMessage)
+                        try:
+                            pdfCrossRefEntry = PDFCrossRefEntry(f2, f3, f1)
+                        except:
+                            errorMessage = "[!] Error creating PDFCrossRefEntry"
+                            if isForceMode:
+                                pdfCrossRefSection.addError(errorMessage)
+                            else:
+                                return (-1, errorMessage)
+                        entries.append(pdfCrossRefEntry)
                 for i in range(int(numSubsections)):
                     firstObject = subsectionIndexes[index]
                     numObjectsInSubsection = subsectionIndexes[index + 1]
@@ -8257,7 +8761,7 @@ class PDFParser:
                         entries[firstEntry : firstEntry + numObjectsInSubsection]
                     )
                     pdfCrossRefSection.addSubsection(pdfCrossRefSubSection)
-                    firstEntry = numObjectsInSubsection
+                    firstEntry += numObjectsInSubsection
                     index += 2
                 return (0, pdfCrossRefSection)
             return (-1, "The object stream is None")
@@ -8400,22 +8904,14 @@ class PDFParser:
             regExp = re.compile(r"((\d{1,10}\s\d{1,10}\sobj).*?endobj)", re.DOTALL)
             matchingObjects = regExp.findall(content)
         else:
-            regExp = re.compile(
-                r"((\d{1,10}\s\d{1,10}\sobj).*?)\s\d{1,10}\s\d{1,10}\sobj", re.DOTALL
-            )
-            matchingObjectsAux = regExp.findall(content)
-            while matchingObjectsAux != []:
-                if matchingObjectsAux[0] != []:
-                    objectBody = matchingObjectsAux[0][0]
-                    matchingObjects.append(matchingObjectsAux[0])
-                    content = content[content.find(objectBody) + len(objectBody) :]
-                    matchingObjectsAux = regExp.findall(content)
-                else:
-                    matchingObjectsAux = []
-            lastObject = re.findall(r"(\d{1,5}\s\d{1,5}\sobj)", content, re.DOTALL)
-            if lastObject != []:
-                content = content[content.find(lastObject[0]) :]
-                matchingObjects.append((content, lastObject[0]))
+            headerRegExp = re.compile(r"\d{1,10}\s\d{1,10}\sobj")
+            headers = list(headerRegExp.finditer(content))
+            for i, headerMatch in enumerate(headers):
+                header = headerMatch.group()
+                start = headerMatch.start()
+                end = headers[i + 1].start() if i + 1 < len(headers) else len(content)
+                objectBody = content[start:end].rstrip(" \t\n\r\f\v") # keep .rstrip() in case of issues with parsing streams
+                matchingObjects.append((objectBody, header))
         return matchingObjects
 
     def getLines(self, content):
@@ -8591,9 +9087,12 @@ class PDFParser:
                     if ret[0] == 0:
                         self.comments.append(ret[1])
                         self.readSpaces(content)
-                        pdfObject = self.readObject(
+                        ret = self.readObject(
                             content[self.charCounter :], objectType
                         )
+                        if ret[0] == -1:
+                            return ret
+                        pdfObject = ret[1]
                     else:
                         return ret
                     break

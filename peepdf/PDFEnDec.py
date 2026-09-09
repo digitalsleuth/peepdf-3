@@ -22,10 +22,6 @@
 """
 ccitt
 
-TODO
-http://tools.ietf.org/pdf/rfc804.pdf
-http://code.google.com/p/origami-pdf/source/browse/lib/origami/filters/ccitt.rb
-
 __author__ = "Binjo"
 __version__ = "0.1"
 __date__ = "2012-04-08 14:30:05"
@@ -46,8 +42,7 @@ lzw
 Library to encode/decode streams using the LZW algorithm. Mix of third party libraries (python-lzw and pdfminer) with some modifications.
 
 A stream friendly, simple compression library, built around
-iterators. See L{compress} and L{decompress} for the easiest way to
-get started.
+iterators. See L{compress} for the easiest way to get started.
 
 After the TIFF implementation of LZW, as described at
 U{http://www.fileformat.info/format/tiff/corion-lzw.htm}
@@ -87,12 +82,9 @@ The Details
 
 >>> import lzw
 >>>
->>> mybytes = lzw.readbytes("README.txt")
->>> lessbytes = lzw.compress(mybytes)
->>> newbytes = b"".join(lzw.decompress(lessbytes))
->>> oldbytes = b"".join(lzw.readbytes("README.txt"))
->>> oldbytes == newbytes
-True
+>>> with open("README.txt", "rb") as f:
+...     mybytes = f.read()
+>>> compressed = b"".join(lzw.compress(mybytes))
 
 __author__ = "Joe Bowers"
 __license__ = "MIT License"
@@ -105,7 +97,6 @@ __url__ = "http://www.joe-bowers.com/static/lzw"
 
 import re
 import struct
-import itertools
 from io import StringIO
 
 
@@ -127,7 +118,7 @@ class BitWriter:
         """
         Init
         """
-        self._data = ""
+        self._dataParts = []
         self._last_byte = None
         self._bit_ptr = 0
 
@@ -136,7 +127,15 @@ class BitWriter:
         """
         return self._data
         """
-        return self._data
+        return "".join(self._dataParts)
+
+    def align_to_byte(self):
+        """
+        Pads with zero bits up to the next byte boundary, if not already
+        aligned on one.
+        """
+        if self._bit_ptr != 0:
+            self.write(0, 8 - self._bit_ptr)
 
     def write(self, data, length):
         """
@@ -146,7 +145,7 @@ class BitWriter:
             raise BitWriterException("Invalid data length")
 
         if length == 8 and not self._last_byte and self._bit_ptr == 0:
-            self._data += chr(data)
+            self._dataParts.append(chr(data))
             return
 
         while length > 0:
@@ -157,7 +156,7 @@ class BitWriter:
                 self._last_byte |= (data >> length) & ((1 << (8 - self._bit_ptr)) - 1)
 
                 data &= (1 << length) - 1
-                self._data += chr(self._last_byte)
+                self._dataParts.append(chr(self._last_byte))
                 self._last_byte = None
                 self._bit_ptr = 0
             else:
@@ -169,7 +168,7 @@ class BitWriter:
                 self._bit_ptr += length
 
                 if self._bit_ptr == 8:
-                    self._data += chr(self._last_byte)
+                    self._dataParts.append(chr(self._last_byte))
                     self._last_byte = None
                     self._bit_ptr = 0
 
@@ -523,7 +522,6 @@ class CCITTFax:
         """
         Init
         """
-        self._decoded = []
 
     def decode(
         self,
@@ -540,14 +538,13 @@ class CCITTFax:
         """
         Decode provided value, return the decoded BitWriter data
         """
-        # FIXME seems not stick to the spec? default is false, but if not set as true, it won't decode 6cc2a162e08836f7d50d461a9fc136fe correctly
         byteAlign = True
 
         white = int(not blackIs1)
         bitr = BitReader(stream)
         bitw = BitWriter()
-
-        while not (bitr.eod_p or rows == 0):
+        unlimitedRows = rows <= 0
+        while not bitr.eod_p and (unlimitedRows or rows > 0):
             current_color = white
             if byteAlign and bitr.pos % 8 != 0:
                 bitr.pos += 8 - (bitr.pos % 8)
@@ -587,6 +584,82 @@ class CCITTFax:
 
             rows -= 1
         return bitw.data
+
+    def encode(
+        self,
+        stream,
+        k=0,
+        eol=False,
+        byteAlign=False,
+        columns=1728,
+        rows=0,
+        eob=True,
+        blackIs1=False,
+    ):
+        """
+        Only K-=0 (one-dimensional) encoding is supported
+        """
+        if k != 0:
+            raise ValueError("CCITT encoding scheme not supported")
+        if columns <= 0:
+            raise ValueError("Invalid /Columns value")
+        rowStride = (columns + 7) // 8
+        if rows <= 0:
+            if len(stream) % rowStride != 0:
+                raise ValueError("Cannot determine number of rows from data length")
+            rows = len(stream) // rowStride
+
+        whiteBitValue = int(not blackIs1)
+        bitw = BitWriter()
+
+        for rowIndex in range(rows):
+            if byteAlign:
+                bitw.align_to_byte()
+            if eol:
+                bitw.write(self.EOL[0], self.EOL[1])
+
+            rowBytes = stream[rowIndex * rowStride : (rowIndex + 1) * rowStride]
+            bitr = BitReader(rowBytes)
+            isWhite = True
+            remaining = columns
+            while remaining > 0:
+                currentBitValue = whiteBitValue if isWhite else 1 - whiteBitValue
+                runLength = 0
+                while runLength < remaining and bitr.peek(1) == currentBitValue:
+                    bitr.pos += 1
+                    runLength += 1
+                self._write_run(bitw, isWhite, runLength)
+                remaining -= runLength
+                isWhite = not isWhite
+
+        if eob:
+            if byteAlign:
+                bitw.align_to_byte()
+            bitw.write(self.RTC[0], self.RTC[1])
+
+        return bitw.data
+
+    def _write_run(self, bitw, is_white, run_length):
+        config_table = (
+            self.WHITE_CONFIGURATION_ENCODE_TABLE
+            if is_white
+            else self.BLACK_CONFIGURATION_ENCODE_TABLE
+        )
+        term_table = (
+            self.WHITE_TERMINAL_ENCODE_TABLE if is_white else self.BLACK_TERMINAL_ENCODE_TABLE
+        )
+        remaining = run_length
+        while remaining >= 2560:
+            code, length = config_table[2560]
+            bitw.write(code, length)
+            remaining -= 2560
+        if remaining >= 64:
+            makeup = (remaining // 64) * 64
+            code, length = config_table[makeup]
+            bitw.write(code, length)
+            remaining -= makeup
+        code, length = term_table[remaining]
+        bitw.write(code, length)
 
     def get_white_bits(self, bitr):
         """
@@ -720,24 +793,24 @@ class JJDecoder:
 
         str_end = '"+'
 
-        out = ""
+        outParts = []
         while data != "":
             # l o t u
             if data.find(str_l) == 0:
                 data = data[len(str_l) :]
-                out += "l"
+                outParts.append("l")
                 continue
             if data.find(str_o) == 0:
                 data = data[len(str_o) :]
-                out += "o"
+                outParts.append("o")
                 continue
             if data.find(str_t) == 0:
                 data = data[len(str_t) :]
-                out += "t"
+                outParts.append("t")
                 continue
             if data.find(str_u) == 0:
                 data = data[len(str_u) :]
-                out += "u"
+                outParts.append("u")
                 continue
 
             # 0123456789abcdef
@@ -747,7 +820,7 @@ class JJDecoder:
                 for i, entry in enumerate(b):
                     if data.find(entry) == 0:
                         data = data[len(entry) :]
-                        out += f"{i:x}"
+                        outParts.append(f"{i:x}")
                         break
                 continue
 
@@ -771,7 +844,7 @@ class JJDecoder:
                         else:
                             break
 
-                    out += chr(int(ch_str, 16))
+                    outParts.append(chr(int(ch_str, 16)))
                     continue
 
                 if data.find(str_lower) == 0:  # r3 check if "R // n < 128
@@ -827,7 +900,7 @@ class JJDecoder:
                         else:
                             break
 
-                    out += chr(int(ch_str, 8)) + ch_lotux
+                    outParts.append(chr(int(ch_str, 8)) + ch_lotux)
                     continue
 
                 # "S ----> "SR or "S+
@@ -842,12 +915,12 @@ class JJDecoder:
                     n = ord(data[0])
                     if data.find(str_quote) == 0:
                         data = data[len(str_quote) :]
-                        out += '"'
+                        outParts.append('"')
                         match += 1
                         continue
                     if data.find(str_slash) == 0:
                         data = data[len(str_slash) :]
-                        out += "\\"
+                        outParts.append("\\")
                         match += 1
                         continue
                     if data.find(str_end) == 0:  # reached end off S block ? +
@@ -894,7 +967,7 @@ class JJDecoder:
                                         break
                             else:
                                 break  # done
-                        out += chr(int(ch_str, 16))
+                        outParts.append(chr(int(ch_str, 16)))
                         break  # step out of the while loop
                     if data.find(str_lower) == 0:  # r3 check if "R // n < 128
                         if match == 0:
@@ -951,7 +1024,7 @@ class JJDecoder:
                                                 break
                             else:
                                 break
-                        out += chr(int(ch_str, 8)) + ch_lotux
+                        outParts.append(chr(int(ch_str, 8)) + ch_lotux)
                         break  # step out of the while loop
                     if (
                         (0x21 <= n <= 0x2F)
@@ -959,12 +1032,12 @@ class JJDecoder:
                         or (0x5B <= n <= 0x60)
                         or (0x7B <= n <= 0x7F)
                     ):
-                        out += data[0]
+                        outParts.append(data[0])
                         data = data[1:]
                         match += 1
                 continue
             return (-1, "No match in the code!!")
-        return (0, out)
+        return (0, "".join(outParts))
 
 
 ## END JJDECODE
@@ -982,28 +1055,16 @@ def compress(plaintext_bytes):
     """
     Given an iterable of bytes, returns a (hopefully shorter) iterable
     of bytes that you can store in a file or pass over the network or
-    what-have-you, and later use to get back your original bytes with
-    L{decompress}. This is the best place to start using this module.
+    what-have-you.
     """
     encoder = ByteEncoder()
     return encoder.encodetobytes(plaintext_bytes)
 
 
-def decompress(compressed_bytes):
-    """
-    Given an iterable of bytes that were the result of a call to
-    L{compress}, returns an iterator over the uncompressed bytes.
-    """
-    decoder = ByteDecoder()
-    return decoder.decodefrombytes(compressed_bytes)
-
-
 class ByteEncoder:
     """
     Takes a stream of uncompressed bytes and produces a stream of
-    compressed bytes, usable by L{ByteDecoder}. Combines an L{Encoder}
-    with a L{BitPacker}.
-
+    compressed bytes. Combines an L{Encoder} with a L{BitPacker}.
 
     >>> import lzw
     >>>
@@ -1013,12 +1074,6 @@ class ByteEncoder:
     >>> encoded = b"".join( b for b in encoding )
     >>> encoded
     '3\\x98LF#\\x08\\x82\\x05\\x04\\x83\\x1eM\\xf0x\\x1c\\x16\\x1b\\t\\x88C\\xe1q(4"\\x1f\\x17\\x85C#1X\\xec.\\x00'
-    >>>
-    >>> dec = lzw.ByteDecoder()
-    >>> decoding = dec.decodefrombytes(encoded)
-    >>> decoded = b"".join(decoding)
-    >>> decoded == bigstr
-    True
 
     """
 
@@ -1028,13 +1083,15 @@ class ByteEncoder:
         output stream of codepoints.
         """
         self._encoder = Encoder(max_code_size=2**max_width)
-        self._packer = BitPacker(initial_code_size=self._encoder.code_size())
+        self._packer = BitPacker(
+            initial_code_size=self._encoder.code_size(), max_width=max_width
+        )
 
     def encodetobytes(self, bytesource):
         """
         Returns an iterator of bytes, adjusting our packed width
         between minwidth and maxwidth when it detects an overflow is
-        about to occur. Dual of L{ByteDecoder.decodefrombytes}.
+        about to occur.
         """
         codepoints = self._encoder.encode(bytesource)
         codebytes = self._packer.pack(codepoints)
@@ -1042,44 +1099,12 @@ class ByteEncoder:
         return codebytes
 
 
-class ByteDecoder:
-    """
-    Decodes, combines bit-unpacking and interpreting a codepoint
-    stream, suitable for use with bytes generated by
-    L{ByteEncoder}.
-
-    See L{ByteDecoder} for a usage example.
-    """
-
-    def __init__(self):
-        """
-        Init
-        """
-
-        self._decoder = Decoder()
-        self._unpacker = BitUnpacker(initial_code_size=self._decoder.code_size())
-        self.remaining = []
-
-    def decodefrombytes(self, bytesource):
-        """
-        Given an iterator over BitPacked, Encoded bytes, Returns an
-        iterator over the uncompressed bytes. Dual of
-        L{ByteEncoder.encodetobytes}. See L{ByteEncoder} for an
-        example of use.
-        """
-        codepoints = self._unpacker.unpack(bytesource)
-        clearbytes = self._decoder.decode(codepoints)
-
-        return clearbytes
-
-
 class BitPacker:
     """
     Translates a stream of lzw codepoints into a variable width packed
-    stream of bytes, for use by L{BitUnpacker}.  One of a (potential)
-    set of encoders for a stream of LZW codepoints, intended to behave
-    as closely to the TIFF variable-width encoding scheme as closely
-    as possible.
+    stream of bytes. One of a (potential) set of encoders for a stream
+    of LZW codepoints, intended to behave as closely to the TIFF
+    variable-width encoding scheme as closely as possible.
 
     The inbound stream of integer lzw codepoints are packed into
     variable width bit fields, starting at the smallest number of bits
@@ -1094,12 +1119,15 @@ class BitPacker:
     don't know any intimate details about their BitPackers/Unpackers
     """
 
-    def __init__(self, initial_code_size):
+    def __init__(self, initial_code_size, max_width=DEFAULT_MAX_BITS):
         """
         Takes an initial code book size (that is, the count of known
-        codes at the beginning of encoding, or after a clear)
+        codes at the beginning of encoding, or after a clear), and the
+        maximum code width in bits the downstream decoder is willing to
+        read (matching the upstream Encoder's max_code_size).
         """
         self._initial_code_size = initial_code_size
+        self._max_width = max_width
 
     def pack(self, codepoints):
         """
@@ -1130,10 +1158,6 @@ class BitPacker:
         for pt in codepoints:
             newbits = inttobits(pt, nextwidth)
             tailbits = tailbits + newbits
-
-            # PAY ATTENTION. This calculation should be driven by the
-            # size of the upstream codebook, right now we're just trusting
-            # that everybody intends to follow the TIFF spec.
             codesize = codesize + 1
             if pt == END_OF_INFO_CODE:
                 while len(tailbits) % 8:
@@ -1142,7 +1166,7 @@ class BitPacker:
             if pt in [CLEAR_CODE, END_OF_INFO_CODE]:
                 nextwidth = minwidth
                 codesize = self._initial_code_size
-            elif codesize >= (2**nextwidth):
+            elif nextwidth < self._max_width and codesize >= (2**nextwidth):
                 nextwidth = nextwidth + 1
 
             while len(tailbits) > 8:
@@ -1157,183 +1181,6 @@ class BitPacker:
             tail = bitstobytes(tailbits)
             for bt in tail:
                 yield struct.pack("B", bt)
-
-
-class BitUnpacker:
-    """
-    An adaptive-width bit unpacker, intended to decode streams written
-    by L{BitPacker} into integer codepoints. Like L{BitPacker}, knows
-    about code size changes and control codes.
-    """
-
-    def __init__(self, initial_code_size):
-        """
-        initial_code_size is the starting size of the codebook
-        associated with the to-be-unpacked stream.
-        """
-        self._initial_code_size = initial_code_size
-
-    def unpack(self, bytesource):
-        """
-        Given an iterator of bytes, returns an iterator of integer
-        code points. Auto-magically adjusts point width when it sees
-        an almost-overflow in the input stream, or an LZW CLEAR_CODE
-        or END_OF_INFO_CODE
-
-        Trailing bits at the end of the given iterator, after the last
-        codepoint, will be dropped on the floor.
-
-        At the end of the iteration, or when an END_OF_INFO_CODE seen
-        the unpacker will ignore the bits after the code until it
-        reaches the next aligned byte. END_OF_INFO_CODE will *not*
-        stop the generator, just reset the alignment and the width
-
-
-        >>> import lzw
-        >>> unpk = lzw.BitUnpacker(initial_code_size=258)
-        >>> [ i for i in unpk.unpack([ chr(0), chr(0xC0), chr(0x40) ]) ]
-        [1, 257]
-        """
-        bits = []
-        offset = 0
-        ignore = 0
-
-        codesize = self._initial_code_size
-        minwidth = 8
-        while (1 << minwidth) < codesize:
-            minwidth = minwidth + 1
-
-        pointwidth = minwidth
-
-        for nextbit in bytestobits(bytesource):
-            offset = (offset + 1) % 8
-            if ignore > 0:
-                ignore = ignore - 1
-                continue
-
-            bits.append(nextbit)
-
-            if len(bits) == pointwidth:
-                codepoint = intfrombits(bits)
-                bits = []
-
-                yield codepoint
-
-                codesize = codesize + 1
-
-                if codepoint in [CLEAR_CODE, END_OF_INFO_CODE]:
-                    codesize = self._initial_code_size
-                    pointwidth = minwidth
-                else:
-                    # is this too late?
-                    while codesize >= (2**pointwidth):
-                        pointwidth = pointwidth + 1
-
-                if codepoint == END_OF_INFO_CODE:
-                    ignore = (8 - offset) % 8
-
-
-class Decoder:
-    """
-    Uncompresses a stream of lzw code points, as created by
-    L{Encoder}. Given a list of integer code points, with all
-    unpacking foolishness complete, turns that list of codepoints into
-    a list of uncompressed bytes. See L{BitUnpacker} for what this
-    doesn't do.
-    """
-
-    def __init__(self):
-        """
-        Creates a new Decoder. Decoders should not be reused for
-        different streams.
-        """
-        self._clear_codes()
-        self.remainder = []
-
-    def code_size(self):
-        """
-        Returns the current size of the Decoder's code book, that is,
-        it's mapping of codepoints to byte strings. The return value of
-        this method will change as the decode encounters more encoded
-        input, or control codes.
-        """
-        return len(self._codepoints)
-
-    def decode(self, codepoints):
-        """
-        Given an iterable of integer codepoints, yields the
-        corresponding bytes, one at a time, as byte strings of length
-        E{1}. Retains the state of the codebook from call to call, so
-        if you have another stream, you'll likely need another
-        decoder!
-
-        Decoders will NOT handle END_OF_INFO_CODE (rather, they will
-        handle the code by throwing an exception); END_OF_INFO should
-        be handled by the upstream codepoint generator (see
-        L{BitUnpacker}, for example)
-
-        >>> import lzw
-        >>> dec = lzw.Decoder()
-        >>> ''.join(dec.decode([103, 97, 98, 98, 97, 32, 258, 260, 262, 121, 111, 263, 259, 261, 256]))
-        'gabba gabba yo gabba'
-
-        """
-        # codepoints = [cp for cp in codepoints]
-        codepoints = list(codepoints)
-
-        for cp in codepoints:
-            decoded = self._decode_codepoint(cp)
-            yield from decoded
-            # for character in decoded:
-            #    yield character
-
-    def _decode_codepoint(self, codepoint):
-        """
-        Will raise a ValueError if given an END_OF_INFORMATION
-        code. EOI codes should be handled by callers if they're
-        present in our source stream.
-
-        >>> import lzw
-        >>> dec = lzw.Decoder()
-        >>> beforesize = dec.code_size()
-        >>> dec._decode_codepoint(0x80)
-        '\\x80'
-        >>> dec._decode_codepoint(0x81)
-        '\\x81'
-        >>> beforesize + 1 == dec.code_size()
-        True
-        >>> dec._decode_codepoint(256)
-        ''
-        >>> beforesize == dec.code_size()
-        True
-        """
-
-        ret = ""
-
-        if codepoint == CLEAR_CODE:
-            self._clear_codes()
-        elif codepoint == END_OF_INFO_CODE:
-            pass
-            # raise ValueError("End of information code not supported directly by this Decoder")
-        else:
-            if codepoint in self._codepoints:
-                ret = self._codepoints[codepoint]
-                if self._prefix is not None:
-                    self._codepoints[len(self._codepoints)] = self._prefix + ret[0]
-
-            else:
-                ret = self._prefix + self._prefix[0]
-                self._codepoints[len(self._codepoints)] = ret
-
-            self._prefix = ret
-
-        return ret
-
-    def _clear_codes(self):
-        self._codepoints = dict((pt, struct.pack("B", pt)) for pt in range(256))
-        self._codepoints[CLEAR_CODE] = CLEAR_CODE
-        self._codepoints[END_OF_INFO_CODE] = END_OF_INFO_CODE
-        self._prefix = None
 
 
 class Encoder:
@@ -1352,7 +1199,7 @@ class Encoder:
         self.closed = False
 
         self._max_code_size = max_code_size
-        self._buffer = ""
+        self._buffer = b""
         self._clear_codes()
 
         if max_code_size < self.code_size():
@@ -1375,7 +1222,7 @@ class Encoder:
         """
         if self._buffer:
             yield self._prefixes[self._buffer]
-            self._buffer = ""
+            self._buffer = b""
 
         yield CLEAR_CODE
         self._clear_codes()
@@ -1388,31 +1235,34 @@ class Encoder:
 
         >>> import lzw
         >>> enc = lzw.Encoder()
-        >>> [ cp for cp in enc.encode("gabba gabba yo gabba") ]
+        >>> [ cp for cp in enc.encode(b"gabba gabba yo gabba") ]
         [103, 97, 98, 98, 97, 32, 258, 260, 262, 121, 111, 263, 259, 261, 256]
 
         Modified by Jose Miguel Esparza to add support for PDF files encoding
+        Modified by Corey Forman to adjust for Python 3
         """
+        if isinstance(bytesource, str):
+            bytesource = bytesource.encode("latin-1")
+
         yield CLEAR_CODE
         for b in bytesource:
-            yield from self._encode_byte(b)
-            # for point in self._encode_byte(b):
-            #    yield point
-
+            byte = b if isinstance(b, bytes) else bytes([b])
+            yield from self._encode_byte(byte)
+            
             if self.code_size() >= self._max_code_size:
                 yield from self.flush()
-                # for pt in self.flush():
-                #    yield pt
 
-        yield self._prefixes[self._buffer]
+        if self._buffer:
+            yield self._prefixes[self._buffer]
         yield END_OF_INFO_CODE
 
     def _encode_byte(self, byte):
-        # Yields one or zero bytes, AND changes the internal state of
-        # the codebook and prefix buffer.
-        #
-        # Unless you're in self.encode(), you almost certainly don't
-        # want to call this.
+        """
+        Yields one or zero bytes, AND changes the internal state of
+        the codebook and prefix buffer.
+        Unless you're in self.encode(), you almost certainly don't
+        want to call this.
+        """
 
         new_prefix = self._buffer
 
@@ -1441,173 +1291,6 @@ class Encoder:
         self._prefixes[newstring] = len(self._prefixes)
 
 
-class PagingEncoder:
-    """
-    UNTESTED. Handles encoding of multiple chunks or streams of encodable data,
-    separated with control codes. Dual of PagingDecoder.
-    """
-
-    def __init__(self, initial_code_size, max_code_size):
-        self._initial_code_size = initial_code_size
-        self._max_code_size = max_code_size
-
-    def encodepages(self, pages):
-        """
-        Given an iterator of iterators of bytes, produces a single
-        iterator containing a delimited sequence of independently
-        compressed LZW sequences, all beginning on a byte-aligned
-        spot, all beginning with a CLEAR code and all terminated with
-        an END_OF_INFORMATION code (and zero to seven trailing junk
-        bits.)
-
-        The dual of PagingDecoder.decodepages
-
-        >>> import lzw
-        >>> enc = lzw.PagingEncoder(257, 2**12)
-        >>> coded = enc.encodepages([ "say hammer yo hammer mc hammer go hammer",
-        ...                           "and the rest can go and play",
-        ...                           "can't touch this" ])
-        ...
-        >>> b"".join(coded)
-        '\\x80\\x1c\\xcc\\'\\x91\\x01\\xa0\\xc2m6\\x99NB\\x03\\xc9\\xbe\\x0b\\x07\\x84\\xc2\\xcd\\xa68|"\\x14 3\\xc3\\xa0\\xd1c\\x94\\x02\\x02\\x80\\x18M\\xc6A\\x01\\xd0\\xd0e\\x10\\x1c\\x8c\\xa73\\xa0\\x80\\xc7\\x02\\x10\\x19\\xcd\\xe2\\x08\\x14\\x10\\xe0l0\\x9e`\\x10\\x10\\x80\\x18\\xcc&\\xe19\\xd0@t7\\x9dLf\\x889\\xa0\\xd2s\\x80@@'
-
-        """
-
-        for page in pages:
-            encoder = Encoder(max_code_size=self._max_code_size)
-            codepoints = encoder.encode(page)
-            codes_and_eoi = itertools.chain(
-                [CLEAR_CODE], codepoints, [END_OF_INFO_CODE]
-            )
-
-            packer = BitPacker(initial_code_size=encoder.code_size())
-            packed = packer.pack(codes_and_eoi)
-            yield from packed
-            # for byte in packed:
-            #    yield byte
-
-
-class PagingDecoder:
-    """
-    UNTESTED. Dual of PagingEncoder, knows how to handle independently encoded,
-    END_OF_INFO_CODE delimited chunks of an inbound byte stream
-    """
-
-    def __init__(self, initial_code_size):
-        self._initial_code_size = initial_code_size
-        self._remains = []
-
-    def next_page(self, codepoints):
-        """
-        Iterator over the next page of codepoints.
-        """
-        self._remains = []
-
-        try:
-            while 1:
-                cp = codepoints.next()
-                if cp != END_OF_INFO_CODE:
-                    yield cp
-                else:
-                    self._remains = codepoints
-                    break
-
-        except StopIteration:
-            pass
-
-    def decodepages(self, bytesource):
-        """
-        Takes an iterator of bytes, returns an iterator of iterators
-        of uncompressed data. Expects input to conform to the output
-        conventions of PagingEncoder(), in particular that "pages" are
-        separated with an END_OF_INFO_CODE and padding up to the next
-        byte boundary.
-
-        BUG: Dangling trailing page on decompression.
-
-        >>> import lzw
-        >>> pgdec = lzw.PagingDecoder(initial_code_size=257)
-        >>> pgdecoded = pgdec.decodepages(
-        ...     ''.join([ '\\x80\\x1c\\xcc\\'\\x91\\x01\\xa0\\xc2m6',
-        ...               '\\x99NB\\x03\\xc9\\xbe\\x0b\\x07\\x84\\xc2',
-        ...               '\\xcd\\xa68|"\\x14 3\\xc3\\xa0\\xd1c\\x94',
-        ...               '\\x02\\x02\\x80\\x18M\\xc6A\\x01\\xd0\\xd0e',
-        ...               '\\x10\\x1c\\x8c\\xa73\\xa0\\x80\\xc7\\x02\\x10',
-        ...               '\\x19\\xcd\\xe2\\x08\\x14\\x10\\xe0l0\\x9e`\\x10',
-        ...               '\\x10\\x80\\x18\\xcc&\\xe19\\xd0@t7\\x9dLf\\x889',
-        ...               '\\xa0\\xd2s\\x80@@' ])
-        ... )
-        >>> [ b"".join(pg) for pg in pgdecoded ]
-        ['say hammer yo hammer mc hammer go hammer', 'and the rest can go and play', "can't touch this", '']
-
-        """
-
-        # TODO: WE NEED A CODE SIZE POLICY OBJECT THAT ISN'T THIS.
-        # honestly, we should have a "codebook" object we need to pass
-        # to bit packing/unpacking tools, etc, such that we don't have
-        # to roll all of these code size assumptions everyplace.
-
-        unpacker = BitUnpacker(initial_code_size=self._initial_code_size)
-        codepoints = unpacker.unpack(bytesource)
-
-        self._remains = codepoints
-        while self._remains:
-            nextpoints = list(self.next_page(self._remains))
-
-            decoder = Decoder()
-            decoded = list(decoder.decode(nextpoints))
-
-            yield decoded
-
-
-#########################################
-
-
-def unpackbyte(b):
-    """
-    Given a one-byte long byte string, returns an integer. Equivalent
-    to struct.unpack("B", b)
-    """
-    return ord(b)
-
-
-def filebytes(fileobj, buffersize=1024):
-    """
-    Convenience for iterating over the bytes in a file. Given a
-    file-like object (with a read(int) method), returns an iterator
-    over the bytes of that file.
-    """
-    buff = fileobj.read(buffersize)
-    while buff:
-        yield from buff
-        # for byte in buff:
-        #    yield byte
-        buff = fileobj.read(buffersize)
-
-
-def readbytes(filename, buffersize=1024):
-    """
-    Opens a file named by filename and iterates over the L{filebytes}
-    found therein.  Will close the file when the bytes run out.
-    """
-    with open(filename, "rb") as infile:
-        yield from filebytes(infile, buffersize)
-    # for byte in filebytes(infile, buffersize):
-    #    yield byte
-
-
-def writebytes(filename, bytesource):
-    """
-    Convenience for emitting the bytes we generate to a file. Given a
-    filename, opens and truncates the file, dumps the bytes
-    from bytesource into it, and closes it
-    """
-    with open(filename, "wb") as outfile:
-        # outfile = open(filename, "wb")
-        for bt in bytesource:
-            outfile.write(bt)
-
-
 def inttobits(anint, width=None):
     """
     Produces an array of booleans representing the given argument as
@@ -1634,45 +1317,6 @@ def inttobits(anint, width=None):
         ret = ret_head + ret
 
     return ret
-
-
-def intfrombits(bits):
-    """
-    Given a list of boolean values, interprets them as a binary
-    encoded, MSB-first unsigned integer (with True == 1 and False
-    == 0) and returns the result.
-
-    >>> import lzw
-    >>> lzw.intfrombits([ 1, 0, 0, 1, 1, 0, 0, 0, 0 ])
-    304
-    """
-    ret = 0
-    lsb_first = list(bits)
-    lsb_first.reverse()
-
-    for bit_index, bit in enumerate(lsb_first):
-        if bit:
-            ret = ret | (1 << bit_index)
-
-    return ret
-
-
-def bytestobits(bytesource):
-    """
-    Breaks a given iterable of bytes into an iterable of boolean
-    values representing those bytes as unsigned integers.
-
-    >>> import lzw
-    >>> [ x for x in lzw.bytestobits(b"\\x01\\x30") ]
-    [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0]
-    """
-    for b in bytesource:
-        value = unpackbyte(b)
-
-        for bitplusone in range(8, 0, -1):
-            bitindex = bitplusone - 1
-            nextbit = 1 & (value >> bitindex)
-            yield nextbit
 
 
 def bitstobytes(bits):

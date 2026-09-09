@@ -30,7 +30,7 @@ import html.entities
 import json
 import logging
 from pathlib import Path
-from datetime import datetime as dt
+from datetime import datetime as dt, timezone
 import requests
 from lxml import etree
 
@@ -41,6 +41,7 @@ except ModuleNotFoundError:
     from PDFVulns import vulnsDict, vulnsVersion
 
 DTFMT = "%Y%m%d-%H%M%S"
+jsErrorsFile = None
 
 
 class StripColors(logging.Formatter):
@@ -154,10 +155,10 @@ def decodeString(string: str):
     @return A tuple (status,statusContent), where statusContent is the decoded PDF string in case status = 0 or an error in case status = -1
     """
     decodedString = string
-    octalNumbers = re.findall("\\\\([0-7]{1-3})", decodedString, re.DOTALL)
+    octalNumbers = re.findall("\\\\([0-7]{1,3})", decodedString, re.DOTALL)
     for octal in octalNumbers:
         try:
-            decodedString = decodedString.replace("\\\\" + octal, chr(int(octal, 8)))
+            decodedString = decodedString.replace("\\" + octal, chr(int(octal, 8)))
         except:
             return (-1, "Error decoding string")
     return (0, decodedString)
@@ -210,13 +211,13 @@ def escapeRegExpString(string: str):
     @return: Escaped string
     """
     toEscapeChars = ["\\", "(", ")", ".", "|", "^", "$", "*", "+", "?", "[", "]"]
-    escapedValue = ""
+    escapedValue = []
     for _, thisString in enumerate(string):
         if thisString in toEscapeChars:
-            escapedValue += f"\\{thisString}"
+            escapedValue.append(f"\\{thisString}")
         else:
-            escapedValue += thisString
-    return escapedValue
+            escapedValue.append(thisString)
+    return "".join(escapedValue)
 
 
 def escapeString(string: str):
@@ -227,29 +228,29 @@ def escapeString(string: str):
     @return: Escaped string
     """
     toEscapeChars = ["\\", "(", ")"]
-    escapedValue = ""
+    escapedParts = []
     for i, thisString in enumerate(string):
         if thisString in toEscapeChars and (i == 0 or string[i - 1] != "\\"):
             if thisString == "\\":
                 if len(string) > i + 1 and re.match("[0-7]", string[i + 1]):
-                    escapedValue += thisString
+                    escapedParts.append(thisString)
                 else:
-                    escapedValue += "\\" + thisString
+                    escapedParts.append("\\" + thisString)
             else:
-                escapedValue += "\\" + thisString
+                escapedParts.append("\\" + thisString)
         elif thisString == "\r":
-            escapedValue += "\\r"
+            escapedParts.append("\\r")
         elif thisString == "\n":
-            escapedValue += "\\n"
+            escapedParts.append("\\n")
         elif thisString == "\t":
-            escapedValue += "\\t"
+            escapedParts.append("\\t")
         elif thisString == "\b":
-            escapedValue += "\\b"
+            escapedParts.append("\\b")
         elif thisString == "\f":
-            escapedValue += "\\f"
+            escapedParts.append("\\f")
         else:
-            escapedValue += thisString
-    return escapedValue
+            escapedParts.append(thisString)
+    return "".join(escapedParts)
 
 
 def getBitsFromNum(num: int, bitsPerComponent: int = 8):
@@ -310,14 +311,14 @@ def getBytesFromBits(bitsStream: str):
         return (-1, "Bit stream must only contain 0 and 1")
     if len(bitsStream) < 8:
         return (-1, "Bit stream must contain at least 8 bits")
-    byteStr = ""
+    byteChars = []
     try:
         for i in range(0, len(bitsStream) - 7, 8):
             bits = bitsStream[i : i + 8]
-            byteStr += chr(int(bits, 2))
+            byteChars.append(chr(int(bits, 2)))
     except:
         return (-1, "Error in conversion from bits to bytes")
-    return (0, byteStr)
+    return (0, "".join(byteChars))
 
 
 def getBytesFromFile(filename: str, offset: int, numBytes: int):
@@ -351,15 +352,15 @@ def hexToString(hexString: str):
     @param hexString: A string in hexadecimal format
     @return: A tuple (status,statusContent), where statusContent is an ascii string in case status = 0 or an error in case status = -1
     """
-    string = ""
+    chars = []
     if len(hexString) % 2 != 0:
         hexString = "0" + hexString
     try:
         for i in range(0, len(hexString), 2):
-            string += chr(int(hexString[i] + hexString[i + 1], 16))
+            chars.append(chr(int(hexString[i] + hexString[i + 1], 16)))
     except:
         return (-1, "Error in hexadecimal conversion")
-    return (0, string)
+    return (0, "".join(chars))
 
 
 def numToHex(num: int, numBytes: int):
@@ -377,9 +378,10 @@ def numToHex(num: int, numBytes: int):
         hexNumber = hex(num)[2:]
         if len(hexNumber) % 2 != 0:
             hexNumber = "0" + hexNumber
+        chars = []
         for i in range(0, len(hexNumber) - 1, 2):
-            hexString += chr(int(hexNumber[i] + hexNumber[i + 1], 16))
-        hexString = "\0" * (numBytes - len(hexString)) + hexString
+            chars.append(chr(int(hexNumber[i] + hexNumber[i + 1], 16)))
+        hexString = "\0" * (numBytes - len(chars)) + "".join(chars)
     except:
         return (-1, "Error in hexadecimal conversion")
     return (0, hexString)
@@ -443,37 +445,37 @@ def unescapeString(string: str):
     @return: Unescaped string
     """
     toUnescapeChars = ["\\", "(", ")"]
-    unescapedValue = ""
+    unescapedParts = []
     i = 0
     while i < len(string):
         if string[i] == "\\" and i != len(string) - 1:
             if string[i + 1] in toUnescapeChars:
                 if string[i + 1] == "\\":
-                    unescapedValue += "\\"
+                    unescapedParts.append("\\")
                     i += 1
                 else:
                     pass
             elif string[i + 1] == "r":
                 i += 1
-                unescapedValue += "\r"
+                unescapedParts.append("\r")
             elif string[i + 1] == "n":
                 i += 1
-                unescapedValue += "\n"
+                unescapedParts.append("\n")
             elif string[i + 1] == "t":
                 i += 1
-                unescapedValue += "\t"
+                unescapedParts.append("\t")
             elif string[i + 1] == "b":
                 i += 1
-                unescapedValue += "\b"
+                unescapedParts.append("\b")
             elif string[i + 1] == "f":
                 i += 1
-                unescapedValue += "\f"
+                unescapedParts.append("\f")
             else:
-                unescapedValue += string[i]
+                unescapedParts.append(string[i])
         else:
-            unescapedValue += string[i]
+            unescapedParts.append(string[i])
         i += 1
-    return unescapedValue
+    return "".join(unescapedParts)
 
 
 def vtcheck(md5: str, vtKey: str):
@@ -504,7 +506,7 @@ def getPeepXML(statsDict, VERSION):
         author="Jose Miguel Esparza and Corey Forman",
     )
     analysisDate = etree.SubElement(root, "date")
-    analysisDate.text = dt.today().strftime("%Y-%m-%d %H:%M:%S")
+    analysisDate.text = dt.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
     basicInfo = etree.SubElement(root, "basic")
     fileName = etree.SubElement(basicInfo, "filename")
     fileName.text = statsDict["File"]
@@ -521,11 +523,8 @@ def getPeepXML(statsDict, VERSION):
             filter(lambda ch: ch not in "\n\r\t", statsDict["IDs"])
         ).replace("]V", "] V")
         all_ids = all_ids.split("Version ")
-        for each in all_ids:
-            all_ids[all_ids.index(each)] = each.rstrip()
-        for entry in all_ids:
-            if entry == "":
-                all_ids.remove(entry)
+        all_ids = [each.rstrip() for each in all_ids]
+        all_ids = [entry for entry in all_ids if entry != ""]
         for i, each_id in enumerate(all_ids):
             ids = etree.SubElement(basicInfo, f"id{i}")
             ids.text = f"Version {each_id}"
@@ -824,7 +823,7 @@ def getPeepJSON(statsDict, VERSION):
     jsonDict = {
         "peepdf_analysis": {
             "peepdf_info": peepdfDict,
-            "date": dt.today().strftime("%Y-%m-%d %H:%M:%S"),
+            "date": dt.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z"),
             "basic": basicDict,
             "advanced": advancedInfo,
         }
