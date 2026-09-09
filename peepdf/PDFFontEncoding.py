@@ -42,6 +42,7 @@ def _buildCodecTable(codecName):
             continue
     return table
 
+
 """
 WinAnsiEncoding and MacRomanEncoding are, for `search` purposes, close
 enough matches to common Windows-1252 and Mac OS Roman codecs.

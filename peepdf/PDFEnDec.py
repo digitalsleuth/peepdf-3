@@ -646,7 +646,9 @@ class CCITTFax:
             else self.BLACK_CONFIGURATION_ENCODE_TABLE
         )
         term_table = (
-            self.WHITE_TERMINAL_ENCODE_TABLE if is_white else self.BLACK_TERMINAL_ENCODE_TABLE
+            self.WHITE_TERMINAL_ENCODE_TABLE
+            if is_white
+            else self.BLACK_TERMINAL_ENCODE_TABLE
         )
         remaining = run_length
         while remaining >= 2560:
@@ -1248,7 +1250,7 @@ class Encoder:
         for b in bytesource:
             byte = b if isinstance(b, bytes) else bytes([b])
             yield from self._encode_byte(byte)
-            
+
             if self.code_size() >= self._max_code_size:
                 yield from self.flush()
 

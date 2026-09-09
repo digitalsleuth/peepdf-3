@@ -94,7 +94,7 @@ def computeEncryptionKey(
             kSalt = dictUserPass[40:48]
             if revision == 6:
                 intermediateKey = computeHardenedHash(password, kSalt)
-            else:            
+            else:
                 intermediateKey = hashlib.sha256(password + kSalt).digest()
             ret = decryptData(b"\0" * 16 + dictUE, intermediateKey)
         elif passwordType == "OWNER":
@@ -102,8 +102,10 @@ def computeEncryptionKey(
             kSalt = dictOwnerPass[40:48]
             if revision == 6:
                 intermediateKey = computeHardenedHash(password, kSalt, dictUserPass)
-            else:            
-                intermediateKey = hashlib.sha256(password + kSalt + dictUserPass).digest()
+            else:
+                intermediateKey = hashlib.sha256(
+                    password + kSalt + dictUserPass
+                ).digest()
             ret = decryptData(b"\0" * 16 + dictOE, intermediateKey)
         return ret
     except:
@@ -283,14 +285,16 @@ def isUserPass(password, computedUserPass, dictU, revision):
             inputHash = computeHardenedHash(password, vSalt)
         else:
             inputHash = hashlib.sha256(password + vSalt).digest()
-        return bool(inputHash == dictU[:32])        
+        return bool(inputHash == dictU[:32])
     if revision in {3, 4}:
         return bool(computedUserPass[:16] == dictU[:16])
     if revision < 3:
         return bool(computedUserPass == dictU)
 
 
-def isOwnerPass(password, dictO, dictU, keyLength, revision, fileId, pElement, encryptMetadata):
+def isOwnerPass(
+    password, dictO, dictU, keyLength, revision, fileId, pElement, encryptMetadata
+):
     """
     Checks if the given password is the owner password of the file
 
@@ -497,7 +501,9 @@ def _aesRawCbc(data: bytes, key: bytes, iv: bytes, encrypt: bool = True) -> byte
     result = bytearray()
     for i in range(0, len(data), 16):
         block = list(data[i : i + 16])
-        outBlock = aesMode.encrypt_block(block) if encrypt else aesMode.decrypt_block(block)
+        outBlock = (
+            aesMode.encrypt_block(block) if encrypt else aesMode.decrypt_block(block)
+        )
         result.extend(outBlock)
     return bytes(result)
 
@@ -512,7 +518,9 @@ def _aesEcbEncryptBlock(block: bytes, key: bytes) -> bytes:
     return bytes(aesCipher.cipher_block(list(block)))
 
 
-def computeHardenedHash(password: bytes, salt: bytes, userKeyData: bytes = b"") -> bytes:
+def computeHardenedHash(
+    password: bytes, salt: bytes, userKeyData: bytes = b""
+) -> bytes:
     """
     @param password: The UTF-8 encoded password (up to 127 bytes).
     @param salt: The 8-byte validation or key salt.
@@ -575,7 +583,9 @@ def computeOwnerPassAESV3(password: bytes, fileEncryptionKey: bytes, dictU: byte
         return (-1, f"ComputeOwnerPassAESV3 error: {exc}")
 
 
-def computePermsAESV3(permissionNum: int, encryptMetadata: bool, fileEncryptionKey: bytes):
+def computePermsAESV3(
+    permissionNum: int, encryptMetadata: bool, fileEncryptionKey: bytes
+):
     """
     Computes the /Perms value for a new revision 6 (AESV3) encrypted file.
     @return: A tuple (status, statusContent), where statusContent is the

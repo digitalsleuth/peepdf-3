@@ -59,7 +59,13 @@ reJSscript = r"<script[^>]*?contentType\s*?=\s*?['\"]application/x-javascript['\
 preDefinedCode = "var app = this;"
 
 
-def analyseJS(code: str, context=None, manualAnalysis: bool = False, src: str = None, errorsFile=None):
+def analyseJS(
+    code: str,
+    context=None,
+    manualAnalysis: bool = False,
+    src: str = None,
+    errorsFile=None,
+):
     """
     Hooks the eval function and search for obfuscated elements in the Javascript code
 
@@ -333,8 +339,8 @@ def unescape(escapedBytes: str, unicode: bool = True):
                     "u[0-9a-f]{4}", splitByte[:5], re.IGNORECASE
                 ):
                     unescapedParts.append(
-                        chr(int(splitByte[3] + splitByte[4], 16)) + 
-                        chr(int(splitByte[1] + splitByte[2], 16))
+                        chr(int(splitByte[3] + splitByte[4], 16))
+                        + chr(int(splitByte[1] + splitByte[2], 16))
                     )
                     if len(splitByte) > 5:
                         for j in range(5, len(splitByte)):

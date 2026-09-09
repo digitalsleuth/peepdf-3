@@ -992,7 +992,9 @@ def dctEncode(stream, parameters):
         width = int(widthElement.getRawValue())
         height = int(heightElement.getRawValue())
         bitsElement = parameters.get("/BitsPerComponent")
-        bitsPerComponent = int(bitsElement.getRawValue()) if bitsElement is not None else 8
+        bitsPerComponent = (
+            int(bitsElement.getRawValue()) if bitsElement is not None else 8
+        )
         if bitsPerComponent != 8:
             return (-1, "Only 8-bit-per-component images are supported for DCTEncode")
         colorSpaceElement = parameters.get("/ColorSpace")
@@ -1032,7 +1034,7 @@ def jbig2Decode(stream, parameters):
     # end_of_page = '0000000331000100000000'
     # end_of_file = '00000004330100000000'
     # Concat all together to make full JBIG2 file.
-    #return (0, stream.encode().hex())
+    # return (0, stream.encode().hex())
     return (-1, "Jbig2Decode not supported yet")
 
 
@@ -1081,7 +1083,9 @@ def jpxEncode(stream, parameters):
         width = int(widthElement.getRawValue())
         height = int(heightElement.getRawValue())
         bitsElement = parameters.get("/BitsPerComponent")
-        bitsPerComponent = int(bitsElement.getRawValue()) if bitsElement is not None else 8
+        bitsPerComponent = (
+            int(bitsElement.getRawValue()) if bitsElement is not None else 8
+        )
         if bitsPerComponent != 8:
             return (-1, "Only 8-bit-per-component images are supported for JPXEncode")
         colorSpaceElement = parameters.get("/ColorSpace")

@@ -337,10 +337,6 @@ class PDFConsole(cmd.Cmd):
                 message = "[!] Error: The version number is not valid"
                 self.log_output("changelog " + argv, message)
                 return False
-        if version == 0 or (version is None and self.pdfFile.getNumUpdates() == 0):
-            message = "[!] No changes"
-            self.log_output("changelog " + argv, message)
-            return False
         # Getting information about original document
         data = self.pdfFile.getBasicMetadata(0)
         output += f"Original document information: {newLine}"
@@ -361,26 +357,41 @@ class PDFConsole(cmd.Cmd):
         changes = self.pdfFile.getChangeLog(version)
         for k, v in enumerate(changes):
             changelog = v
-            if changelog == [[], [], [], []]:
-                output += f"No changes in version {str(k + 1)}{newLine}"
+            isEmpty = (
+                changelog[:4] == [[], [], [], []]
+                and changelog[4] is None
+                and changelog[5] is None
+                and changelog[6] is None
+            )
+            if k == 0:
+                if isEmpty:
+                    output += f"No hidden or missing objects, /Size mismatch, or body count variance detected in version 0{newLine}"
+                else:
+                    output += f"Version 0 (original): {newLine}"
             else:
-                output += f"Changes in version {str(k + 1)}: {newLine}"
-            # Getting modification information
-            data = self.pdfFile.getBasicMetadata(k + 1)
-            if "title" in data and data["title"].isascii():
-                output += f'\tTitle: {data["title"]}{newLine}'
-            if "author" in data:
-                output += f'\tAuthor: {data["author"]}{newLine}'
-            if "creator" in data:
-                output += f'\tCreator: {data["creator"]}{newLine}'
-            if "producer" in data:
-                output += f'\tProducer: {data["producer"]}{newLine}'
-            if "modification" in data:
-                output += f'\tModification date: {data["modification"]}{newLine}'
+                if isEmpty:
+                    output += f"No changes in version {str(k)}{newLine}"
+                else:
+                    output += f"Changes in version {str(k)}: {newLine}"
+                # Getting modification information
+                data = self.pdfFile.getBasicMetadata(k)
+                if "title" in data and data["title"].isascii():
+                    output += f'\tTitle: {data["title"]}{newLine}'
+                if "author" in data:
+                    output += f'\tAuthor: {data["author"]}{newLine}'
+                if "creator" in data:
+                    output += f'\tCreator: {data["creator"]}{newLine}'
+                if "producer" in data:
+                    output += f'\tProducer: {data["producer"]}{newLine}'
+                if "modification" in data:
+                    output += f'\tModification date: {data["modification"]}{newLine}'
             addedObjects = changelog[0]
             modifiedObjects = changelog[1]
             removedObjects = changelog[2]
             notMatchingObjects = changelog[3]
+            sizeMismatch = changelog[4]
+            bodyMismatches = changelog[5]
+            crossRefCheck = changelog[6]
             if addedObjects != []:
                 output += f"\tAdded objects: {str(addedObjects)}{newLine}"
             if modifiedObjects != []:
@@ -388,14 +399,57 @@ class PDFConsole(cmd.Cmd):
             if removedObjects != []:
                 output += f"\tRemoved objects: {str(removedObjects)}{newLine}"
             if notMatchingObjects != []:
-                output += f"\tIncoherent objects: {str(notMatchingObjects)}{newLine}"
+                label = (
+                    "Hidden objects (in body, not in xref)"
+                    if k == 0
+                    else "Incoherent objects"
+                )
+                output += f"\t{label}: {str(notMatchingObjects)}{newLine}"
+            if sizeMismatch is not None:
+                declaredSize, actualSize = sizeMismatch
+                output += (
+                    f"\tTrailer /Size mismatch: declared {declaredSize}, "
+                    f"actual {actualSize}{newLine}"
+                )
+            if bodyMismatches is not None:
+                for counterName, (cached, actual) in bodyMismatches.items():
+                    output += (
+                        f"\tBody counter mismatch ({counterName}): cached "
+                        f"{cached}, actual {actual}{newLine}"
+                    )
+            if crossRefCheck is not None:
+                # For version 0 the "hidden" objects are already shown
+                # via notMatchingObjects; avoid printing them twice.
+                if k != 0 and crossRefCheck.get("hidden"):
+                    output += (
+                        f"\tHidden objects (in body, not declared in xref): "
+                        f"{str(crossRefCheck['hidden'])}{newLine}"
+                    )
+                if crossRefCheck.get("missing"):
+                    output += (
+                        f"\tMissing objects (declared in xref, not in body): "
+                        f"{str(crossRefCheck['missing'])}{newLine}"
+                    )
+                if crossRefCheck.get("offset_mismatch"):
+                    for objId, declaredOffset, actualOffset in crossRefCheck[
+                        "offset_mismatch"
+                    ]:
+                        output += (
+                            f"\tOffset mismatch for object {objId}: declared "
+                            f"{declaredOffset}, actual {actualOffset}{newLine}"
+                        )
             output += newLine
         self.log_output("changelog " + argv, output)
 
     def help_changelog(self):
         print(f"{newLine}Usage: changelog [$version]")
         print(
-            f"{newLine}Shows the changelog of the document or version of the document {newLine}"
+            f"{newLine}Shows the changelog of the document or version of the document. "
+            f"Every version is checked for objects present in the body but not declared "
+            f"in its xref table (hidden objects), for objects in xref but not in the body "
+            "(missing), for a trailer /Size that doesn't match the highest object id "
+            "actually present, and for body object or stream counts that don't match "
+            f"the actual object / stream data. {newLine}"
         )
 
     def do_clear(self, argv):
@@ -707,7 +761,7 @@ class PDFConsole(cmd.Cmd):
         if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("embed " + argv, message)
-            return False        
+            return False
         if not args:
             self.help_embed()
             return False
@@ -1606,7 +1660,7 @@ class PDFConsole(cmd.Cmd):
         if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("hash " + argv, message)
-            return False        
+            return False
         if not args:
             self.help_hash()
             return False
@@ -2243,7 +2297,9 @@ class PDFConsole(cmd.Cmd):
             urlsFound,
             jsErrors,
             self.javaScriptContexts["global"],
-        ) = analyseJS(content, self.javaScriptContexts["global"], errorsFile=self.jsErrorsFile)
+        ) = analyseJS(
+            content, self.javaScriptContexts["global"], errorsFile=self.jsErrorsFile
+        )
         if content not in jsCode:
             jsCode = [content] + jsCode
         jsanalyseOutput = ""
@@ -2552,7 +2608,9 @@ class PDFConsole(cmd.Cmd):
             with open(src, "rb") as srcFile:
                 content = srcFile.read().decode("latin-1")
             base = os.path.basename(src)
-            errorFile = f"{base}-{dt.now(timezone.utc).strftime(DTFMT)}-peepdf-jserrors.txt"
+            errorFile = (
+                f"{base}-{dt.now(timezone.utc).strftime(DTFMT)}-peepdf-jserrors.txt"
+            )
             if not isJavascript(content):
                 if self.use_rawinput:
                     if not self.isCommand:
@@ -5005,6 +5063,97 @@ class PDFConsole(cmd.Cmd):
         )
         print(
             f"The search is case sensitive, use -i to make it case insensitive.{newLine}"
+        )
+
+    def do_xref(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("xref " + argv, message)
+            return False
+        args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("xref " + argv, message)
+            return False
+        if len(args) == 0:
+            version = None
+        elif len(args) == 1:
+            version = args[0]
+            if not version.isdigit():
+                self.help_xref()
+                return False
+            version = int(version)
+            if version > self.pdfFile.getNumUpdates():
+                message = "[!] Error: The version number is not valid"
+                self.log_output("xref " + argv, message)
+                return False
+        else:
+            self.help_xref()
+            return False
+
+        if version is None:
+            versionsToShow = range(self.pdfFile.getNumUpdates() + 1)
+        else:
+            versionsToShow = [version]
+
+        output = ""
+        for v in versionsToShow:
+            ret = self.pdfFile.getXrefSection(v)
+            if ret is None or ret[1] is None or ret[1] == [None, None]:
+                if version is not None:
+                    message = "[!] Error: xref section not found"
+                    self.log_output("xref " + argv, message)
+                    return False
+                continue
+            classicSection, streamSection = ret[1]
+            output += f"{newLine}Version {v}:{newLine}"
+            for label, section in (
+                ("xref table", classicSection),
+                ("Xref stream", streamSection),
+            ):
+                if section is None:
+                    continue
+                if section.inStream():
+                    location = f"in object {section.getXrefStreamObject()}"
+                else:
+                    location = f"offset {section.getOffset()}"
+                output += f"{newLine}  {label} ({location}):{newLine}"
+                output += f"  {'Object':<8}\t{'Gen':<5}\tType\tDetails{newLine}"
+                output += f"  {'-' * 8}\t{'-' * 5}\t{'-' * 4}\t{'-' * 30}{newLine}"
+                for subsection in section.getSubsectionsArray():
+                    for i, entry in enumerate(subsection.getEntries()):
+                        objId = subsection.getObjectId(i)
+                        entryType = entry.getType()
+                        if entryType in ("n", 1):
+                            typeLabel = "n"
+                            gen = entry.getGenNumber()
+                            detail = f"offset {entry.getObjectOffset()}"
+                        elif entryType in ("f", 0):
+                            typeLabel = "f"
+                            gen = entry.getGenNumber()
+                            detail = f"next free {entry.getNextObject()}"
+                        else:
+                            typeLabel = "c"
+                            gen = "-"
+                            detail = (
+                                f"in ObjStm {entry.getObjectStream()} "
+                                f"at index {entry.getIndexObject()}"
+                            )
+                        genDisplay = "-" if gen is None else gen
+                        output += f"  {objId:<8}\t{genDisplay:<5}\t{typeLabel}\t{detail}{newLine}"
+        if output == "":
+            message = "[!] No xref information available"
+            self.log_output("xref " + argv, message)
+            return False
+        self.log_output("xref " + argv, output)
+
+    def help_xref(self):
+        print(f"{newLine}Usage: xref [$version]")
+        print(
+            f"{newLine}Shows the cross reference table (classic and/or stream) of the "
+            f"document or the specified version: each object's id, generation number, "
+            f"type ('n' in use, 'f' free, 'c' compressed inside an object stream), and "
+            f"its offset, next-free link, or ObjStm location accordingly.{newLine}"
         )
 
     def additionRequest(self, isDict: bool = False):

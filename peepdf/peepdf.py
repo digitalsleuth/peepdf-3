@@ -40,7 +40,7 @@ try:
         getPeepXML,
         getUpdate,
         DTFMT,
-        ppdfLog
+        ppdfLog,
     )
     from peepdf.PDFVulns import vulnsDict
     from peepdf.PDFConsole import PDFConsole, EMU_MODULE
@@ -62,6 +62,7 @@ except ModuleNotFoundError:
     COLORIZED_OUTPUT = False
 
 VT_KEY = f"YOUR KEY GOES ON LINE 66 OF {__file__}, USE set vt_key yourAPIkey in interactive mode instead of -c, OR use -k yourAPIkey with -c"
+
 
 def main():
     global COLORIZED_OUTPUT
@@ -197,7 +198,7 @@ def main():
         dest="use_now",
         default=False,
         help=f"Forces logging to use {now} in the log file name, requires --log",
-    )    
+    )
     argsParser.add_argument(
         "--silent",
         action="store_true",
@@ -343,7 +344,7 @@ def main():
                     args.isForceMode,
                     args.isLooseMode,
                     args.isManualAnalysis,
-                    jsErrorsFile
+                    jsErrorsFile,
                 )
                 if args.getText:
                     text_output = pdfParser.getText(fileName)
