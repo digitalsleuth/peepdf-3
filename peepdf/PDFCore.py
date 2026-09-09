@@ -4140,7 +4140,7 @@ class PDFCrossRefSubSection:
     def getFreeObjectIds(self):
         ids = []
         for i, entry in enumerate(self.entries):
-            if entry.getType() == "f":
+            if entry.getType() in ("f", 0):
                 ids.append(self.getObjectId(i))
         return ids
 
@@ -4152,14 +4152,14 @@ class PDFCrossRefSubSection:
 
     def getNextFree(self, numEntry):
         for i in range(numEntry + 1, self.numObjects):
-            if self.entries[i].getType() == "f":
+            if self.entries[i].getType() in ("f", 0):
                 return i
         return None
 
     def getNewObjectIds(self):
         ids = []
         for i, entry in enumerate(self.entries):
-            if entry.getType() == "n":
+            if entry.getType() in ("n", 1, 2):
                 ids.append(self.getObjectId(i))
         return ids
 
@@ -4167,6 +4167,8 @@ class PDFCrossRefSubSection:
         return self.numObjects
 
     def getObjectId(self, numEntry):
+        if numEntry is None:
+            return None
         return self.firstObject + numEntry
 
     def getOffset(self):
@@ -4174,7 +4176,7 @@ class PDFCrossRefSubSection:
 
     def getPrevFree(self, numEntry):
         for i in range(numEntry):
-            if self.entries[i].getType() == "f":
+            if self.entries[i].getType() in ("f", 0):
                 return i
         return None
 

@@ -61,7 +61,7 @@ try:
 except ModuleNotFoundError:
     COLORIZED_OUTPUT = False
 
-VT_KEY = f"YOUR KEY GOES ON LINE 66 OF {__file__}, USE set vt_key yourAPIkey in interactive mode instead of -c, OR use -k yourAPIkey with -c"
+VT_KEY = f"YOUR KEY GOES ON LINE 64 OF {__file__}, USE set vt_key yourAPIkey in interactive mode instead of -c, OR use -k yourAPIkey with -c"
 
 
 def main():
