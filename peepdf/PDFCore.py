@@ -681,6 +681,11 @@ class PDFString(PDFObject):
             errorMessage = "[!] Error in octal conversion"
             self.addError(errorMessage)
             return (-1, errorMessage)
+        if self.value[:2] in ("\xfe\xff", "\xff\xfe"):
+            try:
+                self.value = self.value.encode("latin-1").decode("utf-16")
+            except (UnicodeDecodeError, UnicodeEncodeError):
+                pass
         if isJavascript(self.value) or self.referencedJSObject:
             self.containsJScode = True
             (
@@ -846,7 +851,7 @@ class PDFHexString(PDFObject):
         if not decrypt:
             try:
                 if newHexValue:
-                    if self.rawValue.startswith("feff"):
+                    if self.rawValue.lower().startswith("feff"):
                         self.value = self.getBomDecodedValue(self.rawValue)
                     else:
                         # New hexadecimal value
@@ -857,7 +862,7 @@ class PDFHexString(PDFObject):
                         self.value = bytes.fromhex(tmpValue).decode("latin-1")
                 else:
                     # New decoded value
-                    if self.rawValue.startswith("feff"):
+                    if self.rawValue.lower().startswith("feff"):
                         self.value = self.getBomDecodedValue(self.rawValue)
                     else:
                         self.rawValue = (self.value).encode("latin-1").hex()
@@ -6624,9 +6629,19 @@ class PDFFile:
         return (0, "")
 
     def getBomDecodedValue(self, value):
-        byte_value = bytes.fromhex(value)
+        byte_value = value.encode("latin-1")
         decoded_value = byte_value.decode("utf-16")
         return decoded_value
+
+    @staticmethod
+    def hasUtf16Bom(value):
+        """
+        Determines if value has a UTF-16 BOM
+
+        @param value: object's decoded value (raw bytes passed through latin-1)
+        @return: True if value's raw bytes start with a UTF-16 BOM
+        """
+        return isinstance(value, str) and value[:2] in ("\xfe\xff", "\xff\xfe")
 
     def getBasicMetadata(self, version):
         basicMetadata = {}
@@ -6636,24 +6651,25 @@ class PDFFile:
         if infoObject is not None:
             author = infoObject.getElementByName("/Author")
             if author is not None and author != []:
-                if author.rawValue.startswith("feff"):
-                    basicMetadata["author"] = self.getBomDecodedValue(author.rawValue)
+                authorValue = author.getValue()
+                if self.hasUtf16Bom(authorValue):
+                    basicMetadata["author"] = self.getBomDecodedValue(authorValue)
                 else:
-                    basicMetadata["author"] = author.getValue()
+                    basicMetadata["author"] = authorValue
             creator = infoObject.getElementByName("/Creator")
             if creator is not None and creator != []:
-                if creator.rawValue.startswith("feff"):
-                    basicMetadata["creator"] = self.getBomDecodedValue(creator.rawValue)
+                creatorValue = creator.getValue()
+                if self.hasUtf16Bom(creatorValue):
+                    basicMetadata["creator"] = self.getBomDecodedValue(creatorValue)
                 else:
-                    basicMetadata["creator"] = creator.getValue()
+                    basicMetadata["creator"] = creatorValue
             producer = infoObject.getElementByName("/Producer")
             if producer is not None and producer != []:
-                if producer.rawValue.startswith("feff"):
-                    basicMetadata["producer"] = self.getBomDecodedValue(
-                        producer.rawValue
-                    )
+                producerValue = producer.getValue()
+                if self.hasUtf16Bom(producerValue):
+                    basicMetadata["producer"] = self.getBomDecodedValue(producerValue)
                 else:
-                    basicMetadata["producer"] = producer.getValue()
+                    basicMetadata["producer"] = producerValue
             creationDate = infoObject.getElementByName("/CreationDate")
             if creationDate is not None and creationDate != []:
                 basicMetadata["creation"] = creationDate.getValue()
@@ -6662,16 +6678,18 @@ class PDFFile:
                 basicMetadata["modification"] = modificationDate.getValue()
             subject = infoObject.getElementByName("/Subject")
             if subject is not None and subject != []:
-                if subject.rawValue.startswith("feff"):
-                    basicMetadata["subject"] = self.getBomDecodedValue(subject.rawValue)
+                subjectValue = subject.getValue()
+                if self.hasUtf16Bom(subjectValue):
+                    basicMetadata["subject"] = self.getBomDecodedValue(subjectValue)
                 else:
-                    basicMetadata["subject"] = subject.getValue()
+                    basicMetadata["subject"] = subjectValue
             title = infoObject.getElementByName("/Title")
             if title is not None and title != []:
-                if title.rawValue.startswith("feff"):
-                    basicMetadata["title"] = self.getBomDecodedValue(title.rawValue)
+                titleValue = title.getValue()
+                if self.hasUtf16Bom(titleValue):
+                    basicMetadata["title"] = self.getBomDecodedValue(titleValue)
                 else:
-                    basicMetadata["title"] = title.getValue()
+                    basicMetadata["title"] = titleValue
         if "author" not in basicMetadata:
             ids = self.getObjectsByString("<dc:creator>", version)
             if ids is not None and ids != []:
@@ -6795,6 +6813,9 @@ class PDFFile:
         modifiedObjects = []
         notMatchingObjects = []
         changes = []
+        declaredAnywhere = (
+            self._getCumulativeXrefObjectIds() if self.linearized else None
+        )
         if version is None:
             version = self.updates + 1
         else:
@@ -6818,7 +6839,10 @@ class PDFFile:
                         lastVersionObjects.append(thisId)
                     else:
                         modifiedObjects.append(thisId)
-                    if thisId not in xrefNewObjects or thisId in xrefFreeObjects:
+                    if declaredAnywhere is not None:
+                        if thisId not in declaredAnywhere:
+                            notMatchingObjects.append(thisId)
+                    elif thisId not in xrefNewObjects:
                         notMatchingObjects.append(thisId)
                 for thisId in lastVersionObjects:
                     if thisId not in actualVersionObjects:
@@ -6827,6 +6851,10 @@ class PDFFile:
                             lastVersionObjects.remove(thisId)
                         if thisId in xrefNewObjects:
                             notMatchingObjects.append(thisId)
+                addedObjects.sort()
+                modifiedObjects.sort()
+                removedObjects.sort()
+                notMatchingObjects.sort()
                 changes.append(
                     [
                         addedObjects,
@@ -8009,6 +8037,28 @@ class PDFFile:
                 return entry
         return None
 
+    def _getCumulativeXrefObjectIds(self):
+        """
+        @return: The set of every object id declared "in use" (classic or compressed) in any version's xref.
+        """
+        allNewIds = set()
+        for v in range(self.updates + 1):
+            crossRefSection, crossRefStreamSection = self.crossRefTable[v]
+            if crossRefSection is not None:
+                allNewIds.update(crossRefSection.getNewObjectIds())
+            if crossRefStreamSection is not None:
+                allNewIds.update(crossRefStreamSection.getNewObjectIds())
+        return allNewIds
+
+    def _getCumulativeBodyObjectIds(self):
+        """
+        @return: The set of every object id found anywhere in the body.
+        """
+        allIds = set()
+        for v in range(self.updates + 1):
+            allIds.update(self.body[v].getObjectsIds())
+        return allIds
+
     def updateCrossRefTable(self, version):
         """
         Compares a version's actual body objects against what its own
@@ -8018,7 +8068,6 @@ class PDFFile:
         are "in use" that aren't actually present in the body.
         It also includes objects whose offset doesn't match where
         it was found in the file (after scanning for "id gen obj" markers)
-
 
         @param version: The version to check
         @return: A dict with "hidden", "missing" and / or "offset_mismatch"
@@ -8039,14 +8088,22 @@ class PDFFile:
             xrefNewObjects += crossRefStreamSection.getNewObjectIds()
             xrefFreeObjects += crossRefStreamSection.getFreeObjectIds()
         actualObjects = self.body[version].getObjectsIds()
-        hiddenObjects = [
-            thisId
-            for thisId in actualObjects
-            if thisId not in xrefNewObjects or thisId in xrefFreeObjects
-        ]
-        missingObjects = [
-            thisId for thisId in xrefNewObjects if thisId not in actualObjects
-        ]
+        if self.linearized:
+            declaredAnywhere = self._getCumulativeXrefObjectIds()
+            presentAnywhere = self._getCumulativeBodyObjectIds()
+            hiddenObjects = [
+                thisId for thisId in actualObjects if thisId not in declaredAnywhere
+            ]
+            missingObjects = [
+                thisId for thisId in xrefNewObjects if thisId not in presentAnywhere
+            ]
+        else:
+            hiddenObjects = [
+                thisId for thisId in actualObjects if thisId not in xrefNewObjects
+            ]
+            missingObjects = [
+                thisId for thisId in xrefNewObjects if thisId not in actualObjects
+            ]
         offsetMismatches = []
         checkedCount = 0
         for thisId in actualObjects:
@@ -8087,6 +8144,9 @@ class PDFFile:
             and len(offsetMismatches) / checkedCount > noiseRatioThreshold
         ):
             offsetMismatches = []
+        hiddenObjects.sort()
+        missingObjects.sort()
+        offsetMismatches.sort()
         result = {}
         if hiddenObjects:
             result["hidden"] = hiddenObjects
@@ -8107,7 +8167,7 @@ class PDFFile:
         @param version: version to check
         @return: A tuple (declaredSize, actualSize) if they differ, or None
                  if they match or there's nothing to compare against
-                 (no trailer for this version, or /Size missing/malformed).
+                 (no trailer for xref for this version, or /Size missing/malformed).
         """
         if version < 0 or version > self.updates:
             return None
@@ -8119,8 +8179,24 @@ class PDFFile:
             declaredSize = streamTrailer.getNumObjects()
         if declaredSize is None:
             return None
-        objectIds = self.body[version].getObjectsIds()
-        actualSize = (max(objectIds) + 1) if objectIds else 0
+        crossRefSection, crossRefStreamSection = self.crossRefTable[version]
+        if crossRefSection is None and crossRefStreamSection is None:
+            return None
+        maxDeclaredId = -1
+        for section in (crossRefSection, crossRefStreamSection):
+            if section is None:
+                continue
+            for subsection in section.getSubsectionsArray():
+                if subsection.getNumObjects() == 0:
+                    continue
+                highestInSubsection = (
+                    subsection.getFirstObject() + subsection.getNumObjects() - 1
+                )
+                maxDeclaredId = max(maxDeclaredId, highestInSubsection)
+        if maxDeclaredId == -1:
+            # If the version xref has no entries, then there is nothing to check /Size against
+            return None
+        actualSize = maxDeclaredId + 1
         if declaredSize == actualSize:
             return None
         return (declaredSize, actualSize)
@@ -8289,7 +8365,7 @@ class PDFParser:
             if i == 0:
                 bodyOffset = 0
             else:
-                bodyOffset = len(self.fileParts[i - 1])
+                bodyOffset = sum(len(part) for part in self.fileParts[:i])
 
             # Getting the content for each section
             if isinstance(content, bytes):
@@ -8300,13 +8376,17 @@ class PDFParser:
             if xrefContent is not None:
                 xrefOffset = bodyOffset + len(bodyContent)
                 trailerOffset = xrefOffset + len(xrefContent)
-                bodyContent = bodyContent.strip("\r\n")
+                strippedBodyContent = bodyContent.lstrip("\r\n")
+                bodyOffset += len(bodyContent) - len(strippedBodyContent)
+                bodyContent = strippedBodyContent.rstrip("\r\n")
                 xrefContent = xrefContent.strip("\r\n")
                 trailerContent = trailerContent.strip("\r\n")
             elif trailerContent is not None:
                 xrefOffset = -1
                 trailerOffset = bodyOffset + len(bodyContent)
-                bodyContent = bodyContent.strip("\r\n")
+                strippedBodyContent = bodyContent.lstrip("\r\n")
+                bodyOffset += len(bodyContent) - len(strippedBodyContent)
+                bodyContent = strippedBodyContent.rstrip("\r\n")
                 trailerContent = trailerContent.strip("\r\n")
             else:
                 errorMessage = "PDF sections not found"
