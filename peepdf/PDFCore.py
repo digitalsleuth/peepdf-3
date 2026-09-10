@@ -748,7 +748,7 @@ class PDFString(PDFObject):
         @param algorithm: The algorithm used to decrypt the object. Default is RC4 (str)
         @return: A tuple (status,statusContent), where statusContent is empty in case status = 0 or an error message in case status = -1
         """
-        self.encrypted = True
+        self.encrypted = False
         if password is not None:
             self.encryptionKey = password
         try:
@@ -955,7 +955,7 @@ class PDFHexString(PDFObject):
         @param algorithm: The algorithm used to decrypt the object. Default is RC4 (str)
         @return: A tuple (status,statusContent), where statusContent is empty in case status = 0 or an error message in case status = -1
         """
-        self.encrypted = True
+        self.encrypted = False
         if password is not None:
             self.encryptionKey = password
         try:
@@ -974,6 +974,12 @@ class PDFHexString(PDFObject):
             errorMessage = f"[!] Error decrypting with {str(algorithm)}"
             self.addError(errorMessage)
             return (-1, errorMessage)
+        try:
+            self.rawValue = self.value.encode("latin-1").hex()
+        except Exception:
+            errorMessage = "[!] Error in hexadecimal conversion"
+            self.addError(errorMessage)
+            return (-1, errorMessage)        
         ret = self.update(decrypt=True)
         return ret
 
@@ -1193,7 +1199,7 @@ class PDFArray(PDFObject):
         @return: A tuple (status,statusContent), where statusContent is empty in case status = 0 or an error message in case status = -1
         """
         errorMessage = ""
-        self.encrypted = True
+        self.encrypted = False
         if password is not None:
             self.encryptionKey = password
         decryptedElements = []
@@ -1501,7 +1507,7 @@ class PDFDictionary(PDFObject):
         @param password: The password used to decrypt the object. It's dependent on the object.
         @return: A tuple (status,statusContent), where statusContent is empty in case status = 0 or an error message in case status = -1
         """
-        self.encrypted = True
+        self.encrypted = False
         errorMessage = ""
         if password is not None:
             self.encryptionKey = password
@@ -2603,6 +2609,7 @@ class PDFStream(PDFDictionary):
             decryptedElements[key] = obj
         self.elements = decryptedElements
         ret = self.update(decrypt=True, algorithm=altAlgorithm)
+        self.encrypted = False
         if ret[0] == 0 and errorMessage != "":
             return (-1, errorMessage)
         return ret
@@ -5229,6 +5236,23 @@ class PDFTrailer:
             return (-1, errorMessage)
         return ret
 
+    def setXRefStmOffset(self, newOffset):
+        try:
+            xrefStmObject = PDFNum(str(newOffset))
+        except:
+            errorMessage = "[!] Error creating PDFNum"
+            if isForceMode:
+                self.addError(errorMessage)
+                xrefStmObject = PDFNum("0")
+            else:
+                return (-1, errorMessage)
+        ret = self.trailerDict.setElement("/XRefStm", xrefStmObject)
+        if ret[0] == -1:
+            errorMessage = f"{ret[1]} in dictionary element"
+            self.addError(errorMessage)
+            return (-1, errorMessage)
+        return ret
+
     def setSize(self, newSize):
         self.size = newSize
 
@@ -5762,7 +5786,22 @@ class PDFFile:
         xrefSection = PDFCrossRefSection()
         xrefSection.addSubsection(subsection)
         xrefSection.setXrefStreamObject(xrefStreamId)
-        xrefSection.setBytesPerField([1, 2, 2])
+        maxField2 = 0
+        maxField3 = 0
+        for entry in xrefEntries:
+            entryType = entry.getType()
+            if entryType in ("f", 0):
+                maxField2 = max(maxField2, entry.getNextObject())
+                maxField3 = max(maxField3, entry.getGenNumber())
+            elif entryType in ("n", 1):
+                maxField2 = max(maxField2, entry.getObjectOffset())
+                maxField3 = max(maxField3, entry.getGenNumber())
+            else:
+                maxField2 = max(maxField2, entry.getObjectStream())
+                maxField3 = max(maxField3, entry.getIndexObject())
+        field2Bytes = max(1, (maxField2.bit_length() + 7) // 8)
+        field3Bytes = max(1, (maxField3.bit_length() + 7) // 8)        
+        xrefSection.setBytesPerField([1, field2Bytes, field3Bytes])
         self.crossRefTable[version] = [None, xrefSection]
         if errorMessage != "":
             return (-1, errorMessage)
@@ -6333,6 +6372,12 @@ class PDFFile:
                                     self.addError(ret[1])
         if errorMessage != "":
             return (-1, errorMessage)
+        for v in range(self.updates + 1):
+            thisTrailer, thisStreamTrailer = self.trailer[v]
+            for trailerObj in (thisTrailer, thisStreamTrailer):
+                if trailerObj is not None and trailerObj.getDictEntry("/Encrypt") is not None:
+                    trailerObj.trailerDict.delElement("/Encrypt")
+        self.setEncrypted(False)        
         return (0, "")
 
     def deleteObject(self, thisId):
@@ -7697,6 +7742,7 @@ class PDFFile:
         indirectObjects = {}
         xrefStreamObjectId = None
         xrefStreamObject = None
+        hybridXrefStreamObject = None
         try:
             if version is None:
                 version = self.updates
@@ -7802,6 +7848,7 @@ class PDFFile:
                     offset = len(outputFileContent)
                     xrefStreamObject.setSize(offset - xrefStreamObject.getOffset())
                     indirectObjects[xrefStreamObjectId] = xrefStreamObject
+                    hybridXrefStreamObject = xrefStreamObject
                 self.body[v].setNextOffset(offset)
 
                 if (
@@ -7823,6 +7870,13 @@ class PDFFile:
                         trailer.setNumObjects(maxId + 1)
                         if prevXrefSectionOffset != 0:
                             trailer.setPrevCrossRefSection(prevXrefSectionOffset)
+                    if (
+                        hybridXrefStreamObject is not None
+                        and trailer.getDictEntry("/XRefStm") is not None
+                    ):
+                        ret = trailer.setXRefStmOffset(hybridXrefStreamObject.getOffset())
+                        if ret[0] == -1:
+                            self.addError(ret[1])
                     outputFileContent += trailer.toFile()
                     offset = len(outputFileContent)
                     trailer.setSize(offset - trailer.getOffset())

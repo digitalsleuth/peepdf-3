@@ -381,6 +381,8 @@ def numToHex(num: int, numBytes: int):
         chars = []
         for i in range(0, len(hexNumber) - 1, 2):
             chars.append(chr(int(hexNumber[i] + hexNumber[i + 1], 16)))
+        if len(chars) > numBytes:
+            return (-1, f"Number {num} does not fit in {numBytes} byte(s)")
         hexString = "\0" * (numBytes - len(chars)) + "".join(chars)
     except:
         return (-1, "Error in hexadecimal conversion")
