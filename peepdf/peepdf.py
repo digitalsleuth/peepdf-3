@@ -197,7 +197,7 @@ def main():
         action="store_true",
         dest="use_now",
         default=False,
-        help=f"Forces logging to use {now} in the log file name, requires --log",
+        help=f"Forces logging to use now ({now}) in the log file name, requires --log",
     )
     argsParser.add_argument(
         "--silent",
