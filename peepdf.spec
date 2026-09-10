@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name=f'peepdf-{__version__}',
+    name=f'peepdf-3-{__version__}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
