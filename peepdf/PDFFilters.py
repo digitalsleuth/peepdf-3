@@ -109,6 +109,15 @@ except ModuleNotFoundError:
     PIL_MODULE = False
 
 
+_IMAGE_COLORSPACE_TO_PIL_MODE = {
+    "/DeviceGray": "L",
+    "/CalGray": "L",
+    "/DeviceRGB": "RGB",
+    "/CalRGB": "RGB",
+    "/DeviceCMYK": "CMYK",
+}
+
+
 def decodeStream(stream, thisFilter, parameters=None):
     """
     Decode the given stream
@@ -137,7 +146,7 @@ def decodeStream(stream, thisFilter, parameters=None):
     elif thisFilter in {"/DCTDecode", "/DCT"}:
         ret = dctDecode(stream, parameters)
     elif thisFilter == "/JPXDecode":
-        ret = jpxDecode(stream)
+        ret = jpxDecode(stream, parameters)
     elif thisFilter == "/Crypt":
         ret = crypt(stream, parameters)
     else:
@@ -173,7 +182,7 @@ def encodeStream(stream, thisFilter, parameters=None):
     elif thisFilter == "/DCTDecode":
         ret = dctEncode(stream, parameters)
     elif thisFilter == "/JPXDecode":
-        ret = jpxEncode(stream)
+        ret = jpxEncode(stream, parameters)
     elif thisFilter == "/Crypt":
         ret = crypt(stream, parameters)
     else:
@@ -215,7 +224,7 @@ def ascii85Decode(stream: str):
 
 def ascii85Encode(stream: str):
     """
-    Method to encode streams using ASCII85 (NOT SUPPORTED YET)
+    Method to encode streams using ASCII85
 
     @param stream: A PDF stream
     @return: A tuple (status,statusContent), where statusContent is the encoded PDF stream in case status = 0 or an error in case status = -1
@@ -224,11 +233,10 @@ def ascii85Encode(stream: str):
         return (-1, "Input must be a string")
     try:
         byte_data = stream.encode("latin-1")
-        encoded = base64.a85encode(byte_data, adobe=True).decode("ascii")
+        encoded = base64.a85encode(byte_data, adobe=False).decode("ascii") + "~"
     except Exception as exc:
         return (-1, f"Encoding error: {exc}")
     return (0, encoded)
-    # return (-1, "Ascii85Encode not supported yet")
 
 
 def asciiHexDecode(stream):
@@ -239,16 +247,16 @@ def asciiHexDecode(stream):
     @return: A tuple (status,statusContent), where statusContent is the decoded PDF stream in case status = 0 or an error in case status = -1
     """
     eod = ">"
-    decodedStream = ""
+    decodedChars = []
     char = ""
     index = 0
     while index < len(stream):
         c = stream[index]
         if c == eod:
-            if len(decodedStream) % 2 != 0:
+            if len(decodedChars) % 2 != 0:
                 char += "0"
                 try:
-                    decodedStream += chr(int(char, 16))
+                    decodedChars.append(chr(int(char, 16)))
                 except:
                     return (-1, "Error in hexadecimal conversion")
             break
@@ -258,12 +266,12 @@ def asciiHexDecode(stream):
         char += c
         if len(char) == 2:
             try:
-                decodedStream += chr(int(char, 16))
+                decodedChars.append(chr(int(char, 16)))
             except:
                 return (-1, "Error in hexadecimal conversion")
             char = ""
         index += 1
-    return (0, decodedStream)
+    return (0, "".join(decodedChars))
 
 
 def asciiHexEncode(stream):
@@ -272,10 +280,9 @@ def asciiHexEncode(stream):
 
     @param stream: A PDF stream
     @return: A tuple (status,statusContent), where statusContent is the encoded PDF stream in case status = 0 or an error in case status = -1
-    Confirm whether or not Unicode correction is needed here.
     """
     try:
-        encodedStream = hexlify(stream.encode()).decode("latin-1")
+        encodedStream = hexlify(stream.encode("latin-1")).decode("latin-1")
     except:
         return (-1, "Error in hexadecimal conversion")
     return (0, encodedStream)
@@ -444,13 +451,13 @@ def lzwEncode(stream, parameters):
     @param stream: A PDF stream
     @return: A tuple (status,statusContent), where statusContent is the encoded PDF stream in case status = 0 or an error in case status = -1
     """
-    encodedStream = ""
+    encodedStream = b""
     if parameters is None or parameters == {}:
         try:
             generator = compress(stream)
             for c in generator:
                 encodedStream += c
-            return (0, encodedStream)
+            return (0, encodedStream.decode("latin-1"))
         except:
             return (-1, "Error compressing string with LZW Encode")
     else:
@@ -487,7 +494,7 @@ def lzwEncode(stream, parameters):
             generator = compress(output)
             for c in generator:
                 encodedStream += c
-            return (0, encodedStream)
+            return (0, encodedStream.decode("latin-1"))
         except:
             return (-1, "Error compressing string with LZW Encode")
 
@@ -576,7 +583,8 @@ def pre_prediction(stream, predictor, columns, colors, bits):
                         )
                         filter_row.append((row[i] - paeth(left, up, up_left)) % 256)
                 elif filter_type == 5:
-                    pass
+                    filter_row[0] = 0
+                    filter_row += row
                 else:
                     return (-1, f"Unsupported PNG predictor: {filter_type}")
                 output.extend(filter_row)
@@ -727,7 +735,7 @@ def runLengthDecode(stream):
 
 def runLengthEncode(stream):
     """
-    Method to encode streams using the Run-Length algorithm (NOT IMPLEMENTED YET)
+    Method to encode streams using the Run-Length algorithm
 
     @param stream: A PDF stream
     @return: A tuple (status,statusContent), where statusContent is the encoded PDF stream in case status = 0 or an error in case status = -1
@@ -856,12 +864,62 @@ def ccittFaxDecode(stream, parameters):
 
 def ccittFaxEncode(stream, parameters):
     """
-    Method to encode streams using the CCITT facsimile standard (NOT IMPLEMENTED YET)
+    Method to encode streams using the CCITT facsimile standard.
+    Only the K=0 (Group 3, pure one-dimensional / Modified Huffman) encoding scheme
+    is supported.
 
-    @param stream: A PDF stream
+    @param stream: Raw bitmap sample data (1 bit per pixel, each row starting on a byte boundary)
     @return: A tuple (status,statusContent), where statusContent is the encoded PDF stream in case status = 0 or an error in case status = -1
     """
-    return (-1, "CcittFaxEncode not supported yet")
+    if parameters is None:
+        parameters = {}
+    if "/K" in parameters:
+        k = parameters["/K"].getRawValue()
+        if not isinstance(k, int):
+            k = 0
+        elif k != 0:
+            return (-1, "CCITT encoding scheme not supported")
+    else:
+        k = 0
+    if "/EndOfLine" in parameters:
+        eol = parameters["/EndOfLine"].getRawValue()
+        eol = bool(eol == "true")
+    else:
+        eol = False
+    if "/EncodedByteAlign" in parameters:
+        byteAlign = parameters["/EncodedByteAlign"].getRawValue()
+        byteAlign = bool(byteAlign == "true")
+    else:
+        byteAlign = True
+    if "/Columns" in parameters:
+        columns = parameters["/Columns"].getRawValue()
+        if not isinstance(columns, int):
+            columns = 1728
+    else:
+        columns = 1728
+    if "/Rows" in parameters:
+        rows = parameters["/Rows"].getRawValue()
+        if not isinstance(rows, int):
+            rows = 0
+    else:
+        rows = 0
+    if "/EndOfBlock" in parameters:
+        eob = parameters["/EndOfBlock"].getRawValue()
+        eob = not bool(eob == "false")
+    else:
+        eob = True
+    if "/BlackIs1" in parameters:
+        blackIs1 = parameters["/BlackIs1"].getRawValue()
+        blackIs1 = bool(blackIs1 == "true")
+    else:
+        blackIs1 = False
+    try:
+        encodedStream = CCITTFax().encode(
+            stream, k, eol, byteAlign, columns, rows, eob, blackIs1
+        )
+        return (0, encodedStream)
+    except Exception as exc:
+        return (-1, f"Error compressing string with CCITT Fax Encode: {exc}")
 
 
 def crypt(stream, parameters):
@@ -878,7 +936,6 @@ def crypt(stream, parameters):
     cryptFilterName = parameters["/Name"].getValue()
     if cryptFilterName == "Identity":
         return (0, stream)
-    # TODO: algorithm is cryptFilterName, specified in the /CF dictionary
     return (-1, "Crypt not supported yet")
 
 
@@ -896,36 +953,70 @@ def decrypt(stream, parameters):
     cryptFilterName = parameters["/Name"].getValue()
     if cryptFilterName == "Identity":
         return (0, stream)
-    # TODO: algorithm is cryptFilterName, specified in the /CF dictionary
     return (-1, "Decrypt not supported yet")
 
 
 def dctDecode(stream, parameters):
     """
-    Method to decode streams using a DCT technique based on the JPEG standard (NOT IMPLEMENTED YET)
+    Method to decode streams using a DCT technique based on the JPEG standard
 
     @param stream: A PDF stream
     @return: A tuple (status,statusContent), where statusContent is the decoded PDF stream in case status = 0 or an error in case status = -1
     """
-    decodedStream = ""
     if not PIL_MODULE:
         return (-1, "PIL is not installed")
     try:
-        im = Image.open(BytesIO(stream.encode("latin-1")))
-        decodedStream = im.tobytes()
-        return (0, decodedStream)
-    except:
-        return (-1, "Error decompressing image data")
+        rawBytes = stream.encode("latin-1") if isinstance(stream, str) else stream
+        image = Image.open(BytesIO(rawBytes))
+        decodedStream = image.tobytes()
+        return (0, decodedStream.decode("latin-1"))
+    except Exception as exc:
+        return (-1, f"Error decompressing image data: {exc}")
 
 
 def dctEncode(stream, parameters):
     """
-    Method to encode streams using a DCT technique based on the JPEG standard (NOT IMPLEMENTED YET)
+    Method to encode streams using a DCT technique based on the JPEG standard
 
-    @param stream: A PDF stream
+    @param stream: Raw, decoded image sample data
+    @param parameters: dict expected to contain /Width, /Height, /ColorSpace and /BitsPerComponent PDFObjects
     @return: A tuple (status,statusContent), where statusContent is the encoded PDF stream in case status = 0 or an error in case status = -1
     """
-    return (-1, "DctEncode not supported yet")
+    if not PIL_MODULE:
+        return (-1, "PIL is not installed")
+    try:
+        widthElement = parameters.get("/Width")
+        heightElement = parameters.get("/Height")
+        if widthElement is None or heightElement is None:
+            return (-1, "Missing /Width or /Height, cannot encode as JPEG")
+        width = int(widthElement.getRawValue())
+        height = int(heightElement.getRawValue())
+        bitsElement = parameters.get("/BitsPerComponent")
+        bitsPerComponent = (
+            int(bitsElement.getRawValue()) if bitsElement is not None else 8
+        )
+        if bitsPerComponent != 8:
+            return (-1, "Only 8-bit-per-component images are supported for DCTEncode")
+        colorSpaceElement = parameters.get("/ColorSpace")
+        if colorSpaceElement is None:
+            colorSpaceName = "/DeviceRGB"
+        elif colorSpaceElement.getType() == "name":
+            colorSpaceName = colorSpaceElement.getValue()
+        else:
+            return (-1, "Only simple /ColorSpace names are supported for DCTEncode")
+        mode = _IMAGE_COLORSPACE_TO_PIL_MODE.get(colorSpaceName)
+        if mode is None:
+            return (-1, f'Unsupported /ColorSpace "{colorSpaceName}" for DCTEncode')
+        rawBytes = stream.encode("latin-1") if isinstance(stream, str) else stream
+        expectedSize = width * height * len(mode)
+        if len(rawBytes) < expectedSize:
+            return (-1, "Not enough image sample data for the given /Width and /Height")
+        image = Image.frombytes(mode, (width, height), rawBytes[:expectedSize])
+        buffer = BytesIO()
+        image.save(buffer, format="JPEG")
+        return (0, buffer.getvalue().decode("latin-1"))
+    except Exception as exc:
+        return (-1, f"Error compressing image data: {exc}")
 
 
 def jbig2Decode(stream, parameters):
@@ -943,8 +1034,8 @@ def jbig2Decode(stream, parameters):
     # end_of_page = '0000000331000100000000'
     # end_of_file = '00000004330100000000'
     # Concat all together to make full JBIG2 file.
-    return (0, stream.encode().hex())
-    # return (-1, "Jbig2Decode not supported yet")
+    # return (0, stream.encode().hex())
+    return (-1, "Jbig2Decode not supported yet")
 
 
 def jbig2Encode(stream, parameters):
@@ -957,21 +1048,63 @@ def jbig2Encode(stream, parameters):
     return (-1, "Jbig2Encode not supported yet")
 
 
-def jpxDecode(stream):
+def jpxDecode(stream, parameters):
     """
-    Method to decode streams using the JPEG2000 standard (NOT IMPLEMENTED YET)
+    Method to decode streams using the JPEG2000 standard
 
     @param stream: A PDF stream
     @return: A tuple (status,statusContent), where statusContent is the decoded PDF stream in case status = 0 or an error in case status = -1
     """
-    return (-1, "JpxDecode not supported yet")
+    if not PIL_MODULE:
+        return (-1, "PIL is not installed")
+    try:
+        rawBytes = stream.encode("latin-1") if isinstance(stream, str) else stream
+        image = Image.open(BytesIO(rawBytes))
+        decodedStream = image.tobytes()
+        return (0, decodedStream.decode("latin-1"))
+    except Exception as exc:
+        return (-1, f"Error decompressing image data: {exc}")
 
 
-def jpxEncode(stream):
+def jpxEncode(stream, parameters):
     """
     Method to encode streams using the JPEG2000 standard (NOT IMPLEMENTED YET)
 
     @param stream: A PDF stream
     @return: A tuple (status,statusContent), where statusContent is the encoded PDF stream in case status = 0 or an error in case status = -1
     """
-    return (-1, "JpxEncode not supported yet")
+    if not PIL_MODULE:
+        return (-1, "PIL is not installed")
+    try:
+        widthElement = parameters.get("/Width")
+        heightElement = parameters.get("/Height")
+        if widthElement is None or heightElement is None:
+            return (-1, "Missing /Width or /Height, cannot encode as JPEG2000")
+        width = int(widthElement.getRawValue())
+        height = int(heightElement.getRawValue())
+        bitsElement = parameters.get("/BitsPerComponent")
+        bitsPerComponent = (
+            int(bitsElement.getRawValue()) if bitsElement is not None else 8
+        )
+        if bitsPerComponent != 8:
+            return (-1, "Only 8-bit-per-component images are supported for JPXEncode")
+        colorSpaceElement = parameters.get("/ColorSpace")
+        if colorSpaceElement is None:
+            colorSpaceName = "/DeviceRGB"
+        elif colorSpaceElement.getType() == "name":
+            colorSpaceName = colorSpaceElement.getValue()
+        else:
+            return (-1, "Only simple /ColorSpace names are supported for JPXEncode")
+        mode = _IMAGE_COLORSPACE_TO_PIL_MODE.get(colorSpaceName)
+        if mode is None:
+            return (-1, f'Unsupported /ColorSpace "{colorSpaceName}" for JPXEncode')
+        rawBytes = stream.encode("latin-1") if isinstance(stream, str) else stream
+        expectedSize = width * height * len(mode)
+        if len(rawBytes) < expectedSize:
+            return (-1, "Not enough image sample data for the given /Width and /Height")
+        image = Image.frombytes(mode, (width, height), rawBytes[:expectedSize])
+        buffer = BytesIO()
+        image.save(buffer, format="JPEG2000")
+        return (0, buffer.getvalue().decode("latin-1"))
+    except Exception as exc:
+        return (-1, f"Error compressing image data: {exc}")

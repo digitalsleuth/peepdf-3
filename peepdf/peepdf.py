@@ -28,10 +28,8 @@ Initial script to launch the tool
 import sys
 import os
 import argparse
-import traceback
-import logging
+import json
 from datetime import datetime as dt
-from operator import attrgetter
 
 
 try:
@@ -63,7 +61,7 @@ try:
 except ModuleNotFoundError:
     COLORIZED_OUTPUT = False
 
-VT_KEY = f"YOUR KEY GOES ON LINE 66 OF {__file__}, USE set vt_key yourAPIkey in interactive mode instead of -c, OR use -k yourAPIkey with -c"
+VT_KEY = f"YOUR KEY GOES ON LINE 64 OF {__file__}, USE set vt_key yourAPIkey in interactive mode instead of -c, OR use -k yourAPIkey with -c"
 
 
 def main():
@@ -195,6 +193,13 @@ def main():
         help="Path to output log file (replaces default log file), requires --log",
     )
     argsParser.add_argument(
+        "--now",
+        action="store_true",
+        dest="use_now",
+        default=False,
+        help=f"Forces logging to use {now} in the log file name, requires --log",
+    )
+    argsParser.add_argument(
         "--silent",
         action="store_true",
         dest="silent",
@@ -218,27 +223,50 @@ def main():
     vtJsonDict = None
     log = args.log
     output = args.output
+    use_now = args.use_now
     ERROR_LOG = f"peepdf-errors-NOFILE-{now}.txt"
-    errorsFile = os.path.join(os.getcwd(), ERROR_LOG)
     LOG_FILE = f"peepdf-NOFILE-{now}.txt"
+    errorsFile = os.path.join(os.getcwd(), ERROR_LOG)
     errorLogger = None
+    jsErrorsFile = None
+    no_file = os.path.join(os.getcwd(), "peepdf-NOFILE.txt")
+    if use_now or os.path.exists(no_file):
+        LOG_FILE = os.path.join(os.getcwd(), f"peepdf-NOFILE-{now}.txt")
+    else:
+        LOG_FILE = no_file
+    base, ext = os.path.splitext(LOG_FILE)
+    errorsFile = f"{base}-errors{ext}"
     if fileName is not None and os.path.exists(os.path.abspath(fileName)):
-        errorsFile = f"{os.path.abspath(fileName)}-{now}-peepdf-errors.txt"
-        LOG_FILE = f"{os.path.abspath(fileName)}-{now}-peepdf.txt"
+        abs_file = os.path.abspath(fileName)
+        std_log = f"{abs_file}-peepdf.txt"
+        if use_now or os.path.exists(std_log):
+            LOG_FILE = f"{abs_file}-{now}-peepdf.txt"
+        else:
+            LOG_FILE = std_log
+        base, ext = os.path.splitext(LOG_FILE)
+        errorsFile = f"{base}-errors{ext}"
+        jsErrorsFile = f"{base}-jserrors{ext}"
     elif fileName is not None and not os.path.exists(os.path.abspath(fileName)):
         argsParser.error(f'[!] Error: The file "{fileName}" does not exist')
+    if log and output:
+        output_dir = os.path.dirname(output)
+        if not output_dir:
+            target = os.path.join(os.getcwd(), output)
+        elif os.path.exists(output_dir):
+            target = output
+        else:
+            argsParser.error(f'[!] Error: The directory "{output_dir}" does not exist')
+        outfile, ext = os.path.splitext(target)
+        if use_now or (os.path.exists(target) and os.path.isfile(target)):
+            LOG_FILE = f"{outfile}-{now}{ext}"
+        else:
+            LOG_FILE = target
+        base, ext = os.path.splitext(LOG_FILE)
+        errorsFile = f"{base}-errors{ext}"
+        jsErrorsFile = f"{base}-jserrors{ext}"
     if args.isInteractive:
         log = False
         output = None
-    if log and output and os.path.exists(os.path.dirname(output)):
-        if os.path.exists(output) and os.path.isfile(output):
-            outfile, ext = os.path.splitext(output)
-            LOG_FILE = f"{outfile}-{now}{ext}"
-            errorsFile = f"{outfile}-errors-{now}{ext}"
-        else:
-            LOG_FILE = output
-            outfile, ext = os.path.splitext(output)
-            errorsFile = f"{outfile}-errors{ext}"
     logger = ppdfLog(
         log_to_file=log,
         silent=args.silent,
@@ -286,6 +314,7 @@ def main():
                     argsParser.error(f'[!] Error: The file "{fileName}" does not exist')
             elif numArgs == 2 and (args.isInteractive and args.avoidColors):
                 console = PDFConsole(pdf, VT_KEY, args.avoidColors)
+                console.jsErrorsFile = jsErrorsFile
                 try:
                     console.cmdloop()
                 except Exception as exc:
@@ -315,6 +344,7 @@ def main():
                     args.isForceMode,
                     args.isLooseMode,
                     args.isManualAnalysis,
+                    jsErrorsFile,
                 )
                 if args.getText:
                     text_output = pdfParser.getText(fileName)
@@ -402,6 +432,7 @@ def main():
                     console = PDFConsole(
                         pdf, VT_KEY, args.avoidColors, stdin=scriptFileObject
                     )
+                    console.jsErrorsFile = jsErrorsFile
                     try:
                         console.cmdloop()
                     except Exception as exc:
@@ -420,6 +451,7 @@ def main():
                         ) from exc
                 elif args.commands is not None:
                     console = PDFConsole(pdf, VT_KEY, args.avoidColors, isCommand=True)
+                    console.jsErrorsFile = jsErrorsFile
                     try:
                         for command in args.commands:
                             console.onecmd(command)
@@ -669,6 +701,7 @@ def main():
                         logger.info(niceOutput)
                     if args.isInteractive:
                         console = PDFConsole(pdf, VT_KEY, args.avoidColors)
+                        console.jsErrorsFile = jsErrorsFile
                         while not console.leaving:
                             try:
                                 console.cmdloop()
@@ -698,7 +731,6 @@ def main():
                 errorLogger = getErrorLogger()
             errorLogger.error(errorMessage)
             errorLogger.error(str(e))
-        logger.error(errorMessage)
     finally:
         if os.path.exists(errorsFile) and os.path.getsize(errorsFile) != 0:
             message = f"{newLine}Please don't forget to report the errors found in file {errorsFile}:{newLine * 2}"

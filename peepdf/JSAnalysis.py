@@ -25,13 +25,12 @@ This module contains some functions to analyse Javascript code inside the PDF fi
 
 import os
 import re
-import sys
-import traceback
-from datetime import datetime as dt
+from datetime import datetime as dt, timezone
 import jsbeautifier
 
 try:
     from peepdf.PDFUtils import unescapeHTMLEntities, escapeString, DTFMT, ppdfLog
+
 except ModuleNotFoundError:
     from PDFUtils import unescapeHTMLEntities, escapeString, DTFMT, ppdfLog
 
@@ -54,13 +53,19 @@ except ModuleNotFoundError:
     STPyV8 = None
 
 
-now = dt.now().strftime(DTFMT)
+now = dt.now(timezone.utc).strftime(DTFMT)
 newLine = os.linesep
 reJSscript = r"<script[^>]*?contentType\s*?=\s*?['\"]application/x-javascript['\"][^>]*?>(.*?)</script>"
 preDefinedCode = "var app = this;"
 
 
-def analyseJS(code: str, context=None, manualAnalysis: bool = False, src: str = None):
+def analyseJS(
+    code: str,
+    context=None,
+    manualAnalysis: bool = False,
+    src: str = None,
+    errorsFile=None,
+):
     """
     Hooks the eval function and search for obfuscated elements in the Javascript code
 
@@ -78,9 +83,9 @@ def analyseJS(code: str, context=None, manualAnalysis: bool = False, src: str = 
     unescapedBytes = []
     urlsFound = []
     logger = None
-    if src:
+    if src and not errorsFile:
         errorsFile = f"{os.path.abspath(src)}-{now}-peepdf-jserrors.txt"
-    else:
+    elif not src and not errorsFile:
         errorsFile = os.path.join(os.getcwd(), f"{now}-peepdf-jserrors-NOFILE.txt")
     try:
         code = unescapeHTMLEntities(code)
@@ -169,9 +174,7 @@ def analyseJS(code: str, context=None, manualAnalysis: bool = False, src: str = 
         logger.error(str(exc))
         errors.append(error)
     finally:
-        for js in jsCode:
-            if js is None or js == "":
-                jsCode.remove(js)
+        jsCode = [js for js in jsCode if js is not None and js != ""]
     return [jsCode, unescapedBytes, urlsFound, errors, context]
 
 
@@ -313,8 +316,7 @@ def unescape(escapedBytes: str, unicode: bool = True):
     @param unicode: Bool, if the provided value should be interpreted as unicode
     @return: A tuple (status,statusContent), where statusContent is an unescaped string in case status = 0 or an error in case status = -1
     """
-    # TODO: modify to accept a list of escaped strings?
-    unescapedBytes = ""
+    unescapedParts = []
     if unicode:
         unicodePadding = "\x00"
     else:
@@ -336,28 +338,29 @@ def unescape(escapedBytes: str, unicode: bool = True):
                 if len(splitByte) > 4 and re.match(
                     "u[0-9a-f]{4}", splitByte[:5], re.IGNORECASE
                 ):
-                    unescapedBytes += chr(int(splitByte[3] + splitByte[4], 16)) + chr(
-                        int(splitByte[1] + splitByte[2], 16)
+                    unescapedParts.append(
+                        chr(int(splitByte[3] + splitByte[4], 16))
+                        + chr(int(splitByte[1] + splitByte[2], 16))
                     )
                     if len(splitByte) > 5:
                         for j in range(5, len(splitByte)):
-                            unescapedBytes += splitByte[j] + unicodePadding
+                            unescapedParts.append(splitByte[j] + unicodePadding)
                 elif len(splitByte) > 1 and re.match(
                     "[0-9a-f]{2}", splitByte[:2], re.IGNORECASE
                 ):
-                    unescapedBytes += (
+                    unescapedParts.append(
                         chr(int(splitByte[0] + splitByte[1], 16)) + unicodePadding
                     )
                     if len(splitByte) > 2:
                         for j in range(2, len(splitByte)):
-                            unescapedBytes += splitByte[j] + unicodePadding
+                            unescapedParts.append(splitByte[j] + unicodePadding)
                 else:
                     if k != 0:
-                        unescapedBytes += "%" + unicodePadding
+                        unescapedParts.append("%" + unicodePadding)
                     for _, v in enumerate(splitByte):
-                        unescapedBytes += v + unicodePadding
+                        unescapedParts.append(v + unicodePadding)
         else:
-            unescapedBytes = escapedBytes
+            unescapedParts.append(escapedBytes)
     except:
         return (-1, "[!] Error while unescaping the bytes")
-    return (0, unescapedBytes)
+    return (0, "".join(unescapedParts))

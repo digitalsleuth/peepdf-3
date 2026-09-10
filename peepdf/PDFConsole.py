@@ -29,7 +29,6 @@ import os
 import re
 import hashlib
 import traceback
-import pathlib
 from base64 import b64encode, b64decode
 from datetime import datetime as dt, timezone
 from builtins import input
@@ -231,6 +230,13 @@ class PDFConsole(cmd.Cmd):
         self.outputVarName = None
         self.outputFileName = None
         self.isCommand = isCommand
+        if self.pdfFile is not None:
+            self.jsErrorsFile = f"{self.pdfFile.getPath()}-peepdf-jserrors.txt"
+        else:
+            now = dt.now(timezone.utc).strftime(DTFMT)
+            self.jsErrorsFile = os.path.join(
+                os.getcwd(), f"peepdf-NOFILE-{now}-jserrors.txt"
+            )
 
     def emptyline(self):
         return
@@ -331,10 +337,6 @@ class PDFConsole(cmd.Cmd):
                 message = "[!] Error: The version number is not valid"
                 self.log_output("changelog " + argv, message)
                 return False
-        if version == 0 or (version is None and self.pdfFile.getNumUpdates() == 0):
-            message = "[!] No changes"
-            self.log_output("changelog " + argv, message)
-            return False
         # Getting information about original document
         data = self.pdfFile.getBasicMetadata(0)
         output += f"Original document information: {newLine}"
@@ -355,26 +357,41 @@ class PDFConsole(cmd.Cmd):
         changes = self.pdfFile.getChangeLog(version)
         for k, v in enumerate(changes):
             changelog = v
-            if changelog == [[], [], [], []]:
-                output += f"No changes in version {str(k + 1)}{newLine}"
+            isEmpty = (
+                changelog[:4] == [[], [], [], []]
+                and changelog[4] is None
+                and changelog[5] is None
+                and changelog[6] is None
+            )
+            if k == 0:
+                if isEmpty:
+                    output += f"No hidden or missing objects, /Size mismatch, or body count variance detected in version 0{newLine}"
+                else:
+                    output += f"Version 0 (original): {newLine}"
             else:
-                output += f"Changes in version {str(k + 1)}: {newLine}"
-            # Getting modification information
-            data = self.pdfFile.getBasicMetadata(k + 1)
-            if "title" in data and data["title"].isascii():
-                output += f'\tTitle: {data["title"]}{newLine}'
-            if "author" in data:
-                output += f'\tAuthor: {data["author"]}{newLine}'
-            if "creator" in data:
-                output += f'\tCreator: {data["creator"]}{newLine}'
-            if "producer" in data:
-                output += f'\tProducer: {data["producer"]}{newLine}'
-            if "modification" in data:
-                output += f'\tModification date: {data["modification"]}{newLine}'
+                if isEmpty:
+                    output += f"No changes in version {str(k)}{newLine}"
+                else:
+                    output += f"Changes in version {str(k)}: {newLine}"
+                # Getting modification information
+                data = self.pdfFile.getBasicMetadata(k)
+                if "title" in data and data["title"].isascii():
+                    output += f'\tTitle: {data["title"]}{newLine}'
+                if "author" in data:
+                    output += f'\tAuthor: {data["author"]}{newLine}'
+                if "creator" in data:
+                    output += f'\tCreator: {data["creator"]}{newLine}'
+                if "producer" in data:
+                    output += f'\tProducer: {data["producer"]}{newLine}'
+                if "modification" in data:
+                    output += f'\tModification date: {data["modification"]}{newLine}'
             addedObjects = changelog[0]
             modifiedObjects = changelog[1]
             removedObjects = changelog[2]
             notMatchingObjects = changelog[3]
+            sizeMismatch = changelog[4]
+            bodyMismatches = changelog[5]
+            crossRefCheck = changelog[6]
             if addedObjects != []:
                 output += f"\tAdded objects: {str(addedObjects)}{newLine}"
             if modifiedObjects != []:
@@ -382,14 +399,57 @@ class PDFConsole(cmd.Cmd):
             if removedObjects != []:
                 output += f"\tRemoved objects: {str(removedObjects)}{newLine}"
             if notMatchingObjects != []:
-                output += f"\tIncoherent objects: {str(notMatchingObjects)}{newLine}"
+                label = (
+                    "Hidden objects (in body, not in xref)"
+                    if k == 0
+                    else "Incoherent objects"
+                )
+                output += f"\t{label}: {str(notMatchingObjects)}{newLine}"
+            if sizeMismatch is not None:
+                declaredSize, actualSize = sizeMismatch
+                output += (
+                    f"\tTrailer /Size mismatch: declared {declaredSize}, "
+                    f"actual {actualSize}{newLine}"
+                )
+            if bodyMismatches is not None:
+                for counterName, (cached, actual) in bodyMismatches.items():
+                    output += (
+                        f"\tBody counter mismatch ({counterName}): cached "
+                        f"{cached}, actual {actual}{newLine}"
+                    )
+            if crossRefCheck is not None:
+                # For version 0 the "hidden" objects are already shown
+                # via notMatchingObjects; avoid printing them twice.
+                if k != 0 and crossRefCheck.get("hidden"):
+                    output += (
+                        f"\tHidden objects (in body, not declared in xref): "
+                        f"{str(crossRefCheck['hidden'])}{newLine}"
+                    )
+                if crossRefCheck.get("missing"):
+                    output += (
+                        f"\tMissing objects (declared in xref, not in body): "
+                        f"{str(crossRefCheck['missing'])}{newLine}"
+                    )
+                if crossRefCheck.get("offset_mismatch"):
+                    for objId, declaredOffset, actualOffset in crossRefCheck[
+                        "offset_mismatch"
+                    ]:
+                        output += (
+                            f"\tOffset mismatch for object {objId}: declared "
+                            f"{declaredOffset}, actual {actualOffset}{newLine}"
+                        )
             output += newLine
         self.log_output("changelog " + argv, output)
 
     def help_changelog(self):
         print(f"{newLine}Usage: changelog [$version]")
         print(
-            f"{newLine}Shows the changelog of the document or version of the document {newLine}"
+            f"{newLine}Shows the changelog of the document or version of the document. "
+            f"Every version is checked for objects present in the body but not declared "
+            f"in its xref table (hidden objects), for objects in xref but not in the body "
+            "(missing), for a trailer /Size that doesn't match the highest object id "
+            "actually present, and for body object or stream counts that don't match "
+            f"the actual object / stream data. {newLine}"
         )
 
     def do_clear(self, argv):
@@ -403,9 +463,11 @@ class PDFConsole(cmd.Cmd):
         message = ""
         validCreateTypes = ["pdf", "object_stream"]
         args = self.parseArgs(argv)
-        if not args:
+        if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("create " + argv, message)
+            return False
+        if not args:
             self.help_create()
             return False
         numArgs = len(args)
@@ -539,12 +601,14 @@ class PDFConsole(cmd.Cmd):
         offset = 0
         size = 0
         validTypes = ["variable", "file", "raw", "string"]
-        notImplementedFilters = ["ccittfax", "ccf", "dct", "jbig2", "jpx"]
+        notImplementedFilters = ["jbig2"]
         filters = []
         args = self.parseArgs(argv)
-        if not args:
+        if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("decode " + argv, message)
+            return False
+        if not args:
             self.help_decode()
             return False
         if len(args) > 2:
@@ -608,7 +672,7 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("decode " + argv, message)
                 return False
             decodedContent = ret[1]
-        if decodedContent == "":
+        if decodedContent == "" or decodedContent == b"":
             message = "[!] Error: The content is empty"
             self.log_output("decode " + argv, message)
             return False
@@ -622,6 +686,8 @@ class PDFConsole(cmd.Cmd):
                     self.log_output("decode " + argv, message)
                     return False
             else:
+                if isinstance(decodedContent, bytes):
+                    decodedContent = decodedContent.decode("latin-1")
                 ret = decodeStream(decodedContent, realFilter)
                 if ret[0] == -1:
                     message = f"[!] Error: {ret[1]}"
@@ -648,8 +714,8 @@ class PDFConsole(cmd.Cmd):
         print("\trunlength,rl: /RunLengthDecode")
         print("\tccittfax,ccf: /CCITTFaxDecode")
         print("\tjbig2: /JBIG2Decode (Not implemented)")
-        print("\tdct: /DCTDecode (Not implemented)")
-        print(f"\tjpx: /JPXDecode (Not implemented) {newLine}")
+        print("\tdct: /DCTDecode")
+        print(f"\tjpx: /JPXDecode{newLine}")
 
     def do_decrypt(self, argv):
         if self.pdfFile is None:
@@ -657,9 +723,11 @@ class PDFConsole(cmd.Cmd):
             self.log_output("decrypt " + argv, message)
             return False
         args = self.parseArgs(argv)
-        if not args:
+        if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("decrypt " + argv, message)
+            return False
+        if not args:
             self.help_decrypt()
             return False
         numArgs = len(args)
@@ -690,9 +758,11 @@ class PDFConsole(cmd.Cmd):
             self.log_output("embed " + argv, message)
             return False
         args = self.parseArgs(argv)
-        if not args:
+        if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("embed " + argv, message)
+            return False
+        if not args:
             self.help_embed()
             return False
         numArgs = len(args)
@@ -1011,7 +1081,7 @@ class PDFConsole(cmd.Cmd):
             return False
 
         message = "[+] File embedded successfully"
-        self.log_output("open " + argv, message)
+        self.log_output("embed " + argv, message)
 
     def help_embed(self):
         print(f"{newLine}Usage: embed [-x] $filename [$file_type]")
@@ -1029,18 +1099,14 @@ class PDFConsole(cmd.Cmd):
         offset = 0
         size = 0
         validTypes = ["variable", "file", "raw", "string"]
-        notImplementedFilters = [
-            "jbig2",
-            "jpx",
-            "ccittfax",
-            "ccf",
-            "dct",
-        ]
+        notImplementedFilters = ["jbig2"]
         filters = []
         args = self.parseArgs(argv)
-        if not args:
+        if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("encode " + argv, message)
+            return False
+        if not args:
             self.help_encode()
             return False
         if len(args) > 2:
@@ -1054,7 +1120,7 @@ class PDFConsole(cmd.Cmd):
             else:
                 if self.pdfFile is None:
                     message = "[!] Error: You must open a file"
-                    self.log_output("decode " + argv, message)
+                    self.log_output("encode " + argv, message)
                     return False
                 if len(args) < 3:
                     self.help_encode()
@@ -1067,7 +1133,7 @@ class PDFConsole(cmd.Cmd):
                     self.log_output("encode " + argv, message)
                     return False
                 offset = int(args[1])
-                size = int(args[1])
+                size = int(args[2])
             for i in range(iniFilterArgs, len(args)):
                 fileFilter = args[i].lower()
                 if fileFilter not in filter2RealFilterDict:
@@ -1104,15 +1170,19 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("encode " + argv, message)
                 return False
             encodedContent = ret[1]
-        if encodedContent == "":
+        if encodedContent == "" or encodedContent == b"":
             message = "[!] Error: The content is empty"
             self.log_output("encode " + argv, message)
             return False
         for fileFilter in filters:
             realFilter = filter2RealFilterDict[fileFilter]
             if realFilter == "base64":
+                if isinstance(encodedContent, str):
+                    encodedContent = encodedContent.encode("latin-1")
                 encodedContent = b64encode(encodedContent)
             else:
+                if isinstance(encodedContent, bytes):
+                    encodedContent = encodedContent.decode("latin-1")
                 ret = encodeStream(encodedContent, realFilter)
                 if ret[0] == -1:
                     message = f"[!] Error: {ret[1]}"
@@ -1137,10 +1207,10 @@ class PDFConsole(cmd.Cmd):
         print("\tlzw: /LZWDecode")
         print("\tflatedecode,fl: /FlateDecode")
         print("\trunlength,rl: /RunLengthDecode (in beta)")
-        print("\tccittfax,ccf: /CCITTFaxDecode (Not implemented)")
+        print("\tccittfax,ccf: /CCITTFaxDecode")
         print("\tjbig2: /JBIG2Decode (Not implemented)")
-        print("\tdct: /DCTDecode (Not implemented)")
-        print(f"\tjpx: /JPXDecode (Not implemented) {newLine}")
+        print("\tdct: /DCTDecode")
+        print(f"\tjpx: /JPXDecode{newLine}")
 
     def do_encode_strings(self, argv):
         if self.pdfFile is None:
@@ -1248,14 +1318,22 @@ class PDFConsole(cmd.Cmd):
             self.log_output("encrypt " + argv, message)
             return False
         numArgs = len(args)
+        algorithm = "RC4"
         if numArgs == 0:
             password = ""
         elif numArgs == 1:
             password = args[0]
+        elif numArgs == 2:
+            password = args[0]
+            algorithmArg = args[1].lower()
+            if algorithmArg not in ("rc4", "aes", "aes256"):
+                self.help_encrypt()
+                return False
+            algorithm = algorithmArg.upper()
         else:
             self.help_encrypt()
             return False
-        ret = self.pdfFile.encrypt(password)
+        ret = self.pdfFile.encrypt(password, algorithm)
         if ret[0] == -1:
             message = f"[!] Error: {ret[1]}"
         else:
@@ -1263,8 +1341,10 @@ class PDFConsole(cmd.Cmd):
         self.log_output("encrypt " + argv, message)
 
     def help_encrypt(self):
-        print(f"{newLine}Usage: encrypt [$password]")
-        print(f"Encrypts the file with the default or specified password {newLine}")
+        print(f"{newLine}Usage: encrypt [$password] [rc4|aes|aes256]")
+        print(
+            f"Encrypts the file with the default or specified password, using RC4 (default, 128-bit) or AES (AESV2, 128-bit) or AES256 (AESV3, 256-bit) {newLine}"
+        )
 
     def do_errors(self, argv):
         if self.pdfFile is None:
@@ -1368,9 +1448,11 @@ class PDFConsole(cmd.Cmd):
             self.log_output("extract " + argv, message)
             return False
         args = self.parseArgs(argv)
-        if not args:
+        if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("extract " + argv, message)
+            return False
+        if not args:
             self.help_extract()
             return False
         if len(args) == 1:
@@ -1422,7 +1504,7 @@ class PDFConsole(cmd.Cmd):
     def do_filters(self, argv):
         if self.pdfFile is None:
             message = "[!] Error: You must open a file"
-            self.log_output("errors " + argv, message)
+            self.log_output("filters " + argv, message)
             return False
         message = ""
         value = ""
@@ -1433,17 +1515,15 @@ class PDFConsole(cmd.Cmd):
             "runlength",
             "rl",
             "jbig2",
-            "jpx",
-            "ccittfax",
-            "ccf",
-            "dct",
         ]
         iniFilterArgs = 1
         filters = []
         args = self.parseArgs(argv)
-        if not args:
+        if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("filters " + argv, message)
+            return False
+        if not args:
             self.help_filters()
             return False
         if len(args) == 1:
@@ -1486,7 +1566,7 @@ class PDFConsole(cmd.Cmd):
             self.log_output("filters " + argv, message)
             return False
         if obj.getType() != "stream":
-            message = "[!] Error: The object doesn't contain any streams"
+            message = "[!] Error: The object does not contain a stream"
             self.log_output("filters " + argv, message)
             return False
         errors = obj.getErrors()
@@ -1556,10 +1636,10 @@ class PDFConsole(cmd.Cmd):
         print("\tlzw: /LZWDecode")
         print("\tflatedecode,fl: /FlateDecode")
         print("\trunlength,rl: /RunLengthDecode (in beta)")
-        print("\tccittfax,ccf: /CCITTFaxDecode (Not implemented)")
+        print("\tccittfax,ccf: /CCITTFaxDecode")
         print("\tjbig2: /JBIG2Decode (Not implemented)")
-        print("\tdct: /DCTDecode (Not implemented)")
-        print(f"\tjpx: /JPXDecode (Not implemented) {newLine}")
+        print("\tdct: /DCTDecode")
+        print(f"\tjpx: /JPXDecode{newLine}")
 
     def do_hash(self, argv):
         content = ""
@@ -1580,6 +1660,8 @@ class PDFConsole(cmd.Cmd):
         if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("hash " + argv, message)
+            return False
+        if not args:
             self.help_hash()
             return False
         if len(args) == 2:
@@ -1660,7 +1742,7 @@ class PDFConsole(cmd.Cmd):
                     return False
                 if srcType in {"stream", "rawstream"}:
                     if obj.getType() != "stream":
-                        message = "[!] Error: The object doesn't contain any stream"
+                        message = "[!] Error: The object does not contain a stream"
                         self.log_output("hash " + argv, message)
                         return False
                     if srcType == "stream":
@@ -1672,9 +1754,9 @@ class PDFConsole(cmd.Cmd):
                 else:
                     content = obj.getRawValue()
         content = str(content)
-        md5Hash = hashlib.md5(content.encode()).hexdigest()
-        sha1Hash = hashlib.sha1(content.encode()).hexdigest()
-        sha256Hash = hashlib.sha256(content.encode()).hexdigest()
+        md5Hash = hashlib.md5(content.encode("latin-1")).hexdigest()
+        sha1Hash = hashlib.sha1(content.encode("latin-1")).hexdigest()
+        sha256Hash = hashlib.sha256(content.encode("latin-1")).hexdigest()
         output = f"MD5: {md5Hash}{newLine}SHA1: {sha1Hash}{newLine}SHA256: {sha256Hash}{newLine}"
         self.log_output("hash " + argv, output)
 
@@ -2125,7 +2207,7 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("js_analyse " + argv, message)
                 return False
             with open(src, "rb") as srcFile:
-                content = srcFile.read()
+                content = srcFile.read().decode("latin-1")
             if not isJavascript(content):
                 if self.use_rawinput:
                     if not self.isCommand:
@@ -2163,8 +2245,12 @@ class PDFConsole(cmd.Cmd):
             if obj is not None:
                 if obj.containsJS():
                     content = obj.getJSCode()
-                    if content is not None and content != []:
+                    if content:
                         content = content[0]
+                    else:
+                        message = "[!] Error: JS code object is empty, may be caused by an error during JS analysis"
+                        self.log_output("js_analyse " + argv, message)
+                        return False
                 else:
                     if self.use_rawinput:
                         if not self.isCommand:
@@ -2211,7 +2297,9 @@ class PDFConsole(cmd.Cmd):
             urlsFound,
             jsErrors,
             self.javaScriptContexts["global"],
-        ) = analyseJS(content, self.javaScriptContexts["global"])
+        ) = analyseJS(
+            content, self.javaScriptContexts["global"], errorsFile=self.jsErrorsFile
+        )
         if content not in jsCode:
             jsCode = [content] + jsCode
         jsanalyseOutput = ""
@@ -2295,7 +2383,7 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("js_beautify " + argv, message)
                 return False
             with open(src, "rb") as srcFile:
-                content = srcFile.read()
+                content = srcFile.read().decode("latin-1")
             if not isJavascript(content):
                 if self.use_rawinput:
                     if not self.isCommand:
@@ -2334,7 +2422,13 @@ class PDFConsole(cmd.Cmd):
             obj = self.pdfFile.getObject(src, version)
             if obj is not None:
                 if obj.containsJS():
-                    content = obj.getJSCode()[0]
+                    content = obj.getJSCode()
+                    if content:
+                        content = content[0]
+                    else:
+                        message = "[!] Error: JS code object is empty, may be caused by an error during JS analysis"
+                        self.log_output("js_beautify " + argv, message)
+                        return False
                 else:
                     if self.use_rawinput:
                         if not self.isCommand:
@@ -2355,15 +2449,15 @@ class PDFConsole(cmd.Cmd):
                     objectType = obj.getType()
                     if objectType == "stream":
                         content = obj.getStream()
-                    elif srcType in {"dictionary", "array"}:
+                    elif objectType in {"dictionary", "array"}:
                         element = obj.getElementByName("/JS")
-                        if element is not None:
+                        if element:
                             content = element.getValue()
                         else:
                             message = "[!] Error: Target not found"
                             self.log_output("js_beautify " + argv, message)
                             return False
-                    elif srcType in {"string", "hexstring"}:
+                    elif objectType in {"string", "hexstring"}:
                         content = obj.getValue()
                     else:
                         message = "[!] Error: Target not found"
@@ -2456,6 +2550,7 @@ class PDFConsole(cmd.Cmd):
     def do_js_eval(self, argv):
         error = ""
         content = ""
+        errorFile = f"NOFILE-{dt.now(timezone.utc).strftime(DTFMT)}-peepdf-jserrors.txt"
         if not JS_MODULE:
             message = "[!] Error: STPyV8 is not installed"
             self.log_output("js_eval " + argv, message)
@@ -2511,7 +2606,11 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("js_eval " + argv, message)
                 return False
             with open(src, "rb") as srcFile:
-                content = srcFile.read()
+                content = srcFile.read().decode("latin-1")
+            base = os.path.basename(src)
+            errorFile = (
+                f"{base}-{dt.now(timezone.utc).strftime(DTFMT)}-peepdf-jserrors.txt"
+            )
             if not isJavascript(content):
                 if self.use_rawinput:
                     if not self.isCommand:
@@ -2547,11 +2646,16 @@ class PDFConsole(cmd.Cmd):
                     self.log_output("js_eval " + argv, message)
                     return False
             obj = self.pdfFile.getObject(src, version)
+            errorFile = self.jsErrorsFile
             if obj is not None:
                 if obj.containsJS():
                     content = obj.getJSCode()
-                    if content is not None and content != []:
+                    if content:
                         content = content[0]
+                    else:
+                        message = "[!] Error: JS code object is empty, may be caused by an error during JS analysis"
+                        self.log_output("js_eval " + argv, message)
+                        return False
                 else:
                     if self.use_rawinput:
                         if not self.isCommand:
@@ -2572,15 +2676,15 @@ class PDFConsole(cmd.Cmd):
                     objectType = obj.getType()
                     if objectType == "stream":
                         content = obj.getStream()
-                    elif srcType in {"dictionary", "array"}:
+                    elif objectType in {"dictionary", "array"}:
                         element = obj.getElementByName("/JS")
-                        if element is not None:
+                        if element:
                             content = element.getValue()
                         else:
                             message = "[!] Error: Target not found"
                             self.log_output("js_eval " + argv, message)
                             return False
-                    elif srcType in {"string", "hexstring"}:
+                    elif objectType in {"string", "hexstring"}:
                         content = obj.getValue()
                     else:
                         message = "[!] Error: Target not found"
@@ -2614,7 +2718,6 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("js_eval " + argv, evalCode)
         except:
             error = str(sys.exc_info()[1])
-            errorFile = f"jserror-{dt.now().strftime(DTFMT)}.log"
             with open(errorFile, "a") as errorOut:
                 errorOut.write(f"{error}{newLine}")
 
@@ -2679,7 +2782,7 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("js_jjdecode " + argv, message)
                 return False
             with open(src, "rb") as srcFile:
-                content = srcFile.read()
+                content = srcFile.read().decode("latin-1")
             if not isJavascript(content):
                 if self.use_rawinput:
                     if not self.isCommand:
@@ -2746,15 +2849,15 @@ class PDFConsole(cmd.Cmd):
                     objectType = obj.getType()
                     if objectType == "stream":
                         content = obj.getStream()
-                    elif srcType in {"dictionary", "array"}:
+                    elif objectType in {"dictionary", "array"}:
                         element = obj.getElementByName("/JS")
-                        if element is not None:
+                        if element:
                             content = element.getValue()
                         else:
                             message = "[!] Error: Target not found"
                             self.log_output("js_jjdecode " + argv, message)
                             return False
-                    elif srcType in {"string", "hexstring"}:
+                    elif objectType in {"string", "hexstring"}:
                         content = obj.getValue()
                     else:
                         message = "[!] Error: Target not found"
@@ -2825,7 +2928,7 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("js_join " + argv, message)
                 return False
             with open(src, "rb") as srcFile:
-                content = srcFile.read()
+                content = srcFile.read().decode("latin-1")
         else:
             content = src
         strings = re.findall(reSeparatedStrings, content)
@@ -2883,7 +2986,7 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("js_unescape " + argv, message)
                 return False
             with open(src, "rb") as srcFile:
-                content = srcFile.read()
+                content = srcFile.read().decode("latin-1")
         else:
             content = src
         if (
@@ -3166,7 +3269,6 @@ class PDFConsole(cmd.Cmd):
         )
 
     def do_modify(self, argv):
-        ## TODO - maxDepth = 2 - Possibly re-introduce this later
         validModifyTypes = ["object", "stream"]
         args = self.parseArgs(argv)
         if args is None:
@@ -3319,6 +3421,10 @@ class PDFConsole(cmd.Cmd):
             return False
         stats = ""
         args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("objects " + argv, message)
+            return False
         if not self.avoidOutputColors:
             beforeStaticLabel = self.staticColor
         else:
@@ -3333,6 +3439,9 @@ class PDFConsole(cmd.Cmd):
                     f'{self.resetColor}{str(statsVersion["Objects"][1])}{newLine}'
                 )
         elif len(args) == 1:
+            if not args[0].isdigit():
+                self.help_objects()
+                return False
             version = int(args[0])
             if version in range(len(statsDict["Versions"])):
                 statsVersion = statsDict["Versions"][version]
@@ -3362,6 +3471,10 @@ class PDFConsole(cmd.Cmd):
             return False
         fileName = self.pdfFile.path
         args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("ocr " + argv, message)
+            return False
         pdfText = PDFParser.getText(self, fileName)
         if pdfText is None:
             message = "[!] Error: No textual content found"
@@ -3643,15 +3756,15 @@ class PDFConsole(cmd.Cmd):
             version = int(version)
             if version > self.pdfFile.getNumUpdates():
                 message = "[!] Error: The version number is not valid"
-                self.log_output("stream " + argv, message)
+                self.log_output("rawstream " + argv, message)
                 return False
         obj = self.pdfFile.getObject(thisId, version)
         if obj is None:
             message = "[!] Error: Object not found"
-            self.log_output("stream " + argv, message)
+            self.log_output("rawstream " + argv, message)
             return False
         if obj.getType() != "stream":
-            message = "[!] Error: The object doesn't contain any stream"
+            message = "[!] Error: The object does not contain a stream"
             self.log_output("rawstream " + argv, message)
             return False
         value = obj.getRawStream()
@@ -3739,7 +3852,7 @@ class PDFConsole(cmd.Cmd):
                 if ret[1] == "String not found":
                     message = "String not found"
                 else:
-                    message = "[!] Error: The string has not been replaced"
+                    message = f"[!] Error: The string has not been replaced: {ret[1]}"
             else:
                 message = "[+] The string has been replaced correctly"
         elif numArgs == 4:
@@ -3756,8 +3869,10 @@ class PDFConsole(cmd.Cmd):
                     return False
                 with open(src, "rb") as srcFile:
                     content = srcFile.read()
-                if content.find(string1) != -1:
-                    replaceOutput = content.replace(string1, string2)
+                string1Bytes = string1.encode("latin-1")
+                string2Bytes = string2.encode("latin-1")
+                if content.find(string1Bytes) != -1:
+                    replaceOutput = content.replace(string1Bytes, string2Bytes)
                     try:
                         with open(src, "wb") as outSrc:
                             outSrc.write(replaceOutput)
@@ -3885,10 +4000,8 @@ class PDFConsole(cmd.Cmd):
                 message = "[!] Error: The version number is not valid"
                 self.log_output("save_version " + argv, message)
                 return False
-            currentFilePath = str(pathlib.Path(self.pdfFile.path).parent)
             ret = self.pdfFile.save(
                 fileName,
-                currentFilePath,
                 version,
                 malformedOptions=self.variables["malformed_options"][0],
                 headerFile=self.variables["header_file"][0],
@@ -3980,6 +4093,8 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("sctest " + argv, message)
                 return False
             byteVal = self.variables[src][0]
+            if isinstance(byteVal, str):
+                byteVal = byteVal.encode("latin-1")
         elif srcType == "file":
             if not os.path.exists(src):
                 message = "[!] Error: The file does not exist"
@@ -4033,6 +4148,9 @@ class PDFConsole(cmd.Cmd):
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("search " + argv, message)
             return False
+        useGlyphSearch = bool(args) and args[0] == "-g"
+        if useGlyphSearch:
+            args = args[1:]
         if len(args) != 1 and len(args) != 2:
             self.help_search()
             return False
@@ -4063,6 +4181,14 @@ class PDFConsole(cmd.Cmd):
                 return False
         toSearch = escapeRegExpString(toSearch)
         objects = self.pdfFile.getObjectsByString(toSearch)
+        if useGlyphSearch:
+            glyphObjects = self.pdfFile.getObjectsByGlyphDecodedString(toSearch)
+            merged = []
+            for i in range(max(len(objects), len(glyphObjects))):
+                found = set(objects[i] if i < len(objects) else [])
+                found |= set(glyphObjects[i] if i < len(glyphObjects) else [])
+                merged.append(sorted(found))
+            objects = merged
         if objects == []:
             output = "Not found"
         elif len(objects) == 1:
@@ -4077,7 +4203,7 @@ class PDFConsole(cmd.Cmd):
             if output == "":
                 output = "Not found"
             else:
-                output = output[1:-1]
+                output = output.strip(newLine)
         self.log_output("search " + argv, output)
 
     def help_search(self):
@@ -4085,7 +4211,12 @@ class PDFConsole(cmd.Cmd):
         print(
             f"Search the specified string or hexadecimal value in objects (decoded and encrypted streams included){newLine}"
         )
+        print(
+            "-g: also search page text shown through custom-encoded fonts (glyph codes decoded via "
+            f"/ToUnicode or /Differences plus Adobe Glyph List, best-effort, does not account for all fonts){newLine}"
+        )
         print(f"Example: search hex \\x34\\x35 {newLine}")
+        print(f"Example: search -g interesting_text {newLine}")
 
     def do_set(self, argv):
         consoleOutput = ""
@@ -4150,7 +4281,7 @@ class PDFConsole(cmd.Cmd):
             '\toutput:\t\t\tSpecifies where the output of a command will go. Options are "stdout", "file", and "variable". Default is "stdout".'
         )
         print(
-            "\toutput_limit:\t\tvariable to specify the maximum number of lines to be shown at once when the output is long (no limit = -1). By default there is no limit."
+            "\toutput_limit:\t\tvariable to specify the maximum number of lines to be shown at once when the output is long (no limit = -1). By default the limit is 500 lines."
         )
         print(f"\tvt_key:\t\t\tVirusTotal API key. {newLine}")
 
@@ -4224,7 +4355,7 @@ class PDFConsole(cmd.Cmd):
             self.log_output("stream " + argv, message)
             return False
         if obj.getType() != "stream":
-            message = "[!] Error: The object doesn't contain any stream"
+            message = "[!] Error: The object does not contain a stream"
             self.log_output("stream " + argv, message)
             return False
         value = obj.getStream()
@@ -4247,6 +4378,10 @@ class PDFConsole(cmd.Cmd):
             return False
         stats = ""
         args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("streams " + argv, message)
+            return False
         if not self.avoidOutputColors:
             beforeStaticLabel = self.staticColor
         else:
@@ -4261,6 +4396,9 @@ class PDFConsole(cmd.Cmd):
                     f'{self.resetColor}{str(statsVersion["Streams"][1])}{newLine}'
                 )
         elif len(args) == 1:
+            if not args[0].isdigit():
+                self.help_streams()
+                return False
             version = int(args[0])
             if version in range(len(statsDict["Versions"])):
                 statsVersion = statsDict["Versions"][version]
@@ -4286,7 +4424,7 @@ class PDFConsole(cmd.Cmd):
     def do_tree(self, argv):
         if self.pdfFile is None:
             message = "[!] Error: You must open a file"
-            self.log_output("version " + argv, message)
+            self.log_output("tree " + argv, message)
             return False
         version = None
         treeOutput = ""
@@ -4447,7 +4585,7 @@ class PDFConsole(cmd.Cmd):
                         return False
                     if srcType in {"stream", "rawstream"}:
                         if obj.getType() != "stream":
-                            message = "[!] Error: The object doesn't contain any stream"
+                            message = "[!] Error: The object does not contain a stream"
                             self.log_output("vtcheck " + argv, message)
                             return False
                         if srcType == "stream":
@@ -4459,7 +4597,7 @@ class PDFConsole(cmd.Cmd):
                     else:
                         content = obj.getRawValue()
             content = str(content)
-            md5Hash = hashlib.md5(content.encode()).hexdigest()
+            md5Hash = hashlib.md5(content.encode("latin-1")).hexdigest()
         # Checks the MD5 on VirusTotal
         ret = vtcheck(md5Hash, self.variables["vt_key"][0])
         if ret[0] == -1:
@@ -4613,9 +4751,11 @@ class PDFConsole(cmd.Cmd):
         version = None
         validTypes = ["variable", "file", "raw", "stream", "rawstream"]
         args = self.parseArgs(argv)
-        if not args:
+        if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("xor " + argv, message)
+            return False
+        if not args:
             self.help_xor()
             return False
         srcType = args[0]
@@ -4726,7 +4866,7 @@ class PDFConsole(cmd.Cmd):
                     self.log_output("xor " + argv, message)
                     return False
                 if obj.getType() != "stream":
-                    message = "[!] Error: The object doesn't contain any stream"
+                    message = "[!] Error: The object does not contain a stream"
                     self.log_output("xor " + argv, message)
                     return False
                 if srcType == "stream":
@@ -4772,15 +4912,18 @@ class PDFConsole(cmd.Cmd):
         validTypes = ["variable", "file", "raw", "stream", "rawstream"]
         version = None
         args = self.parseArgs(argv)
-        if not args:
+        if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("xor_search " + argv, message)
+            return False
+        if not args:
             self.help_xor_search()
             return False
         srcType = args[0]
         if len(args) > 0 and srcType == "-i":
             caseSensitive = False
             args = args[1:]
+            srcType = args[0]
         if len(args) == 3:
             if srcType in {"stream", "rawstream"}:
                 thisId = args[1]
@@ -4858,7 +5001,7 @@ class PDFConsole(cmd.Cmd):
                     self.log_output("xor_search " + argv, message)
                     return False
                 if obj.getType() != "stream":
-                    message = "[!] Error: The object doesn't contain any stream"
+                    message = "[!] Error: The object does not contain a stream"
                     self.log_output("xor_search " + argv, message)
                     return False
                 if srcType == "stream":
@@ -4922,6 +5065,97 @@ class PDFConsole(cmd.Cmd):
             f"The search is case sensitive, use -i to make it case insensitive.{newLine}"
         )
 
+    def do_xref(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("xref " + argv, message)
+            return False
+        args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("xref " + argv, message)
+            return False
+        if len(args) == 0:
+            version = None
+        elif len(args) == 1:
+            version = args[0]
+            if not version.isdigit():
+                self.help_xref()
+                return False
+            version = int(version)
+            if version > self.pdfFile.getNumUpdates():
+                message = "[!] Error: The version number is not valid"
+                self.log_output("xref " + argv, message)
+                return False
+        else:
+            self.help_xref()
+            return False
+
+        if version is None:
+            versionsToShow = range(self.pdfFile.getNumUpdates() + 1)
+        else:
+            versionsToShow = [version]
+
+        output = ""
+        for v in versionsToShow:
+            ret = self.pdfFile.getXrefSection(v)
+            if ret is None or ret[1] is None or ret[1] == [None, None]:
+                if version is not None:
+                    message = "[!] Error: xref section not found"
+                    self.log_output("xref " + argv, message)
+                    return False
+                continue
+            classicSection, streamSection = ret[1]
+            output += f"{newLine}Version {v}:{newLine}"
+            for label, section in (
+                ("xref table", classicSection),
+                ("Xref stream", streamSection),
+            ):
+                if section is None:
+                    continue
+                if section.inStream():
+                    location = f"in object {section.getXrefStreamObject()}"
+                else:
+                    location = f"offset {section.getOffset()}"
+                output += f"{newLine}  {label} ({location}):{newLine}"
+                output += f"  {'Object':<8}\t{'Gen':<5}\tType\tDetails{newLine}"
+                output += f"  {'-' * 8}\t{'-' * 5}\t{'-' * 4}\t{'-' * 30}{newLine}"
+                for subsection in section.getSubsectionsArray():
+                    for i, entry in enumerate(subsection.getEntries()):
+                        objId = subsection.getObjectId(i)
+                        entryType = entry.getType()
+                        if entryType in ("n", 1):
+                            typeLabel = "n"
+                            gen = entry.getGenNumber()
+                            detail = f"offset {entry.getObjectOffset()}"
+                        elif entryType in ("f", 0):
+                            typeLabel = "f"
+                            gen = entry.getGenNumber()
+                            detail = f"next free {entry.getNextObject()}"
+                        else:
+                            typeLabel = "c"
+                            gen = "-"
+                            detail = (
+                                f"in ObjStm {entry.getObjectStream()} "
+                                f"at index {entry.getIndexObject()}"
+                            )
+                        genDisplay = "-" if gen is None else gen
+                        output += f"  {objId:<8}\t{genDisplay:<5}\t{typeLabel}\t{detail}{newLine}"
+        if output == "":
+            message = "[!] No xref information available"
+            self.log_output("xref " + argv, message)
+            return False
+        self.log_output("xref " + argv, output)
+
+    def help_xref(self):
+        print(f"{newLine}Usage: xref [$version]")
+        print(
+            f"{newLine}Shows the cross reference table (classic and/or stream) of the "
+            f"document or the specified version: each object's id, generation number, "
+            f"type ('n' in use, 'f' free, 'c' compressed inside an object stream), and "
+            f"its offset, next-free link, or ObjStm location accordingly.{newLine}"
+        )
+
     def additionRequest(self, isDict: bool = False):
         """
         Method to ask the user if they want to add more entries to the object or not
@@ -4947,7 +5181,7 @@ class PDFConsole(cmd.Cmd):
         @return: The new object
         """
         dictNumType = {
-            "1": "boolean",
+            "1": "bool",
             "2": "number",
             "3": "string",
             "4": "hexstring",
@@ -4982,7 +5216,7 @@ class PDFConsole(cmd.Cmd):
             content = self.checkInputContent(objectType, content)
             if content is None:
                 return (-1, "[!] Error: Content not valid for the object type")
-        if objectType == "boolean":
+        if objectType == "bool":
             obj = PDFBool(content)
         elif objectType == "number":
             obj = PDFNum(content)
@@ -5123,7 +5357,7 @@ class PDFConsole(cmd.Cmd):
             )
         if bytesOutput and output != "" and not hexOutput:
             niceOutput = self.printResult(output)
-        if hexOutput and output != "" and not bytesOutput:
+        elif hexOutput and output != "" and not bytesOutput:
             niceOutput = self.printBytes(output)
         else:
             niceOutput = output
