@@ -1,8 +1,7 @@
 # peepdf-3 - peepdf for Python 3
 
 peepdf-3 is a **Python 3 tool to explore PDF files** in order to find out if the file can be harmful or not. The aim of this tool is to provide all the necessary components that
-a security researcher could need in a PDF analysis without using 3 or 4 tools to make
-all the tasks.  
+a security researcher could need in a PDF analysis without using 3 or 4 tools to complete the task.  
 
 With peepdf it's possible to see all the objects in the document showing
 the suspicious elements, supports all the most used filters and encodings, it can parse different versions of a file, object streams and encrypted files. With the installation
