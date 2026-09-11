@@ -117,7 +117,7 @@ MAL_EOBJ = 3
 MAL_ESTREAM = 4
 MAL_XREF = 5
 MAL_BAD_HEAD = 6
-VERSION = "5.4.0"
+VERSION = "5.4.1"
 IS_ID_1 = False
 IS_ID_2 = False
 pdfFile = None
@@ -979,7 +979,7 @@ class PDFHexString(PDFObject):
         except Exception:
             errorMessage = "[!] Error in hexadecimal conversion"
             self.addError(errorMessage)
-            return (-1, errorMessage)        
+            return (-1, errorMessage)
         ret = self.update(decrypt=True)
         return ret
 
@@ -5724,10 +5724,10 @@ class PDFFile:
 
     def createXrefStreamSection(self, version=None):
         lastId = 0
-        lastFreeObject = 0
+        lastFreeId = 0
         errorMessage = ""
         xrefStreamId = None
-        xrefEntries = [PDFCrossRefEntry(0, 65535, 0)]
+        entriesById = {0: PDFCrossRefEntry(0, 65535, 0)}
         if version is None:
             version = self.updates
         actualStream = self.crossRefTable[version][1]
@@ -5736,16 +5736,20 @@ class PDFFile:
         sortedObjectsByOffset = self.body[version].getObjectsIds()
         sortedObjectsIds = sorted(sortedObjectsByOffset, key=lambda x: int(x))
         indirectObjects = self.body[version].getObjects()
+        knownEarlierIds = set()
+        for earlierVersion in range(version):
+            knownEarlierIds.update(self.body[earlierVersion].getObjectsIds())
         lastOffset = None
         lastRawObj = None
         for thisId in sortedObjectsIds:
-            while thisId != lastId + 1:
-                lastFreeEntry = xrefEntries[lastFreeObject]
-                lastFreeEntry.setNextObject(lastId + 1)
-                xrefEntries[lastFreeObject] = lastFreeEntry
-                lastFreeObject = lastId + 1
-                lastId += 1
-                xrefEntries.append(PDFCrossRefEntry(0, 65535, 0))
+            nextId = lastId + 1
+            while nextId != thisId:
+                if nextId not in knownEarlierIds:
+                    entriesById[lastFreeId].setNextObject(nextId)
+                    entriesById[nextId] = PDFCrossRefEntry(0, 65535, 0)
+                    lastFreeId = nextId
+                nextId += 1
+            lastId = thisId
             indirectObject = indirectObjects[thisId]
             if indirectObject is not None:
                 obj = indirectObject.getObject()
@@ -5766,8 +5770,7 @@ class PDFFile:
                     else:
                         offset = indirectObject.getOffset()
                         entry = PDFCrossRefEntry(offset, 0, 1)
-                    xrefEntries.append(entry)
-                    lastId = thisId
+                    entriesById[thisId] = entry
                     lastOffset = indirectObject.getOffset()
                     lastRawObj = obj
         if actualStream is None:
@@ -5779,16 +5782,34 @@ class PDFFile:
                     return (-1, errorMessage)
             else:
                 offset = lastOffset + len(str(lastRawObj.getRawValue()))
-                xrefEntries.append(PDFCrossRefEntry(offset, 0, 1))
                 lastId += 1
+                entriesById[lastId] = PDFCrossRefEntry(offset, 0, 1)
                 xrefStreamId = lastId
-        subsection = PDFCrossRefSubSection(0, lastId + 1, xrefEntries)
         xrefSection = PDFCrossRefSection()
-        xrefSection.addSubsection(subsection)
+        allEntries = []
+        runFirstId = None
+        runEntries = []
+        for thisId in range(lastId + 1):
+            entry = entriesById.get(thisId)
+            if entry is not None:
+                if runFirstId is None:
+                    runFirstId = thisId
+                runEntries.append(entry)
+                allEntries.append(entry)
+            elif runEntries:
+                xrefSection.addSubsection(
+                    PDFCrossRefSubSection(runFirstId, len(runEntries), runEntries)
+                )
+                runFirstId = None
+                runEntries = []
+        if runEntries:
+            xrefSection.addSubsection(
+                PDFCrossRefSubSection(runFirstId, len(runEntries), runEntries)
+            )
         xrefSection.setXrefStreamObject(xrefStreamId)
         maxField2 = 0
         maxField3 = 0
-        for entry in xrefEntries:
+        for entry in allEntries:
             entryType = entry.getType()
             if entryType in ("f", 0):
                 maxField2 = max(maxField2, entry.getNextObject())
@@ -5800,7 +5821,7 @@ class PDFFile:
                 maxField2 = max(maxField2, entry.getObjectStream())
                 maxField3 = max(maxField3, entry.getIndexObject())
         field2Bytes = max(1, (maxField2.bit_length() + 7) // 8)
-        field3Bytes = max(1, (maxField3.bit_length() + 7) // 8)        
+        field3Bytes = max(1, (maxField3.bit_length() + 7) // 8)
         xrefSection.setBytesPerField([1, field2Bytes, field3Bytes])
         self.crossRefTable[version] = [None, xrefSection]
         if errorMessage != "":
@@ -6375,9 +6396,12 @@ class PDFFile:
         for v in range(self.updates + 1):
             thisTrailer, thisStreamTrailer = self.trailer[v]
             for trailerObj in (thisTrailer, thisStreamTrailer):
-                if trailerObj is not None and trailerObj.getDictEntry("/Encrypt") is not None:
+                if (
+                    trailerObj is not None
+                    and trailerObj.getDictEntry("/Encrypt") is not None
+                ):
                     trailerObj.trailerDict.delElement("/Encrypt")
-        self.setEncrypted(False)        
+        self.setEncrypted(False)
         return (0, "")
 
     def deleteObject(self, thisId):
@@ -7744,6 +7768,7 @@ class PDFFile:
         xrefStreamObject = None
         hybridXrefStreamObject = None
         try:
+            isFullSave = version is None
             if version is None:
                 version = self.updates
             outputFileContent = self.headerToFile(malformedOptions, headerFile)
@@ -7830,6 +7855,8 @@ class PDFFile:
                         streamTrailer.setNumObjects(maxId + 1)
                         if prevXrefStreamOffset != 0:
                             streamTrailer.setPrevCrossRefSection(prevXrefStreamOffset)
+                        elif streamTrailer.getDictEntry("/Prev") is not None:
+                            streamTrailer.trailerDict.delElement("/Prev")
                         self.trailer[v][1] = streamTrailer
                     self.crossRefTable[v][1] = streamSection
                     ret = self.createXrefStream(v, xrefStreamObjectId)
@@ -7870,11 +7897,15 @@ class PDFFile:
                         trailer.setNumObjects(maxId + 1)
                         if prevXrefSectionOffset != 0:
                             trailer.setPrevCrossRefSection(prevXrefSectionOffset)
+                        elif trailer.getDictEntry("/Prev") is not None:
+                            trailer.trailerDict.delElement("/Prev")
                     if (
                         hybridXrefStreamObject is not None
                         and trailer.getDictEntry("/XRefStm") is not None
                     ):
-                        ret = trailer.setXRefStmOffset(hybridXrefStreamObject.getOffset())
+                        ret = trailer.setXRefStmOffset(
+                            hybridXrefStreamObject.getOffset()
+                        )
                         if ret[0] == -1:
                             self.addError(ret[1])
                     outputFileContent += trailer.toFile()
@@ -7892,10 +7923,11 @@ class PDFFile:
                 outputFileContent = outputFileContent.encode("latin-1")
             with open(outputPath, "wb") as writeOutput:
                 writeOutput.write(outputFileContent)
-            self.setMD5(hashlib.md5(outputFileContent).hexdigest())
-            self.setSize(len(outputFileContent))
-            self.path = os.path.realpath(filename)
-            self.fileName = filename
+            if isFullSave:
+                self.setMD5(hashlib.md5(outputFileContent).hexdigest())
+                self.setSize(len(outputFileContent))
+                self.path = os.path.realpath(filename)
+                self.fileName = filename
         except:
             return (-1, "Unspecified error")
         return (0, "")
