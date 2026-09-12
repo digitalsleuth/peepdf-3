@@ -1501,6 +1501,81 @@ class PDFConsole(cmd.Cmd):
             f"Extracts all the given type elements of the specified version after being decoded and decrypted (if necessary) {newLine}"
         )
 
+    def do_extract_stream(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("extract_stream " + argv, message)
+            return False
+        args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("extract_stream " + argv, message)
+            return False
+        numArgs = len(args)
+        if numArgs < 2 or numArgs > 4:
+            self.help_extract_stream()
+            return False
+        thisId = args[0]
+        fileName = args[-1]
+        if not thisId.isdigit():
+            self.help_extract_stream()
+            return False
+        thisId = int(thisId)
+        version = None
+        rawMode = False
+        for token in args[1:-1]:
+            if token == "raw":
+                rawMode = True
+            elif token.isdigit():
+                version = int(token)
+            else:
+                self.help_extract_stream()
+                return False
+        if version is not None and version > self.pdfFile.getNumUpdates():
+            message = "[!] Error: The version number is not valid"
+            self.log_output("extract_stream " + argv, message)
+            return False
+        obj = self.pdfFile.getObject(thisId, version)
+        if obj is None:
+            message = "[!] Error: Object not found"
+            self.log_output("extract_stream " + argv, message)
+            return False
+        if obj.getType() != "stream":
+            message = "[!] Error: The object does not contain a stream"
+            self.log_output("extract_stream " + argv, message)
+            return False
+        if rawMode:
+            value = obj.getRawStream()
+        else:
+            value = obj.getStream()
+            if value == -1:
+                message = "[!] Error: The stream cannot be decoded"
+                self.log_output("extract_stream " + argv, message)
+                return False
+        try:
+            with open(fileName, "wb") as outFile:
+                outFile.write(value.encode("latin-1"))
+        except Exception as exc:
+            message = f'[!] Error: Could not write to file "{fileName}": {exc}'
+            self.log_output("extract_stream " + argv, message)
+            return False
+        message = f"[+] Stream content ({len(value)} bytes) written to file {fileName}"
+        self.log_output("extract_stream " + argv, message)
+
+    def help_extract_stream(self):
+        print(f"{newLine}Usage: extract_stream $object_id [$version] [raw] $file_name")
+        print(
+            f"Extracts the stream content of the specified object straight to a file.{newLine}"
+            f"By default the DECODED stream is written (filters removed). Use the "
+            f"'raw' option to write the stream exactly as stored in the file, "
+            f"before decoding.{newLine}"
+            f"For image streams filtered with something like /DCTDecode (JPEG), "
+            f"/JPXDecode (JPEG2000) or /CCITTFaxDecode, the final image "
+            f"compression IS the useful file format - 'raw' gives you the correct "
+            f"openable image there, while the decoded form is just headerless raw "
+            f"pixel data.{newLine}"
+        )
+
     def do_filters(self, argv):
         if self.pdfFile is None:
             message = "[!] Error: You must open a file"
