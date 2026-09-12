@@ -514,6 +514,58 @@ class PDFNull(PDFObject):
         self.references = []
 
 
+class _OriginalFormatFloat(float):
+    """
+    Required in order to fix unexpected rounding of floats from PDF objects
+    Example: /MediaBox floats get rounded to single-digit when subsequent
+    numbers are 0's: ie: 595.30 becomes 595.3, which changes integrity of data
+    read and stored.
+    """
+
+    def __new__(cls, text):
+        return super().__new__(cls, text)
+
+    def __init__(self, text):
+        super().__init__()
+        self._text = text
+
+    def __str__(self):
+        return self._text
+
+    def __repr__(self):
+        return self._text
+
+    def __format__(self, formatSpec):
+        if formatSpec:
+            return super().__format__(formatSpec)
+        return self._text
+
+
+class _OriginalFormatInt(int):
+    """
+    Same intent as _OriginalFormatFloat, maintains integrity of numerical values
+    identified in objects.
+    """
+
+    def __new__(cls, text):
+        return super().__new__(cls, text)
+
+    def __init__(self, text):
+        super().__init__()
+        self._text = text
+
+    def __str__(self):
+        return self._text
+
+    def __repr__(self):
+        return self._text
+
+    def __format__(self, formatSpec):
+        if formatSpec:
+            return super().__format__(formatSpec)
+        return self._text
+
+
 class PDFNum(PDFObject):
     """
     Number object of a PDF document: can be an integer or a real number.
@@ -551,10 +603,10 @@ class PDFNum(PDFObject):
         try:
             if self.value.find(".") != -1:
                 self.objType = "real"
-                self.rawValue = float(self.value)
+                self.rawValue = _OriginalFormatFloat(self.value)
             else:
                 self.objType = "integer"
-                self.rawValue = int(self.value)
+                self.rawValue = _OriginalFormatInt(self.value)
         except:
             errorMessage = "Numeric conversion error"
             self.addError(errorMessage)
