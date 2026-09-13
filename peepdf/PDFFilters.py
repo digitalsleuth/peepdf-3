@@ -792,14 +792,14 @@ def ccittFaxDecode(stream, parameters):
         except:
             return (-1, "Error decompressing string with CCITT Fax Decode")
     else:
-        # K = A code identifying the encoding scheme used
+        # K = A code identifying the encoding scheme used: 0 is Group 3
+        # one-dimensional (T.4), > 0 is Group 3 (mixed one and two-dimensional) (T.4)
+        # < 0 is Group 4 (T.6), purely two-dimensional.
+        # .decode() should support all three.
         if "/K" in parameters:
             k = parameters["/K"].getRawValue()
             if not isinstance(k, int):
                 k = 0
-            elif k != 0:
-                # Only supported "Group 3, 1-D" encoding (Pure one-dimensional encoding)
-                return (-1, "CCITT encoding scheme not supported")
         else:
             k = 0
         # EndOfLine = A flag indicating whether end-of-line bit patterns are required to be present in the encoding.
