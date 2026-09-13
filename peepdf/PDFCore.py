@@ -8487,7 +8487,13 @@ class PDFParser:
         # Getting the number of updates in the file
         while fileContent.find(b"%%EOF") != -1:
             self.readUntilSymbol(fileContent, b"%%EOF")
-            self.readUntilEndOfLine(fileContent.decode("latin-1"))
+            endOfEOF = self.charCounter + len("%%EOF")
+            if endOfEOF < len(fileContent):
+                # A trailing EOL after %%EOF is conventional, not required.
+                # only look for one when there's actually more content after %%EOF.
+                self.readUntilEndOfLine(fileContent.decode("latin-1"))
+            else:
+                self.charCounter = endOfEOF
             self.fileParts.append(fileContent[: self.charCounter].decode("latin-1"))
             fileContent = fileContent[self.charCounter :]
             self.charCounter = 0
@@ -8603,7 +8609,7 @@ class PDFParser:
                         pdfFile.addError(
                             f"[!] Error parsing object: {str(objectHeader)} ({str(ret[1])})"
                         )
-            else:
+            elif bodyContent.strip():
                 pdfFile.addError("No indirect objects found in the body")
             if pdfIndirectObject is not None:
                 body.setNextOffset(pdfIndirectObject.getOffset())
