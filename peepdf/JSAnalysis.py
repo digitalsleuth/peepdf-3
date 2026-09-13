@@ -94,7 +94,11 @@ def analyseJS(
             code = ""
             for scriptElement in scriptElements:
                 code += f"{scriptElement}{newLine * 2}"
-        code = jsbeautifier.beautify(code)
+        if not manualAnalysis:
+            # Using beautify is costly, and should only be done as necessary
+            # This still enables it at user request through the console but
+            # doesn't do it by default for EVERY possibility of JS
+            code = jsbeautifier.beautify(code)
         jsCode.append(code)
 
         if code is not None and JS_MODULE and not manualAnalysis:
