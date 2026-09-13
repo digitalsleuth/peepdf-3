@@ -3607,13 +3607,13 @@ class PDFConsole(cmd.Cmd):
 
         if version is not None:
             print(f"\rVersion {version}:")
-        print(f"{newLine}Start (d)\tEnd (d)\t\tSize (d)\tType and Id\r")
+        print(f"{newLine}Start (d)\tEnd (d) \tSize (d)\tType and Id\r")
         print(f'{"-" * 9}\t{"-" * 9}\t{"-" * 9}\t{"-" * 20}\r')
         for k, v in enumerate(offsetsArray):
             offsets = v
             if k == 0 and "header" in offsets:
                 offset, size = offsets["header"]
-                offsetsOutput += f"{offset:08d}\t\t\t\t\tHeader{newLine}"
+                offsetsOutput += f"{offset:08d}\t{'':8}\t{'':8}\tHeader{newLine}"
             elif version is None:
                 offsetsOutput += f"{newLine}Version {str(k)}: {newLine * 2}"
             if "objects" in offsets:
@@ -3644,7 +3644,7 @@ class PDFConsole(cmd.Cmd):
                 )
             if offsets["eof"] is not None:
                 offset, size = offsets["eof"]
-                offsetsOutput += f"{offset:08d}\t\t\t\t\tEOF{newLine}"
+                offsetsOutput += f"{offset:08d}\t{'':8}\t{'':8}\tEOF{newLine}"
         self.log_output("offsets " + argv, offsetsOutput)
 
     def help_offsets(self):
@@ -5215,7 +5215,7 @@ class PDFConsole(cmd.Cmd):
                                 f"at index {entry.getIndexObject()}"
                             )
                         genDisplay = "-" if gen is None else gen
-                        output += f"  {objId:<8}\t{genDisplay:<5}\t{typeLabel}\t{detail}{newLine}"
+                        output += f"  {objId:<8}\t{genDisplay:<5}\t{typeLabel:<4}\t{detail}{newLine}"
         if output == "":
             message = "[!] No xref information available"
             self.log_output("xref " + argv, message)
