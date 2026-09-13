@@ -118,8 +118,6 @@ MAL_ESTREAM = 4
 MAL_XREF = 5
 MAL_BAD_HEAD = 6
 VERSION = "5.4.2"
-IS_ID_1 = False
-IS_ID_2 = False
 pdfFile = None
 newLine = os.linesep
 isForceMode = False
@@ -893,8 +891,6 @@ class PDFHexString(PDFObject):
         @param newHexValue: A boolean indicating if the value provided is a new hexadecimal value
         @return: A tuple (status,statusContent), where statusContent is empty in case status = 0 or an error message in case status = -1
         """
-        global IS_ID_1
-        global IS_ID_2
         self.errors = []
         self.containsJScode = False
         self.JSCode = []
@@ -918,7 +914,10 @@ class PDFHexString(PDFObject):
                         self.value = self.getBomDecodedValue(self.rawValue)
                     else:
                         self.rawValue = (self.value).encode("latin-1").hex()
-                self.encryptedValue = self.value
+                tmpRawValue = self.rawValue
+                if len(tmpRawValue) % 2 != 0:
+                    tmpRawValue += "0"
+                self.encryptedValue = bytes.fromhex(tmpRawValue).decode("latin-1")
                 if self.IS_ID:
                     self.value = f"<{self.rawValue}>"
                 if self.IS_HASH:
@@ -927,6 +926,12 @@ class PDFHexString(PDFObject):
                 errorMessage = "[!] Error in hexadecimal conversion"
                 self.addError(errorMessage)
                 return (-1, errorMessage)
+        else:
+            if self.rawValue.lower().startswith("feff"):
+                try:
+                    self.value = self.getBomDecodedValue(self.rawValue)
+                except (ValueError, UnicodeDecodeError):
+                    pass
         if isJavascript(self.value) or self.referencedJSObject:
             self.containsJScode = True
             (
@@ -4792,6 +4797,11 @@ class PDFBody:
                 12 + 3 * len(newLine) + len(str(obj.getRawValue())) + len(str(thisId))
             )
             pdfIndirectObject.setSize(size)
+            ret = self.registerObject(pdfIndirectObject)
+            if ret[0] == 0:
+                objectType = ret[1]
+                return (0, [thisId, objectType])
+            return ret
         elif modification:
             errorMessage = "Object not found"
             if isForceMode:
@@ -6345,9 +6355,16 @@ class PDFFile:
             self.setEncryptionKeyLength(keyLength)
             # Computing objects passwords and decryption
             numKeyBytes = int(self.encryptionKeyLength / 8)
+            encryptDictId = (
+                self.encryptDict[0] if self.encryptDict is not None else None
+            )
+            objectErrors = []
             for v in range(self.updates + 1):
                 indirectObjectsIds = list(set(self.body[v].getObjectsIds()))
                 for thisId in indirectObjectsIds:
+                    if thisId == encryptDictId:
+                        # Don't decrypt the already decrypted /Encrypt
+                        continue
                     indirectObject = self.body[v].getObject(thisId, indirect=True)
                     if indirectObject is not None:
                         generationNum = indirectObject.getGenerationNumber()
@@ -6393,7 +6410,7 @@ class PDFFile:
                                             strAlgorithm[0],
                                         )
                                         if ret[0] == -1:
-                                            errorMessage = ret[1]
+                                            objectErrors.append(ret[1])
                                             self.addError(ret[1])
                                         else:
                                             key = ret[1]
@@ -6413,7 +6430,7 @@ class PDFFile:
                                                 embedAlgorithm[0],
                                             )
                                             if ret[0] == -1:
-                                                errorMessage = ret[1]
+                                                objectErrors.append(ret[1])
                                                 self.addError(ret[1])
                                             else:
                                                 key = ret[1]
@@ -6428,7 +6445,7 @@ class PDFFile:
                                                 stmAlgorithm[0],
                                             )
                                             if ret[0] == -1:
-                                                errorMessage = ret[1]
+                                                objectErrors.append(ret[1])
                                                 self.addError(ret[1])
                                             else:
                                                 key = ret[1]
@@ -6437,11 +6454,11 @@ class PDFFile:
                                         key, strAlgorithm[0], altAlgorithm
                                     )
                                 if ret[0] == -1:
-                                    errorMessage = ret[1]
+                                    objectErrors.append(ret[1])
                                     self.addError(ret[1])
                                 ret = self.body[v].setObject(thisId, obj)
                                 if ret[0] == -1:
-                                    errorMessage = ret[1]
+                                    objectErrors.append(ret[1])
                                     self.addError(ret[1])
         if errorMessage != "":
             return (-1, errorMessage)
@@ -8538,23 +8555,9 @@ class PDFParser:
             rawIndirectObjects = self.getIndirectObjects(bodyContent, looseMode)
             if rawIndirectObjects:
                 for _, thisIndirectObject in enumerate(rawIndirectObjects):
-                    relativeOffset = 0
-                    auxContent = str(bodyContent)
                     rawObject = thisIndirectObject[0]
                     objectHeader = thisIndirectObject[1]
-                    while True:
-                        index = auxContent.find(objectHeader)
-                        if index == -1:
-                            relativeOffset = index
-                            break
-                        relativeOffset += index
-                        checkHeader = bodyContent[
-                            relativeOffset - 1 : relativeOffset + len(objectHeader)
-                        ]
-                        if not re.match(r"\d{1,10}" + objectHeader, checkHeader):
-                            break
-                        auxContent = auxContent[index + len(objectHeader) :]
-                        relativeOffset += len(objectHeader)
+                    relativeOffset = thisIndirectObject[2]
                     ret = self.createPDFIndirectObject(rawObject, forceMode, looseMode)
                     if ret[0] != -1:
                         pdfIndirectObject = ret[1]
@@ -8665,6 +8668,10 @@ class PDFParser:
                         pdfFile.addError("/Encrypt dictionary not found")
                 if objectType == "dictionary":
                     pdfFile.setEncryptDict([encryptDictId, encryptDict.getElements()])
+            if trailer is not None:
+                self.tagFileIdElements(trailer.getDictEntry("/ID"))
+            if streamTrailer is not None:
+                self.tagFileIdElements(streamTrailer.getDictEntry("/ID"))
 
             if fileId is not None and pdfFile.getFileId() == "":
                 objectType = fileId.getType()
@@ -8673,19 +8680,32 @@ class PDFParser:
                     if fileIdElements is not None and fileIdElements != []:
                         if fileIdElements[0] is not None:
                             rawFirstId = fileIdElements[0].getRawValue()
-                            fileIdElements[0].setValue(rawFirstId)
                             if fileIdElements[0].getType() == "hexstring":
                                 pdfFile.setFileId(bytes.fromhex(rawFirstId.strip("<>")))
                             else:
+                                fileIdElements[0].setValue(rawFirstId)
                                 pdfFile.setFileId(rawFirstId)
-                        if len(fileIdElements) > 1 and fileIdElements[1] is not None:
-                            fileIdElements[1].setValue(fileIdElements[1].getRawValue())
             pdfFile.addTrailer([trailer, streamTrailer])
         if pdfFile.isEncrypted() and pdfFile.getEncryptDict() is not None:
             ret = pdfFile.decrypt()
             if ret[0] == -1:
                 pdfFile.addError(ret[1])
         return (0, pdfFile)
+
+    @staticmethod
+    def tagFileIdElements(idArray):
+        """
+        Moves away from using IS_ID to identify an /ID entry to avoid
+        it being converted from hex
+
+        @param idArray: The PDFArray from a trailer's /ID entry, or None
+        """
+        if idArray is None or idArray.getType() != "array":
+            return
+        for element in idArray.getElements():
+            if element is not None and element.getType() == "hexstring":
+                element.IS_ID = True
+                element.update()
 
     def parsePDFSections(self, content, forceMode=False, looseMode=False):
         """
@@ -9336,17 +9356,19 @@ class PDFParser:
 
     def getIndirectObjects(self, content, looseMode=False):
         """
-        This function returns an array of raw indirect objects of the PDF file given the raw body.
+        This function returns an array of raw indirect objects of the PDF file given the raw body,
+        and a header_offset. This is the position of the object_header within the content.
         @param content: string with the raw content of the PDF body.
         @param looseMode: boolean specifies if the parsing process should search for the endobj tag or not.
-        @return matchingObjects: array of tuples (object_content,object_header).
+        @return matchingObjects: array of tuples (object_content, object_header, header_offset).
         """
         matchingObjects = []
         if not isinstance(content, str):
             return matchingObjects
         if not looseMode:
-            regExp = re.compile(r"((\d{1,10}\s\d{1,10}\sobj).*?endobj)", re.DOTALL)
-            matchingObjects = regExp.findall(content)
+            regExp = re.compile(r"(\d{1,10}\s\d{1,10}\sobj).*?endobj", re.DOTALL)
+            for match in regExp.finditer(content):
+                matchingObjects.append((match.group(0), match.group(1), match.start(1)))
         else:
             headerRegExp = re.compile(r"\d{1,10}\s\d{1,10}\sobj")
             headers = list(headerRegExp.finditer(content))
@@ -9357,31 +9379,40 @@ class PDFParser:
                 objectBody = content[start:end].rstrip(
                     " \t\n\r\f\v"
                 )  # keep .rstrip() in case of issues with parsing streams
-                matchingObjects.append((objectBody, header))
+                matchingObjects.append((objectBody, header, start))
         return matchingObjects
 
     def getLines(self, content):
         """
         Simple function to return the lines separated by end of line characters
+        Slicing the original string by index keeps each slice
+        limited to that one line's own length, making the whole pass
+        linear in len(content).
+
         @param content
         @return List with the lines, without end of line characters
         """
+
         lines = []
+        start = 0
+        length = len(content)
         i = 0
-        while i < len(content):
-            if content[i] == "\r":
-                lines.append(content[:i])
-                if content[i + 1] == "\n":
+        while i < length:
+            char = content[i]
+            if char == "\r":
+                lines.append(content[start:i])
+                i += 1
+                if i < length and content[i] == "\n":
                     i += 1
-                content = content[i + 1 :]
-                i = 0
-            elif content[i] == "\n":
-                lines.append(content[:i])
-                content = content[i + 1 :]
-                i = 0
-            i += 1
-        if i > 0:
-            lines.append(content)
+                start = i
+            elif char == "\n":
+                lines.append(content[start:i])
+                i += 1
+                start = i
+            else:
+                i += 1
+        if start < length:
+            lines.append(content[start:])
         return lines
 
     def getText(self, fileName):
@@ -9408,8 +9439,6 @@ class PDFParser:
         @param looseMode
         @return A tuple (status,statusContent), where statusContent is a PDFObject instance in case status = 0 or an error in case status = -1
         """
-        global IS_ID_1
-        global IS_ID_2
         if len(content) == 0 or content[:6] == "endobj":
             return (-1, "Empty content reading object")
         pdfObject = None
@@ -9434,7 +9463,8 @@ class PDFParser:
         else:
             delimiters = self.delimiters
         for delim in delimiters:
-            ret = self.readSymbol(content, delim[0])
+            # Accidentally deleted relevant bytes - safeguard against that
+            ret = self.readSymbol(content, delim[0], deleteSpaces=delim[2] != "string")
             if ret[0] != -1:
                 if delim[2] == "dictionary":
                     ret = self.readUntilClosingDelim(content, delim)
@@ -9492,14 +9522,7 @@ class PDFParser:
                     if ret[0] != -1:
                         hexContent = ret[1]
                         self.readSymbol(content, delim[1])
-                        if IS_ID_1:
-                            pdfObject = PDFHexString(hexContent, True)
-                            IS_ID_1 = False
-                        elif IS_ID_2 and not IS_ID_1:
-                            pdfObject = PDFHexString(hexContent, True)
-                            IS_ID_2 = False
-                        else:
-                            pdfObject = PDFHexString(hexContent)
+                        pdfObject = PDFHexString(hexContent)
                     else:
                         pdfObject = PDFHexString(content)
                         pdfObject.addError(
@@ -9523,9 +9546,6 @@ class PDFParser:
                     break
                 if delim[2] == "name":
                     ret, raw = self.readUntilNotRegularChar(content)
-                    if raw == "ID":
-                        IS_ID_1 = True
-                        IS_ID_2 = True
                     pdfObject = PDFName(raw)
                     break
                 if delim[2] == "comment":
@@ -9635,7 +9655,6 @@ class PDFParser:
             self.charCounter += index
             return (0, newContent[:index])
         indexChar = 0
-        prevChar = ""
         while indexChar != len(newContent):
             char = newContent[indexChar]
             if indexChar == len(newContent) - 1:
@@ -9643,14 +9662,18 @@ class PDFParser:
             else:
                 nextChar = newContent[indexChar + 1]
             if char == delim[1] or (char + nextChar) == delim[1]:
-                if char != ")" or indexChar == 0 or newContent[indexChar - 1] != "\\":
+                if (
+                    char != ")"
+                    or indexChar == 0
+                    or not self.isBackslashEscaped(newContent, indexChar)
+                ):
                     return (0, output)
                 output += char
                 indexChar += 1
                 self.charCounter += 1
-            elif (char == "(" and prevChar != "\\") or (
-                char in {"[", "<"} and delim[0] != "("
-            ):
+            elif (
+                char == "(" and not self.isBackslashEscaped(newContent, indexChar)
+            ) or (char in {"[", "<"} and delim[0] != "("):
                 if (char + nextChar) != "<<":
                     delimIndex = delimiterChars.index(char)
                     self.charCounter += 1
@@ -9682,11 +9705,28 @@ class PDFParser:
                 indexChar += 1
                 self.charCounter += 1
                 output += char
-                prevChar = char
         else:
             errorMessage = "No closing delimiter found"
             pdfFile.addError(errorMessage)
             return (-1, errorMessage)
+
+    @staticmethod
+    def isBackslashEscaped(content, position):
+        """
+        Checks whether the character at `position` is escaped by a
+        backslash. A single backslash immediately before it is a real
+        escape. Only an odd number of them leaves the last one "live"
+        to escape what follows.
+        @param content: The string being scanned
+        @param position: Index of the character to check
+        @return: A boolean, True if `position` is escaped
+        """
+        count = 0
+        i = position - 1
+        while i >= 0 and content[i] == "\\":
+            count += 1
+            i -= 1
+        return count % 2 == 1
 
     def readUntilEndOfLine(self, content):
         """
