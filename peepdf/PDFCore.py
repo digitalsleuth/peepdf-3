@@ -30,6 +30,7 @@ import hashlib
 import logging
 import random
 import pypdf
+from lxml import etree
 
 try:
     from peepdf.PDFUtils import (
@@ -3575,11 +3576,25 @@ class PDFObjectStream(PDFStream):
                             ]
                             numbers = re.findall(r"\d{1,10}", offsetsSection)
                             if numbers != [] and len(numbers) % 2 == 0:
+                                sortedOffsets = sorted(
+                                    {
+                                        int(numbers[i + 1])
+                                        for i in range(0, len(numbers), 2)
+                                    }
+                                )
+                                offsetToEnd = {}
+                                for idx, off in enumerate(sortedOffsets):
+                                    offsetToEnd[off] = (
+                                        sortedOffsets[idx + 1]
+                                        if idx + 1 < len(sortedOffsets)
+                                        else len(objectsSection)
+                                    )
                                 for i in range(0, len(numbers), 2):
                                     thisId = int(numbers[i])
                                     offset = int(numbers[i + 1])
+                                    endOffset = offsetToEnd[offset]
                                     ret = PDFParser().readObject(
-                                        objectsSection[offset:]
+                                        objectsSection[offset:endOffset]
                                     )
                                     if ret[0] == -1:
                                         if isForceMode:
@@ -3691,10 +3706,23 @@ class PDFObjectStream(PDFStream):
                         objectsSection = self.decodedStream[self.firstObjectOffset :]
                         numbers = re.findall(r"\d{1,10}", offsetsSection)
                         if numbers != [] and len(numbers) % 2 == 0:
+                            sortedOffsets = sorted(
+                                {int(numbers[i + 1]) for i in range(0, len(numbers), 2)}
+                            )
+                            offsetToEnd = {}
+                            for idx, off in enumerate(sortedOffsets):
+                                offsetToEnd[off] = (
+                                    sortedOffsets[idx + 1]
+                                    if idx + 1 < len(sortedOffsets)
+                                    else len(objectsSection)
+                                )
                             for i in range(0, len(numbers), 2):
                                 thisId = int(numbers[i])
                                 offset = int(numbers[i + 1])
-                                ret = PDFParser().readObject(objectsSection[offset:])
+                                endOffset = offsetToEnd[offset]
+                                ret = PDFParser().readObject(
+                                    objectsSection[offset:endOffset]
+                                )
                                 if ret[0] == -1:
                                     if isForceMode:
                                         obj = None
@@ -3853,10 +3881,21 @@ class PDFObjectStream(PDFStream):
                 objectsSection = self.decodedStream[self.firstObjectOffset :]
                 numbers = re.findall(r"\d{1,10}", offsetsSection)
                 if numbers != [] and len(numbers) % 2 == 0:
+                    sortedOffsets = sorted(
+                        {int(numbers[i + 1]) for i in range(0, len(numbers), 2)}
+                    )
+                    offsetToEnd = {}
+                    for idx, off in enumerate(sortedOffsets):
+                        offsetToEnd[off] = (
+                            sortedOffsets[idx + 1]
+                            if idx + 1 < len(sortedOffsets)
+                            else len(objectsSection)
+                        )
                     for i in range(0, len(numbers), 2):
                         thisId = int(numbers[i])
                         offset = int(numbers[i + 1])
-                        ret = PDFParser().readObject(objectsSection[offset:])
+                        endOffset = offsetToEnd[offset]
+                        ret = PDFParser().readObject(objectsSection[offset:endOffset])
                         if ret[0] == -1:
                             if isForceMode:
                                 obj = None
@@ -5468,6 +5507,125 @@ def _getPageContentStreams(pageObj, pdfFile, version):
     return streams
 
 
+_XMP_SIMPLE_FIELDS = {
+    "CreatorTool": "creatorTool",
+    "CreateDate": "createDate",
+    "ModifyDate": "modifyDate",
+    "MetadataDate": "metadataDate",
+    "Producer": "producer",
+    "Keywords": "keywords",
+    "DocumentID": "documentId",
+    "InstanceID": "instanceId",
+    "OriginalDocumentID": "originalDocumentId",
+}
+_XMP_HISTORY_EVENT_FIELDS = ("action", "when", "softwareAgent", "changed", "instanceID")
+
+
+def _xmpLocalName(tag):
+    return tag.split("}")[-1] if isinstance(tag, str) else tag
+
+
+def _xmpFirstText(elem):
+    """
+    Look for dc values (Dublin Core - dc:title/creator/description), then the
+    subsequent 'li' and take the first non-empty leaf text as the value.
+    """
+    text = (elem.text or "").strip()
+    if text:
+        return text
+    for li in elem.iter():
+        if _xmpLocalName(li.tag) == "li":
+            liText = (li.text or "").strip()
+            if liText:
+                return liText
+    return None
+
+
+def _xmpAllTexts(elem):
+    values = []
+    for li in elem.iter():
+        if _xmpLocalName(li.tag) == "li":
+            liText = (li.text or "").strip()
+            if liText:
+                values.append(liText)
+    if not values:
+        text = (elem.text or "").strip()
+        if text:
+            values.append(text)
+    return values
+
+
+def _parseXMPStream(xmpText):
+    """
+    Matches elements/attributes by local name only, ignoring namespace
+    prefix.
+
+    Returns None if the blob isn't parseable XML.
+    """
+    try:
+        root = etree.fromstring(xmpText.encode("latin-1", errors="replace"))
+    except Exception:
+        return None
+
+    result = {
+        "title": None,
+        "creator": None,
+        "description": None,
+        "subject": [],
+        "creatorTool": None,
+        "createDate": None,
+        "modifyDate": None,
+        "metadataDate": None,
+        "producer": None,
+        "keywords": None,
+        "documentId": None,
+        "instanceId": None,
+        "originalDocumentId": None,
+        "history": [],
+    }
+
+    for elem in root.iter():
+        tag = _xmpLocalName(elem.tag)
+        if tag == "title" and result["title"] is None:
+            result["title"] = _xmpFirstText(elem)
+        elif tag == "creator" and result["creator"] is None:
+            result["creator"] = _xmpFirstText(elem)
+        elif tag == "description" and result["description"] is None:
+            result["description"] = _xmpFirstText(elem)
+        elif tag == "subject":
+            result["subject"] = _xmpAllTexts(elem)
+        elif tag in _XMP_SIMPLE_FIELDS:
+            key = _XMP_SIMPLE_FIELDS[tag]
+            if result[key] is None:
+                result[key] = (elem.text or "").strip() or None
+        elif tag == "History":
+            for li in elem.iter():
+                if _xmpLocalName(li.tag) != "li":
+                    continue
+                event = {}
+                for child in li:
+                    childTag = _xmpLocalName(child.tag)
+                    if childTag in _XMP_HISTORY_EVENT_FIELDS:
+                        event[childTag] = (child.text or "").strip()
+                if event:
+                    result["history"].append(event)
+
+    # xmpMM:DocumentID/InstanceID/OriginalDocumentID are just as often
+    # stored as plain RDF attributes on rdf:Description as they are child
+    # elements - both are valid XMP, so both need checking.
+    for elem in root.iter():
+        if _xmpLocalName(elem.tag) != "Description":
+            continue
+        for attrName, attrValue in elem.attrib.items():
+            attrLocal = _xmpLocalName(attrName)
+            if attrLocal in _XMP_SIMPLE_FIELDS:
+                key = _XMP_SIMPLE_FIELDS[attrLocal]
+                if result[key] is None:
+                    result[key] = attrValue.strip() or None
+
+    return result
+
+
 class PDFFile:
     def __init__(self):
         self.fileName = ""
@@ -6783,6 +6941,7 @@ class PDFFile:
 
     def getBasicMetadata(self, version):
         basicMetadata = {}
+        infoValues = {}
 
         # Getting creation information
         infoObject = self.getInfoObject(version)
@@ -6790,120 +6949,76 @@ class PDFFile:
             author = infoObject.getElementByName("/Author")
             if author is not None and author != []:
                 authorValue = author.getValue()
-                if self.hasUtf16Bom(authorValue):
-                    basicMetadata["author"] = self.getBomDecodedValue(authorValue)
-                else:
-                    basicMetadata["author"] = authorValue
+                infoValues["author"] = (
+                    self.getBomDecodedValue(authorValue)
+                    if self.hasUtf16Bom(authorValue)
+                    else authorValue
+                )
             creator = infoObject.getElementByName("/Creator")
             if creator is not None and creator != []:
                 creatorValue = creator.getValue()
-                if self.hasUtf16Bom(creatorValue):
-                    basicMetadata["creator"] = self.getBomDecodedValue(creatorValue)
-                else:
-                    basicMetadata["creator"] = creatorValue
+                infoValues["creator"] = (
+                    self.getBomDecodedValue(creatorValue)
+                    if self.hasUtf16Bom(creatorValue)
+                    else creatorValue
+                )
             producer = infoObject.getElementByName("/Producer")
             if producer is not None and producer != []:
                 producerValue = producer.getValue()
-                if self.hasUtf16Bom(producerValue):
-                    basicMetadata["producer"] = self.getBomDecodedValue(producerValue)
-                else:
-                    basicMetadata["producer"] = producerValue
+                infoValues["producer"] = (
+                    self.getBomDecodedValue(producerValue)
+                    if self.hasUtf16Bom(producerValue)
+                    else producerValue
+                )
             creationDate = infoObject.getElementByName("/CreationDate")
             if creationDate is not None and creationDate != []:
-                basicMetadata["creation"] = creationDate.getValue()
+                infoValues["creation"] = creationDate.getValue()
             modificationDate = infoObject.getElementByName("/ModDate")
             if modificationDate is not None and modificationDate != []:
-                basicMetadata["modification"] = modificationDate.getValue()
+                infoValues["modification"] = modificationDate.getValue()
             subject = infoObject.getElementByName("/Subject")
             if subject is not None and subject != []:
                 subjectValue = subject.getValue()
-                if self.hasUtf16Bom(subjectValue):
-                    basicMetadata["subject"] = self.getBomDecodedValue(subjectValue)
-                else:
-                    basicMetadata["subject"] = subjectValue
+                infoValues["subject"] = (
+                    self.getBomDecodedValue(subjectValue)
+                    if self.hasUtf16Bom(subjectValue)
+                    else subjectValue
+                )
             title = infoObject.getElementByName("/Title")
             if title is not None and title != []:
                 titleValue = title.getValue()
-                if self.hasUtf16Bom(titleValue):
-                    basicMetadata["title"] = self.getBomDecodedValue(titleValue)
-                else:
-                    basicMetadata["title"] = titleValue
-        if "author" not in basicMetadata:
-            ids = self.getObjectsByString("<dc:creator>", version)
-            if ids is not None and ids != []:
-                for thisId in ids:
-                    author = self.getMetadataElement(thisId, version, "dc:creator")
-                    if author is not None:
-                        basicMetadata["author"] = author
-                        break
-        if "creator" not in basicMetadata:
-            ids = self.getObjectsByString("<xap:CreatorTool>", version)
-            if ids is not None and ids != []:
-                for thisId in ids:
-                    creator = self.getMetadataElement(
-                        thisId, version, "xap:CreatorTool"
-                    )
-                    if creator is not None:
-                        basicMetadata["creator"] = creator
-                        break
-        if "creator" not in basicMetadata:
-            ids = self.getObjectsByString("<xmp:CreatorTool>", version)
-            if ids is not None and ids != []:
-                for thisId in ids:
-                    creator = self.getMetadataElement(
-                        thisId, version, "xmp:CreatorTool"
-                    )
-                    if creator is not None:
-                        basicMetadata["creator"] = creator
-                        break
-        if "producer" not in basicMetadata:
-            ids = self.getObjectsByString("<pdf:Producer>", version)
-            if ids is not None and ids != []:
-                for thisId in ids:
-                    producer = self.getMetadataElement(thisId, version, "pdf:Producer")
-                    if producer is not None:
-                        basicMetadata["producer"] = producer
-                        break
-        if "creation" not in basicMetadata:
-            ids = self.getObjectsByString("<xap:CreateDate>", version)
-            if ids is not None and ids != []:
-                for thisId in ids:
-                    creation = self.getMetadataElement(
-                        thisId, version, "xap:CreateDate"
-                    )
-                    if creation is not None:
-                        basicMetadata["creation"] = creation
-                        break
-        if "creation" not in basicMetadata:
-            ids = self.getObjectsByString("<xmp:CreateDate>", version)
-            if ids is not None and ids != []:
-                for thisId in ids:
-                    creation = self.getMetadataElement(
-                        thisId, version, "xmp:CreateDate"
-                    )
-                    if creation is not None:
-                        basicMetadata["creation"] = creation
-                        break
-        if "modification" not in basicMetadata:
-            ids = self.getObjectsByString("<xap:ModifyDate>", version)
-            if ids is not None and ids != []:
-                for thisId in ids:
-                    modification = self.getMetadataElement(
-                        thisId, version, "xap:ModifyDate"
-                    )
-                    if modification is not None:
-                        basicMetadata["modification"] = modification
-                        break
-        if "modification" not in basicMetadata:
-            ids = self.getObjectsByString("<xmp:ModifyDate>", version)
-            if ids is not None and ids != []:
-                for thisId in ids:
-                    modification = self.getMetadataElement(
-                        thisId, version, "xmp:ModifyDate"
-                    )
-                    if modification is not None:
-                        basicMetadata["modification"] = modification
-                        break
+                infoValues["title"] = (
+                    self.getBomDecodedValue(titleValue)
+                    if self.hasUtf16Bom(titleValue)
+                    else titleValue
+                )
+        basicMetadata.update(infoValues)
+        xmp = self.getXMPMetadata(version)
+        xmpValues = {
+            "author": xmp.get("creator"),
+            "creator": xmp.get("creatorTool"),
+            "producer": xmp.get("producer"),
+            "creation": xmp.get("createDate"),
+            "modification": xmp.get("modifyDate"),
+            "title": xmp.get("title"),
+        }
+        for field, xmpValue in xmpValues.items():
+            if xmpValue and field not in basicMetadata:
+                basicMetadata[field] = xmpValue
+        # Comparison between /Info and XMP data
+        for field in ("author", "creator", "producer", "title"):
+            infoValue = infoValues.get(field)
+            xmpValue = xmpValues.get(field)
+            if (
+                infoValue
+                and xmpValue
+                and infoValue.strip().lower() != xmpValue.strip().lower()
+            ):
+                basicMetadata.setdefault("discrepancies", {})[field] = {
+                    "info": infoValue,
+                    "xmp": xmpValue,
+                }
+
         return basicMetadata
 
     def getCatalogObject(self, version=None, indirect=False):
@@ -7131,19 +7246,66 @@ class PDFFile:
         matchingObjects = self.getObjectsByString("/Metadata", version)
         return matchingObjects
 
-    def getMetadataElement(self, objectId, version, element):
-        metadataObject = self.getObject(objectId, version)
-        if metadataObject is not None:
-            if metadataObject.getType() == "stream":
-                stream = metadataObject.getStream()
-                matches = re.findall(
-                    r"<" + element + r">(.*)</" + element + r">", stream
-                )
-                if matches != []:
-                    return matches[0]
-                return None
-            return None
-        return None
+    def getXMPMetadata(self, version=None):
+        """Returns the parsed XMP metadata stream for a version, or a list
+        of one per version if version is None.
+        """
+        if version is None:
+            return [self.getXMPMetadata(v) for v in range(self.updates + 1)]
+        result = {
+            "objectId": None,
+            "raw": None,
+            "title": None,
+            "creator": None,
+            "description": None,
+            "subject": [],
+            "creatorTool": None,
+            "createDate": None,
+            "modifyDate": None,
+            "metadataDate": None,
+            "producer": None,
+            "keywords": None,
+            "documentId": None,
+            "instanceId": None,
+            "originalDocumentId": None,
+            "history": [],
+        }
+        catalogId = self.getCatalogObjectId(version)
+        catalog = None
+        if catalogId is not None:
+            for v in range(version, -1, -1):
+                catalog = self.body[v].getObject(catalogId)
+                if catalog is not None:
+                    break
+        if catalog is not None:
+            metadataElement = catalog.getElementByName("/Metadata")
+            if metadataElement not in (None, []):
+                metadataObj = metadataElement
+                metadataObjId = None
+                if metadataElement.getType() == "reference":
+                    metadataObjId = metadataElement.getId()
+                    metadataObj = None
+                    for v in range(version, -1, -1):
+                        metadataObj = self.body[v].getObject(metadataObjId)
+                        if metadataObj is not None:
+                            break
+                if metadataObj is not None and metadataObj.getType() == "stream":
+                    subType = metadataObj.getElementByName("/Type")
+                    if subType not in (None, []) and subType.getValue() == "/Metadata":
+                        # Using getStream() instead of getValue() to filter out the
+                        # unnecessary dictionary part of the content
+                        # (including 'stream' and 'endstream')
+                        # and only focusing on the raw stream data
+                        raw = metadataObj.getStream()
+                        if raw:
+                            result["objectId"] = metadataObjId
+                            result["raw"] = raw
+                            parsed = _parseXMPStream(raw)
+                            if parsed is not None:
+                                for key, value in parsed.items():
+                                    if value:
+                                        result[key] = value
+        return result
 
     def getNumUpdates(self):
         return self.updates
@@ -9479,7 +9641,7 @@ class PDFParser:
                     else:
                         dictContent = ret[1]
                     nonDictContent = content[self.charCounter :]
-                    streamFound = re.findall(r"[>\s]stream", nonDictContent)
+                    streamFound = re.match(r"[>\s]*stream", nonDictContent)
                     if streamFound:
                         ret = self.readUntilSymbol(content, "stream")
                         if ret[0] == -1:

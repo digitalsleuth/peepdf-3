@@ -3300,32 +3300,84 @@ class PDFConsole(cmd.Cmd):
                 self.log_output("metadata " + argv, message)
                 return False
         metadataObjects = self.pdfFile.getMetadata(version)
-        if metadataObjects not in ([], [[]]):
+        if version is not None:
+            metadataObjects = [metadataObjects]
+        foundAnything = False
+        for k, v in enumerate(metadataObjects):
+            objects = v
             if version is not None:
-                metadataObjects = [metadataObjects]
-            for k, v in enumerate(metadataObjects):
-                objects = v
-                if version is not None:
-                    k = version
-                infoObject = self.pdfFile.getInfoObject(k)
-                if infoObject is not None:
-                    value = infoObject.getValue()
-                    output += f"Info Object in version {str(k)}: {newLine * 2}{value}{newLine * 2}"
-                if objects:
-                    for thisId in objects:
-                        obj = self.pdfFile.getObject(thisId, k)
-                        objectType = obj.getType()
-                        if objectType in {"dictionary", "stream"}:
-                            subType = obj.getElementByName("/Type")
-                            if subType != []:
-                                subType = subType.getValue()
-                                if subType == "/Metadata":
-                                    value = obj.getValue()
-                                    if value != "":
-                                        output += (
-                                            f"Object {str(thisId)} in version {str(k)}:"
-                                            f" {newLine * 2}{value}{newLine * 2}"
-                                        )
+                k = version
+            infoObject = self.pdfFile.getInfoObject(k)
+            if infoObject is None and not objects:
+                continue
+            foundAnything = True
+
+            basicMetadata = self.pdfFile.getBasicMetadata(k)
+            xmp = self.pdfFile.getXMPMetadata(k)
+            output += f"Version {k} metadata summary: {newLine * 2}"
+            for key, label in (
+                ("title", "Title"),
+                ("author", "Author"),
+                ("creator", "Creator"),
+                ("producer", "Producer"),
+                ("creation", "Creation date"),
+                ("modification", "Modification date"),
+                ("subject", "Subject"),
+            ):
+                if key in basicMetadata:
+                    output += f"  {label}: {basicMetadata[key]}{newLine}"
+            discrepancies = basicMetadata.get("discrepancies")
+            if discrepancies:
+                output += newLine
+                for field, values in discrepancies.items():
+                    output += (
+                        f"  [!] {field.capitalize()} differs between /Info "
+                        f"('{values['info']}') and XMP ('{values['xmp']}'){newLine}"
+                    )
+            if xmp["documentId"] or xmp["instanceId"] or xmp["originalDocumentId"]:
+                output += newLine
+                if xmp["documentId"]:
+                    output += f"  XMP DocumentID: {xmp['documentId']}{newLine}"
+                if xmp["instanceId"]:
+                    output += f"  XMP InstanceID: {xmp['instanceId']}{newLine}"
+                if xmp["originalDocumentId"]:
+                    output += f"  XMP OriginalDocumentID: {xmp['originalDocumentId']}{newLine}"
+            if xmp["history"]:
+                output += f"{newLine}  XMP edit history:{newLine}"
+                table = PrettyTable(["Action", "When", "Software Agent", "Changed"])
+                table.set_style(TableStyle.SINGLE_BORDER)
+                table.align = "l"
+                for event in xmp["history"]:
+                    table.add_row(
+                        [
+                            event.get("action", ""),
+                            event.get("when", ""),
+                            event.get("softwareAgent", ""),
+                            event.get("changed", ""),
+                        ]
+                    )
+                output += str(table) + newLine
+            output += newLine
+
+            if infoObject is not None:
+                value = infoObject.getValue()
+                output += f"Info Object in version {str(k)}: {newLine * 2}{value}{newLine * 2}"
+            if objects:
+                for thisId in objects:
+                    obj = self.pdfFile.getObject(thisId, k)
+                    objectType = obj.getType()
+                    if objectType in {"dictionary", "stream"}:
+                        subType = obj.getElementByName("/Type")
+                        if subType != []:
+                            subType = subType.getValue()
+                            if subType == "/Metadata":
+                                value = obj.getValue()
+                                if value != "":
+                                    output += (
+                                        f"Object {str(thisId)} in version {str(k)}:"
+                                        f" {newLine * 2}{value}{newLine * 2}"
+                                    )
+        if foundAnything:
             self.log_output("metadata " + argv, output)
         else:
             message = "[!] No metadata found"
