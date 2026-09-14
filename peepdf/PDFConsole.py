@@ -1569,11 +1569,6 @@ class PDFConsole(cmd.Cmd):
             f"By default the DECODED stream is written (filters removed). Use the "
             f"'raw' option to write the stream exactly as stored in the file, "
             f"before decoding.{newLine}"
-            f"For image streams filtered with something like /DCTDecode (JPEG), "
-            f"/JPXDecode (JPEG2000) or /CCITTFaxDecode, the final image "
-            f"compression IS the useful file format - 'raw' gives you the correct "
-            f"openable image there, while the decoded form is just headerless raw "
-            f"pixel data.{newLine}"
         )
 
     def do_filters(self, argv):
@@ -3607,44 +3602,57 @@ class PDFConsole(cmd.Cmd):
 
         if version is not None:
             print(f"\rVersion {version}:")
-        print(f"{newLine}Start (d)\tEnd (d) \tSize (d)\tType and Id\r")
-        print(f'{"-" * 9}\t{"-" * 9}\t{"-" * 9}\t{"-" * 20}\r')
         for k, v in enumerate(offsetsArray):
             offsets = v
-            if k == 0 and "header" in offsets:
+            if version is None:
+                offsetsOutput += f"{newLine}Version {str(k)}: {newLine}"
+            table = PrettyTable(["Start (d)", "End (d)", "Size (d)", "Type and Id"])
+            table.set_style(TableStyle.SINGLE_BORDER)
+            table.align = "l"
+            if "header" in offsets:
                 offset, size = offsets["header"]
-                offsetsOutput += f"{offset:08d}\t{'':8}\t{'':8}\tHeader{newLine}"
-            elif version is None:
-                offsetsOutput += f"{newLine}Version {str(k)}: {newLine * 2}"
+                table.add_row([f"{offset:08d}", "", "", "Header"])
             if "objects" in offsets:
                 compressedObjects = offsets["compressed"]
                 sortedObjectList = sorted(offsets["objects"], key=lambda x: x[1])
                 for thisId, offset, size in sortedObjectList:
-                    if thisId in compressedObjects:
-                        offsetsOutput += (
-                            f"{offset:08d}\t{((offset + size) - 1):08d}\t{size:08d}\t"
-                            f"Compressed Object {thisId} {newLine}"
-                        )
-                    else:
-                        offsetsOutput += (
-                            f"{offset:08d}\t{((offset + size) - 1):08d}\t{size:08d}\t"
-                            f"Object {thisId} {newLine}"
-                        )
+                    label = (
+                        f"Compressed Object {thisId}"
+                        if thisId in compressedObjects
+                        else f"Object {thisId}"
+                    )
+                    table.add_row(
+                        [
+                            f"{offset:08d}",
+                            f"{((offset + size) - 1):08d}",
+                            f"{size:08d}",
+                            label,
+                        ]
+                    )
             if offsets["xref"] is not None:
                 offset, size = offsets["xref"]
-                offsetsOutput += (
-                    f"{offset:08d}\t{((offset + size) -1):08d}\t{size:08d}\t"
-                    f"XrefSection {newLine}"
+                table.add_row(
+                    [
+                        f"{offset:08d}",
+                        f"{((offset + size) - 1):08d}",
+                        f"{size:08d}",
+                        "XrefSection",
+                    ]
                 )
             if offsets["trailer"] is not None:
                 offset, size = offsets["trailer"]
-                offsetsOutput += (
-                    f"{offset:08d}\t{((offset + size) - 1):08d}\t{size:08d}\t"
-                    f"Trailer {newLine}"
+                table.add_row(
+                    [
+                        f"{offset:08d}",
+                        f"{((offset + size) - 1):08d}",
+                        f"{size:08d}",
+                        "Trailer",
+                    ]
                 )
             if offsets["eof"] is not None:
                 offset, size = offsets["eof"]
-                offsetsOutput += f"{offset:08d}\t{'':8}\t{'':8}\tEOF{newLine}"
+                table.add_row([f"{offset:08d}", "", "", "EOF"])
+            offsetsOutput += str(table) + newLine
         self.log_output("offsets " + argv, offsetsOutput)
 
     def help_offsets(self):
@@ -5193,8 +5201,9 @@ class PDFConsole(cmd.Cmd):
                 else:
                     location = f"offset {section.getOffset()}"
                 output += f"{newLine}  {label} ({location}):{newLine}"
-                output += f"  {'Object':<8}\t{'Gen':<5}\tType\tDetails{newLine}"
-                output += f"  {'-' * 8}\t{'-' * 5}\t{'-' * 4}\t{'-' * 30}{newLine}"
+                table = PrettyTable(["Object", "Gen", "Type", "Details"])
+                table.set_style(TableStyle.SINGLE_BORDER)
+                table.align = "l"
                 for subsection in section.getSubsectionsArray():
                     for i, entry in enumerate(subsection.getEntries()):
                         objId = subsection.getObjectId(i)
@@ -5215,7 +5224,8 @@ class PDFConsole(cmd.Cmd):
                                 f"at index {entry.getIndexObject()}"
                             )
                         genDisplay = "-" if gen is None else gen
-                        output += f"  {objId:<8}\t{genDisplay:<5}\t{typeLabel:<4}\t{detail}{newLine}"
+                        table.add_row([objId, genDisplay, typeLabel, detail])
+                output += str(table) + newLine
         if output == "":
             message = "[!] No xref information available"
             self.log_output("xref " + argv, message)
