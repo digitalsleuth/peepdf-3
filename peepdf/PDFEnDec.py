@@ -275,6 +275,11 @@ def codeword(bits):
 class CCITTFax:
     """
     CCITTFax Class
+
+    https://en.wikipedia.org/wiki/Group_4_compression
+    https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf
+    https://www.itu.int/rec/T-REC-T.6-198811-I/en
+    https://www.itu.int/rec/T-REC-T.4/en
     """
 
     EOL = codeword("000000000001")
@@ -523,6 +528,27 @@ class CCITTFax:
         Init
         """
 
+    MODE_DECODE_TABLE = {
+        codeword("1"): "V0",
+        codeword("011"): "VR1",
+        codeword("010"): "VL1",
+        codeword("001"): "H",
+        codeword("0001"): "P",
+        codeword("000011"): "VR2",
+        codeword("000010"): "VL2",
+        codeword("0000011"): "VR3",
+        codeword("0000010"): "VL3",
+    }
+    VERTICAL_MODE_OFFSETS = {
+        "V0": 0,
+        "VR1": 1,
+        "VR2": 2,
+        "VR3": 3,
+        "VL1": -1,
+        "VL2": -2,
+        "VL3": -3,
+    }
+
     def decode(
         self,
         stream,
@@ -536,16 +562,22 @@ class CCITTFax:
         damagedRowsBeforeError=0,
     ):
         """
-        Decode provided value, return the decoded BitWriter data
-        """
-        byteAlign = True
+        Decode provided value, return the decoded BitWriter data.
 
+        k selects the coding scheme, per the CCITTFaxDecode /K parameter:
+        k == 0 is Group 3 (one-dimensional Modified Huffman - T.4 std);
+        k > 0 is Group 3, mixed one- and two-dimensional;
+        k < 0 is Group 4 (T.6 standard), purely two-dimensional.
+        The two-dimensional cases decode each line
+        relative to the changing elements of the line above it
+        (an imaginary all-white line as the reference line).
+        """
         white = int(not blackIs1)
         bitr = BitReader(stream)
         bitw = BitWriter()
         unlimitedRows = rows <= 0
+        refChanges = []  # no changing elements on the imaginary white line
         while not bitr.eod_p and (unlimitedRows or rows > 0):
-            current_color = white
             if byteAlign and bitr.pos % 8 != 0:
                 bitr.pos += 8 - (bitr.pos % 8)
 
@@ -561,29 +593,142 @@ class CCITTFax:
             else:
                 bitr.pos += self.EOL[1]
 
-            line_length = 0
-            while line_length < columns:
-                if current_color == white:
-                    bit_length = self.get_white_bits(bitr)
-                else:
-                    bit_length = self.get_black_bits(bitr)
-                if bit_length is None:
-                    raise Exception(
-                        f"Unfinished line (at bit pos {bitr.pos}/{bitr.size}), {bitw.data}"
+            is1DLine = k == 0
+            if k > 0:
+                # Group 3 mixed
+                is1DLine = bitr.read(1) == 1
+
+            if is1DLine:
+                current_color = white
+                line_length = 0
+                curChanges = []
+                while line_length < columns:
+                    if current_color == white:
+                        bit_length = self.get_white_bits(bitr)
+                    else:
+                        bit_length = self.get_black_bits(bitr)
+                    if bit_length is None:
+                        raise Exception(
+                            f"Unfinished line (at bit pos {bitr.pos}/{bitr.size}), {bitw.data}"
+                        )
+
+                    line_length += bit_length
+                    if line_length > columns:
+                        raise Exception(
+                            f"Line is too long (at bit pos {bitr.pos}/{bitr.size})"
+                        )
+
+                    bitw.write(
+                        (current_color << bit_length) - current_color, bit_length
                     )
+                    curChanges.append(line_length)
+                    current_color ^= 1
+                if k > 0:
+                    # Group 3 mixed
+                    refChanges = curChanges
+            else:
+                curChanges = self._decode2DLine(bitr, refChanges, columns)
+                self._writeRowFromChanges(bitw, curChanges, columns, white)
+                refChanges = curChanges
 
-                line_length += bit_length
-                if line_length > columns:
-                    raise Exception(
-                        f"Line is too long (at bit pos {bitr.pos}/{bitr.size})"
-                    )
-
-                bitw.write((current_color << bit_length) - current_color, bit_length)
-
-                current_color ^= 1
+            # A PDF image's decoded sample data always packs each row into
+            # a whole number of bytes (byte-aligned)
+            bitw.align_to_byte()
 
             rows -= 1
         return bitw.data
+
+    def _decode2DLine(self, bitr, refChanges, columns):
+        """
+        Decodes one two-dimensional-coded line, given the bit reader
+        positioned at its first mode code and the changing elements of the
+        reference line (the line above it, or [] for the first line, which
+        is coded against an "imaginary" all-white reference line).
+
+        @param bitr: BitReader positioned at the start of this line's codes
+        @param refChanges: sorted changing-element positions of the
+            reference line, alternating white-to-black (even index),
+            black-to-white (odd index), starting from an implicit white
+            pixel before pos 0
+        @param columns: width of the line in pixels
+        @return: the changing-element positions of the now-decoded line,
+            in the same alternating method for use as the next line's reference
+        """
+        curChanges = []
+        a0 = -1
+        color = 0  # 0 = white, 1 = black
+        refLen = len(refChanges)
+        refPtr = 0
+
+        while a0 < columns:
+            while refPtr < refLen and refChanges[refPtr] <= a0:
+                refPtr += 1
+            idx = refPtr
+            if idx < refLen and (idx % 2) != color:
+                idx += 1
+            b1 = refChanges[idx] if idx < refLen else columns
+            b2 = refChanges[idx + 1] if idx + 1 < refLen else columns
+
+            mode = None
+            for length in range(1, 8):
+                code = bitr.peek(length)
+                mode = self.MODE_DECODE_TABLE.get((code, length))
+                if mode is not None:
+                    bitr.pos += length
+                    break
+            if mode is None:
+                raise Exception(
+                    f"Invalid 2-D mode code (at bit pos {bitr.pos}/{bitr.size})"
+                )
+
+            if mode == "P":
+                a0 = b2
+            elif mode == "H":
+                effectiveA0 = a0 if a0 >= 0 else 0
+                if color == 0:
+                    run1 = self.get_white_bits(bitr)
+                    run2 = self.get_black_bits(bitr)
+                else:
+                    run1 = self.get_black_bits(bitr)
+                    run2 = self.get_white_bits(bitr)
+                if run1 is None or run2 is None:
+                    raise Exception(
+                        f"Invalid horizontal-mode run (at bit pos {bitr.pos}/{bitr.size})"
+                    )
+                a1 = effectiveA0 + run1
+                a2 = a1 + run2
+                curChanges.append(a1)
+                curChanges.append(a2)
+                a0 = a2
+            else:
+                a1 = b1 + self.VERTICAL_MODE_OFFSETS[mode]
+                curChanges.append(a1)
+                a0 = a1
+                color ^= 1
+        return curChanges
+
+    def _writeRowFromChanges(self, bitw, changes, columns, whiteBitValue):
+        """
+        Writes one decoded line's pixel bits from its changing-element
+        positions (as produced by _decode2DLine), filling any gap up to
+        columns with the colour the last run would continue as.
+        """
+        pos = 0
+        isWhite = True
+        for changePos in changes:
+            changePos = min(changePos, columns)
+            if changePos > pos:
+                length = changePos - pos
+                bitValue = whiteBitValue if isWhite else 1 - whiteBitValue
+                bitw.write((bitValue << length) - bitValue, length)
+                pos = changePos
+            isWhite = not isWhite
+            if pos >= columns:
+                return
+        if pos < columns:
+            length = columns - pos
+            bitValue = whiteBitValue if isWhite else 1 - whiteBitValue
+            bitw.write((bitValue << length) - bitValue, length)
 
     def encode(
         self,
@@ -685,13 +830,20 @@ class CCITTFax:
 
     def get_color_bits(self, bitr, config_words, term_words):
         """
-        Return color bits
+        Return colour bits.
+
+        A run length is coded as zero or more make-up codes (each worth a
+        multiple of 64, up to and including the maximum extended value of
+        2560) followed by exactly one terminating code (0-63).
+        A run can require more than one make-up code even when the last one isn't
+        2560 (e.g.: 2560 + 1728 + 704 + a terminating code - so make-up
+        codes must keep being matched for as long as they're found, and
+        only after none match, then we should look for a terminating code).
         """
         bits = 0
-        check_conf = True
 
-        while check_conf:
-            check_conf = False
+        while True:
+            matched_config = False
 
             for i in range(2, 14):
                 code = bitr.peek(i)
@@ -700,9 +852,11 @@ class CCITTFax:
                 if config_value is not None:
                     bitr.pos += i
                     bits += config_value
-                    if config_value == 2560:
-                        check_conf = True
+                    matched_config = True
                     break
+
+            if matched_config:
+                continue
 
             for i in range(2, 14):
                 code = bitr.peek(i)
@@ -713,6 +867,8 @@ class CCITTFax:
                     bits += term_value
 
                     return bits
+
+            return None
 
         return None
 
