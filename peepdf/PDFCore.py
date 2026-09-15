@@ -7420,7 +7420,7 @@ class PDFFile:
         object carries it.
 
         metadataObjectIds can be passed in as the result of getMetadata(version),
-        to skip re-running that same body-wide search
+        to skip re-running the same body-wide search
         """
         if version is None:
             return [self.getEmbeddedXMPMetadata(v) for v in range(self.updates + 1)]
