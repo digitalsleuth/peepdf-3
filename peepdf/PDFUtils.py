@@ -447,10 +447,12 @@ def unescapeString(string: str):
     @return: Unescaped string
     """
     toUnescapeChars = ["\\", "(", ")"]
+    octalDigits = "01234567"
     unescapedParts = []
     i = 0
-    while i < len(string):
-        if string[i] == "\\" and i != len(string) - 1:
+    stringLen = len(string)
+    while i < stringLen:
+        if string[i] == "\\" and i != stringLen - 1:
             if string[i + 1] in toUnescapeChars:
                 if string[i + 1] == "\\":
                     unescapedParts.append("\\")
@@ -472,6 +474,14 @@ def unescapeString(string: str):
             elif string[i + 1] == "f":
                 i += 1
                 unescapedParts.append("\f")
+            elif string[i + 1] in octalDigits:
+                digits = string[i + 1]
+                j = i + 2
+                while j < stringLen and len(digits) < 3 and string[j] in octalDigits:
+                    digits += string[j]
+                    j += 1
+                unescapedParts.append(chr(int(digits, 8)))
+                i = j - 1
             else:
                 unescapedParts.append(string[i])
         else:
