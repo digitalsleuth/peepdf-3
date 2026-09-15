@@ -680,12 +680,36 @@ class PDFName(PDFObject):
         return (0, "")
 
 
+def _escapeLiteralPDFString(string):
+    """
+    Escape a plain, already-decoded string into safe PDF literal-string
+    syntax.
+    """
+    escapedParts = []
+    for char in string:
+        if char in ("\\", "(", ")"):
+            escapedParts.append("\\" + char)
+        elif char == "\r":
+            escapedParts.append("\\r")
+        elif char == "\n":
+            escapedParts.append("\\n")
+        elif char == "\t":
+            escapedParts.append("\\t")
+        elif char == "\b":
+            escapedParts.append("\\b")
+        elif char == "\f":
+            escapedParts.append("\\f")
+        else:
+            escapedParts.append(char)
+    return "".join(escapedParts)
+
+
 class PDFString(PDFObject):
     """
     String object of a PDF document
     """
 
-    def __init__(self, string):
+    def __init__(self, string, isRawSyntax=True):
         self.objType = "string"
         self.errors = []
         self.compressedIn = None
@@ -700,6 +724,7 @@ class PDFString(PDFObject):
         self.urlsFound = []
         self.references = []
         self.referencesInElements = {}
+        self.isRawSyntax = isRawSyntax
         ret = self.update()
         if ret[0] == -1:
             if isForceMode:
@@ -719,24 +744,16 @@ class PDFString(PDFObject):
         self.JSCode = []
         self.unescapedBytes = []
         self.urlsFound = []
-        self.rawValue = unescapeString(self.rawValue)
-        self.value = self.rawValue
-        try:
-            self.value = re.sub(
-                r"\\([0-7]{1,3})",
-                lambda m: chr(int(m.group(1), 8)),
-                self.value,
-                flags=re.DOTALL,
-            )
-        except:
-            errorMessage = "[!] Error in octal conversion"
-            self.addError(errorMessage)
-            return (-1, errorMessage)
-        if self.value[:2] in ("\xfe\xff", "\xff\xfe"):
-            try:
-                self.value = self.value.encode("latin-1").decode("utf-16")
-            except (UnicodeDecodeError, UnicodeEncodeError):
-                pass
+        if self.isRawSyntax:
+            self.rawValue = unescapeString(self.rawValue)
+            self.value = self.rawValue
+            if self.value[:2] in ("\xfe\xff", "\xff\xfe"):
+                try:
+                    self.value = self.value.encode("latin-1").decode("utf-16")
+                except (UnicodeDecodeError, UnicodeEncodeError):
+                    pass
+        else:
+            self.value = self.rawValue
         if isJavascript(self.value) or self.referencedJSObject:
             self.containsJScode = True
             (
@@ -833,6 +850,8 @@ class PDFString(PDFObject):
         return self.JSCode
 
     def getRawValue(self):
+        if not self.isRawSyntax:
+            return f"({_escapeLiteralPDFString(self.rawValue)})"
         return f"({escapeString(self.rawValue)})"
 
     def getUnescapedBytes(self):
@@ -7144,6 +7163,90 @@ class PDFFile:
                 )
         return changes
 
+    def getObjectDiff(self, objId, versionA, versionB):
+        """
+        Compares one object's definition between two document revisions.
+        For dictionaries and streams, keys are compared individually.
+        Everything else is compared as a single unit under changedKeys["(value)"].
+
+        @return: dict 'result' (see below)
+        """
+        result = {
+            "status": None,
+            "typeA": None,
+            "typeB": None,
+            "addedKeys": {},
+            "removedKeys": {},
+            "changedKeys": {},
+            "streamChanged": None,
+            "streamSizeA": None,
+            "streamSizeB": None,
+        }
+        objA = self.getObjectAtVersion(objId, versionA)
+        objB = self.getObjectAtVersion(objId, versionB)
+
+        if objA is None and objB is None:
+            result["status"] = "not_found"
+            return result
+        if objA is None:
+            result["status"] = "added"
+            result["typeB"] = objB.getType()
+            return result
+        if objB is None:
+            result["status"] = "removed"
+            result["typeA"] = objA.getType()
+            return result
+
+        typeA = objA.getType()
+        typeB = objB.getType()
+        result["typeA"] = typeA
+        result["typeB"] = typeB
+
+        if typeA != typeB:
+            result["status"] = "type_changed"
+            return result
+
+        if typeA in ("dictionary", "stream"):
+            elementsA = objA.getElements() or {}
+            elementsB = objB.getElements() or {}
+            for key, valueB in elementsB.items():
+                if key not in elementsA:
+                    result["addedKeys"][key] = (
+                        valueB.getValue() if valueB is not None else None
+                    )
+            for key, valueA in elementsA.items():
+                if key not in elementsB:
+                    result["removedKeys"][key] = (
+                        valueA.getValue() if valueA is not None else None
+                    )
+                else:
+                    valueB = elementsB[key]
+                    valA = valueA.getValue() if valueA is not None else None
+                    valB = valueB.getValue() if valueB is not None else None
+                    if valA != valB:
+                        result["changedKeys"][key] = (valA, valB)
+
+            if typeA == "stream":
+                streamA = objA.getStream()
+                streamB = objB.getStream()
+                result["streamSizeA"] = len(streamA) if streamA else 0
+                result["streamSizeB"] = len(streamB) if streamB else 0
+                result["streamChanged"] = streamA != streamB
+        else:
+            valA = objA.getValue()
+            valB = objB.getValue()
+            if valA != valB:
+                result["changedKeys"]["(value)"] = (valA, valB)
+
+        hasChanges = bool(
+            result["addedKeys"]
+            or result["removedKeys"]
+            or result["changedKeys"]
+            or result["streamChanged"]
+        )
+        result["status"] = "modified" if hasChanges else "unchanged"
+        return result
+
     def getDetectionRate(self):
         return self.detectionRate
 
@@ -7244,7 +7347,11 @@ class PDFFile:
 
     def getMetadata(self, version=None):
         matchingObjects = self.getObjectsByString("/Metadata", version)
-        return matchingObjects
+        if matchingObjects is None:
+            return matchingObjects
+        if version is None:
+            return [sorted(objs) for objs in matchingObjects]
+        return sorted(matchingObjects)
 
     def getXMPMetadata(self, version=None):
         """Returns the parsed XMP metadata stream for a version, or a list
@@ -7271,12 +7378,11 @@ class PDFFile:
             "history": [],
         }
         catalogId = self.getCatalogObjectId(version)
-        catalog = None
-        if catalogId is not None:
-            for v in range(version, -1, -1):
-                catalog = self.body[v].getObject(catalogId)
-                if catalog is not None:
-                    break
+        catalog = (
+            self.getObjectAtVersion(catalogId, version)
+            if catalogId is not None
+            else None
+        )
         if catalog is not None:
             metadataElement = catalog.getElementByName("/Metadata")
             if metadataElement not in (None, []):
@@ -7284,11 +7390,7 @@ class PDFFile:
                 metadataObjId = None
                 if metadataElement.getType() == "reference":
                     metadataObjId = metadataElement.getId()
-                    metadataObj = None
-                    for v in range(version, -1, -1):
-                        metadataObj = self.body[v].getObject(metadataObjId)
-                        if metadataObj is not None:
-                            break
+                    metadataObj = self.getObjectAtVersion(metadataObjId, version)
                 if metadataObj is not None and metadataObj.getType() == "stream":
                     subType = metadataObj.getElementByName("/Type")
                     if subType not in (None, []) and subType.getValue() == "/Metadata":
@@ -7306,6 +7408,102 @@ class PDFFile:
                                     if value:
                                         result[key] = value
         return result
+
+    def getEmbeddedXMPMetadata(self, version=None, metadataObjectIds=None):
+        """Parses every /Metadata stream in the document other than the
+        document's own (the one resolved via /Root/Metadata and returned
+        by getXMPMetadata()).
+
+        Returns a list of dicts (or a list of those lists, one per
+        version, if version is None), each the same shape as one
+        getXMPMetadata() result plus an "objectId" key identifying which
+        object carries it.
+
+        metadataObjectIds can be passed in as the result of getMetadata(version),
+        to skip re-running the same body-wide search
+        """
+        if version is None:
+            return [self.getEmbeddedXMPMetadata(v) for v in range(self.updates + 1)]
+        documentMetadataObjId = self.getXMPMetadata(version)["objectId"]
+        if metadataObjectIds is None:
+            metadataObjectIds = self.getMetadata(version)
+        results = []
+        for thisId in metadataObjectIds or []:
+            if thisId == documentMetadataObjId:
+                continue
+            obj = self.getObject(thisId, version)
+            if obj is None or obj.getType() != "stream":
+                continue
+            subType = obj.getElementByName("/Type")
+            if subType in (None, []) or subType.getValue() != "/Metadata":
+                continue
+            raw = obj.getStream()
+            if not raw:
+                continue
+            parsed = _parseXMPStream(raw)
+            if parsed is None:
+                continue
+            entry = dict(parsed)
+            entry["objectId"] = thisId
+            results.append(entry)
+        return results
+
+    def getPieceInfo(self):
+        """
+        Finds every /PieceInfo entry in the document and extracts each
+        application's own DocumentID/OriginalDocumentID/LastModified.
+
+        Returns a list of dicts, one per (object, application) pair
+        found, sorted by object id then application name:
+            {
+                "objectId": <id of the object carrying /PieceInfo>,
+                "application": "InDesign" (the /PieceInfo sub-key,
+                                without the leading "/"),
+                "documentId": str or None,
+                "originalDocumentId": str or None,
+                "lastModified": str or None,
+            }
+        """
+        results = []
+        seenObjectIds = set()
+        for v in range(self.updates + 1):
+            for objId in self.body[v].getObjectsIds():
+                if objId in seenObjectIds:
+                    continue
+                seenObjectIds.add(objId)
+                obj = self.getObject(objId)
+                if obj is None or obj.getType() not in ("dictionary", "stream"):
+                    continue
+                pieceInfoElement = obj.getElementByName("/PieceInfo")
+                if pieceInfoElement in (None, []):
+                    continue
+                pieceInfo = pieceInfoElement
+                if pieceInfoElement.getType() == "reference":
+                    pieceInfo = self.getObject(pieceInfoElement.getId())
+                if pieceInfo is None or pieceInfo.getType() != "dictionary":
+                    continue
+                for appKey, appValue in (pieceInfo.getElements() or {}).items():
+                    appDict = appValue
+                    if appValue is not None and appValue.getType() == "reference":
+                        appDict = self.getObject(appValue.getId())
+                    if appDict is None or appDict.getType() != "dictionary":
+                        continue
+
+                    def appFieldValue(name, appDict=appDict):
+                        element = appDict.getElementByName(name)
+                        return element.getValue() if element not in (None, []) else None
+
+                    results.append(
+                        {
+                            "objectId": objId,
+                            "application": appKey.lstrip("/"),
+                            "documentId": appFieldValue("/DocumentID"),
+                            "originalDocumentId": appFieldValue("/OriginalDocumentID"),
+                            "lastModified": appFieldValue("/LastModified"),
+                        }
+                    )
+        results.sort(key=lambda entry: (entry["objectId"], entry["application"]))
+        return results
 
     def getNumUpdates(self):
         return self.updates
@@ -7329,6 +7527,15 @@ class PDFFile:
         if indirect:
             return self.body[version].getIndirectObject(thisId)
         return self.body[version].getObject(thisId)
+
+    def getObjectAtVersion(self, thisId, version):
+        if version is None or version > self.updates or version < 0:
+            return None
+        for v in range(version, -1, -1):
+            obj = self.body[v].getObject(thisId)
+            if obj is not None:
+                return obj
+        return None
 
     def getObjectsByString(self, toSearch, version=None):
         """Returns the object containing the specified string."""

@@ -321,13 +321,20 @@ class PDFConsole(cmd.Cmd):
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("changelog " + argv, message)
             return False
-        if len(args) == 0:
-            version = None
-        elif len(args) == 1:
-            version = args[0]
-        else:
+        if len(args) > 2:
             self.help_changelog()
             return False
+        detailed = False
+        versionArgs = []
+        for arg in args:
+            if arg.lower() == "detailed":
+                detailed = True
+            else:
+                versionArgs.append(arg)
+        if len(versionArgs) > 1:
+            self.help_changelog()
+            return False
+        version = versionArgs[0] if versionArgs else None
         if version is not None and not version.isdigit():
             self.help_changelog()
             return False
@@ -352,6 +359,11 @@ class PDFConsole(cmd.Cmd):
             output += f'\tCreation date: {data["creation"]}{newLine}'
         if output != "":
             output += f"{newLine}"
+        if not detailed:
+            output += (
+                f'(Run "changelog detailed" for a key-by-key diff of each '
+                f"modified object.){newLine}{newLine}"
+            )
 
         # Getting changes for versions
         changes = self.pdfFile.getChangeLog(version)
@@ -395,7 +407,20 @@ class PDFConsole(cmd.Cmd):
             if addedObjects != []:
                 output += f"\tAdded objects: {str(addedObjects)}{newLine}"
             if modifiedObjects != []:
-                output += f"\tModified objects: {str(modifiedObjects)}{newLine}"
+                output += (
+                    f"\tModified objects ({len(modifiedObjects)}, version "
+                    f"{k - 1} -> {k}): {str(modifiedObjects)}{newLine}"
+                )
+                if detailed:
+                    output += newLine
+                    for objId in modifiedObjects:
+                        diff = self.pdfFile.getObjectDiff(objId, k - 1, k)
+                        diffLines = self._formatObjectDiff(diff)
+                        if diffLines:
+                            output += f"Object {objId}:{newLine}"
+                            for diffLine in diffLines:
+                                output += self._formatIndentedDiffLine(diffLine)
+                            output += newLine
             if removedObjects != []:
                 output += f"\tRemoved objects: {str(removedObjects)}{newLine}"
             if notMatchingObjects != []:
@@ -442,7 +467,7 @@ class PDFConsole(cmd.Cmd):
         self.log_output("changelog " + argv, output)
 
     def help_changelog(self):
-        print(f"{newLine}Usage: changelog [$version]")
+        print(f"{newLine}Usage: changelog [$version] [detailed]")
         print(
             f"{newLine}Shows the changelog of the document or version of the document. "
             f"Every version is checked for objects present in the body but not declared "
@@ -451,6 +476,68 @@ class PDFConsole(cmd.Cmd):
             "actually present, and for body object or stream counts that don't match "
             f"the actual object / stream data. {newLine}"
         )
+
+    @staticmethod
+    def _formatObjectDiff(diff, maxValueLen=100, context=20):
+        """
+        Used for do_changelog, turns a PDFFile.getObjectDiff() result into
+        diff lines (+,-, ~ old --> new), truncating long values to avoid overtaxing.
+        """
+
+        def trunc(value):
+            text = str(value)
+            return text if len(text) <= maxValueLen else text[: maxValueLen - 3] + "..."
+
+        def truncPair(valueA, valueB):
+            textA, textB = str(valueA), str(valueB)
+            if len(textA) <= maxValueLen and len(textB) <= maxValueLen:
+                return textA, textB
+            minLen = min(len(textA), len(textB))
+            prefixLen = 0
+            while prefixLen < minLen and textA[prefixLen] == textB[prefixLen]:
+                prefixLen += 1
+            maxSuffixLen = minLen - prefixLen
+            suffixLen = 0
+            while (
+                suffixLen < maxSuffixLen
+                and textA[len(textA) - 1 - suffixLen]
+                == textB[len(textB) - 1 - suffixLen]
+            ):
+                suffixLen += 1
+
+            def window(text):
+                start = max(0, prefixLen - context)
+                end = max(start, len(text) - suffixLen)
+                snippet = text[start:end]
+                if len(snippet) > maxValueLen:
+                    snippet = snippet[:maxValueLen] + "..."
+                leading = "..." if start > 0 else ""
+                trailing = "..." if end < len(text) else ""
+                return f"{leading}{snippet}{trailing}"
+
+            return window(textA), window(textB)
+
+        lines = []
+        for key, value in diff["addedKeys"].items():
+            lines.append(f"+ {key}: {trunc(value)}")
+        for key, value in diff["removedKeys"].items():
+            lines.append(f"- {key}: {trunc(value)}")
+        for key, (before, after) in diff["changedKeys"].items():
+            beforeText, afterText = truncPair(before, after)
+            lines.append(f"~ {key}: {beforeText} -> {afterText}")
+        if diff["streamChanged"]:
+            lines.append(
+                f"Stream changed: {diff['streamSizeA']} -> {diff['streamSizeB']} bytes"
+            )
+        return lines
+
+    @staticmethod
+    def _formatIndentedDiffLine(diffLine):
+        physicalLines = re.split(r"\r\n|\r|\n", diffLine)
+        result = f"    {physicalLines[0]}{newLine}"
+        for continuation in physicalLines[1:]:
+            result += f"        {continuation}{newLine}"
+        return result
 
     def do_clear(self, argv):
         clearScreen()
@@ -878,7 +965,7 @@ class PDFConsole(cmd.Cmd):
         fileSpecDict = PDFDictionary(
             elements={
                 "/Type": PDFName("Filespec"),
-                "/F": PDFString(fileName),
+                "/F": PDFString(fileName, isRawSyntax=False),
                 "/EF": embeddedListDict,
             }
         )
@@ -3283,13 +3370,20 @@ class PDFConsole(cmd.Cmd):
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("metadata " + argv, message)
             return False
-        if len(args) == 0:
-            version = None
-        elif len(args) == 1:
-            version = args[0]
-        else:
+        if len(args) > 2:
             self.help_metadata()
             return False
+        detailed = False
+        versionArgs = []
+        for arg in args:
+            if arg.lower() == "detailed":
+                detailed = True
+            else:
+                versionArgs.append(arg)
+        if len(versionArgs) > 1:
+            self.help_metadata()
+            return False
+        version = versionArgs[0] if versionArgs else None
         if version is not None and not version.isdigit():
             self.help_metadata()
             return False
@@ -3299,6 +3393,11 @@ class PDFConsole(cmd.Cmd):
                 message = "[!] Error: The version number is not valid"
                 self.log_output("metadata " + argv, message)
                 return False
+        if not detailed:
+            output += (
+                f'(Run "metadata detailed" to also see the raw /Info dictionary '
+                f"and XMP stream contents.){newLine * 2}"
+            )
         metadataObjects = self.pdfFile.getMetadata(version)
         if version is not None:
             metadataObjects = [metadataObjects]
@@ -3357,26 +3456,86 @@ class PDFConsole(cmd.Cmd):
                         ]
                     )
                 output += str(table) + newLine
+
+            embeddedXmp = self.pdfFile.getEmbeddedXMPMetadata(k, objects)
+            if embeddedXmp:
+                output += f"{newLine}  Embedded resource metadata:{newLine}"
+                for entry in embeddedXmp:
+                    output += f"    Object {entry['objectId']}:{newLine}"
+                    for key, label in (
+                        ("title", "Title"),
+                        ("creator", "Creator"),
+                        ("creatorTool", "Creator tool"),
+                        ("producer", "Producer"),
+                        ("createDate", "Creation date"),
+                        ("modifyDate", "Modification date"),
+                        ("documentId", "DocumentID"),
+                        ("instanceId", "InstanceID"),
+                        ("originalDocumentId", "OriginalDocumentID"),
+                    ):
+                        if entry.get(key):
+                            output += f"      {label}: {entry[key]}{newLine}"
             output += newLine
 
-            if infoObject is not None:
-                value = infoObject.getValue()
-                output += f"Info Object in version {str(k)}: {newLine * 2}{value}{newLine * 2}"
-            if objects:
-                for thisId in objects:
-                    obj = self.pdfFile.getObject(thisId, k)
-                    objectType = obj.getType()
-                    if objectType in {"dictionary", "stream"}:
-                        subType = obj.getElementByName("/Type")
-                        if subType != []:
-                            subType = subType.getValue()
-                            if subType == "/Metadata":
-                                value = obj.getValue()
-                                if value != "":
-                                    output += (
-                                        f"Object {str(thisId)} in version {str(k)}:"
-                                        f" {newLine * 2}{value}{newLine * 2}"
-                                    )
+            if detailed:
+                if infoObject is not None:
+                    value = infoObject.getValue()
+                    output += f"Info Object in version {str(k)}: {newLine * 2}{value}{newLine * 2}"
+                if objects:
+                    for thisId in objects:
+                        obj = self.pdfFile.getObject(thisId, k)
+                        objectType = obj.getType()
+                        if objectType in {"dictionary", "stream"}:
+                            subType = obj.getElementByName("/Type")
+                            if subType != []:
+                                subType = subType.getValue()
+                                if subType == "/Metadata":
+                                    value = obj.getValue()
+                                    if value != "":
+                                        output += (
+                                            f"Object {str(thisId)} in version {str(k)}:"
+                                            f" {newLine * 2}{value}{newLine * 2}"
+                                        )
+        pieceInfoEntries = self.pdfFile.getPieceInfo()
+        if pieceInfoEntries:
+            foundAnything = True
+            output += f"PieceInfo (private application metadata): {newLine * 2}"
+            table = PrettyTable(
+                [
+                    "Object",
+                    "Application",
+                    "DocumentID",
+                    "OriginalDocumentID",
+                    "LastModified",
+                ]
+            )
+            table.set_style(TableStyle.SINGLE_BORDER)
+            table.align = "l"
+            for entry in pieceInfoEntries:
+                table.add_row(
+                    [
+                        entry["objectId"],
+                        entry["application"],
+                        entry["documentId"] or "-",
+                        entry["originalDocumentId"] or "-",
+                        entry["lastModified"] or "-",
+                    ]
+                )
+            output += str(table) + newLine
+            findings = self._detectPieceInfoInconsistencies(pieceInfoEntries)
+            if findings:
+                output += newLine
+                for application, field, distinctCount, objIds in findings:
+                    fieldLabel = (
+                        "DocumentID" if field == "documentId" else "OriginalDocumentID"
+                    )
+                    output += (
+                        f"  [!] {application}: {distinctCount} different {fieldLabel} "
+                        f"values across objects {objIds} - possible mixed-source "
+                        f"content{newLine}"
+                    )
+            output += newLine
+
         if foundAnything:
             self.log_output("metadata " + argv, output)
         else:
@@ -3385,9 +3544,11 @@ class PDFConsole(cmd.Cmd):
             return False
 
     def help_metadata(self):
-        print(f"{newLine}Usage: metadata [$version]")
+        print(f"{newLine}Usage: metadata [$version] [detailed]")
         print(
-            f"Shows the metadata of the document or version of the document {newLine}"
+            "Shows the metadata of the document or version of the document, including "
+            "any /PieceInfo found anywhere in the document - see 'pieceinfo' to view just "
+            f"that on its own, per version.{newLine}"
         )
 
     def do_modify(self, argv):
@@ -3770,6 +3931,92 @@ class PDFConsole(cmd.Cmd):
         print("Options:")
         print("\t-f: Sets force parsing mode to ignore errors")
         print(f"\t-l: Sets loose parsing mode for problematic files {newLine}")
+
+    def do_pieceinfo(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("pieceinfo " + argv, message)
+            return False
+        args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("pieceinfo " + argv, message)
+            return False
+        if len(args) != 0:
+            self.help_pieceinfo()
+            return False
+        entries = self.pdfFile.getPieceInfo()
+        if not entries:
+            message = "[!] No /PieceInfo data found"
+            self.log_output("pieceinfo " + argv, message)
+            return False
+
+        table = PrettyTable(
+            [
+                "Object",
+                "Application",
+                "DocumentID",
+                "OriginalDocumentID",
+                "LastModified",
+            ]
+        )
+        table.set_style(TableStyle.SINGLE_BORDER)
+        table.align = "l"
+        for entry in entries:
+            table.add_row(
+                [
+                    entry["objectId"],
+                    entry["application"],
+                    entry["documentId"] or "-",
+                    entry["originalDocumentId"] or "-",
+                    entry["lastModified"] or "-",
+                ]
+            )
+        output = str(table) + newLine
+
+        findings = self._detectPieceInfoInconsistencies(entries)
+        if findings:
+            output += f"{newLine}Inconsistencies detected:{newLine}"
+            for application, field, distinctCount, objIds in findings:
+                fieldLabel = (
+                    "DocumentID" if field == "documentId" else "OriginalDocumentID"
+                )
+                output += (
+                    f"  [!] {application}: {distinctCount} different {fieldLabel} "
+                    f"values across objects {objIds} - possible mixed-source content"
+                    f"{newLine}"
+                )
+
+        self.log_output("pieceinfo " + argv, output)
+
+    @staticmethod
+    def _detectPieceInfoInconsistencies(entries):
+        """
+        Groups PieceInfo entries by application and flags anywhere
+        more than one distinct DocumentID/OriginalDocumentID appears
+
+        Returns a list of (application, field, distinctCount, objectIds)
+        tuples, one per inconsistency found; field is "documentId" or
+        "originalDocumentId".
+        """
+        byApplication = {}
+        for entry in entries:
+            byApplication.setdefault(entry["application"], []).append(entry)
+        findings = []
+        for application, appEntries in byApplication.items():
+            for field in ("documentId", "originalDocumentId"):
+                values = {e[field] for e in appEntries if e[field]}
+                if len(values) > 1:
+                    objIds = [e["objectId"] for e in appEntries]
+                    findings.append((application, field, len(values), objIds))
+        return findings
+
+    def help_pieceinfo(self):
+        print(f"{newLine}Usage: pieceinfo")
+        print(
+            f"{newLine}Shows every /PieceInfo entry found in the document, carrying their own "
+            "metadata such as DocumentID/OriginalDocumentID/LastModified. {newLine}"
+        )
 
     def do_quit(self, argv):
         return True
