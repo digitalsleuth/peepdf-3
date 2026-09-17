@@ -46,6 +46,14 @@ try:
             """Sets how the JS code will be evaluated"""
             self.evalCode += f"\n\n// New evaluated code\n{expression}"
 
+        def resetEvalCode(self):
+            """
+            Clears accumulated evalCode ahead of a fresh round of
+            evaluation. This is a method call ('context.eval(
+            "resetEvalCode()")'), not a property assignment.
+            """
+            self.evalCode = ""
+
     JS_MODULE = True
 
 except ModuleNotFoundError:
@@ -110,6 +118,8 @@ def analyseJS(
             # context.eval(preDefinedCode)
             while True:
                 try:
+                    # Clear whatever accumulated in evalCode before this round
+                    context.eval("resetEvalCode()")
                     context.eval(code)
                     evalCode = context.eval("evalCode")
                     evalCode = jsbeautifier.beautify(evalCode)

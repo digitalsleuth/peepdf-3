@@ -194,14 +194,14 @@ class PDFObject:
         rawValue = str(self.rawValue)
         encValue = str(self.encryptedValue)
         if (
-            re.findall(pattern, value, re.IGNORECASE) != []
-            or re.findall(pattern, rawValue, re.IGNORECASE) != []
-            or re.findall(pattern, encValue, re.IGNORECASE) != []
+            re.search(pattern, value, re.IGNORECASE) is not None
+            or re.search(pattern, rawValue, re.IGNORECASE) is not None
+            or re.search(pattern, encValue, re.IGNORECASE) is not None
         ):
             return True
         if self.containsJS():
             for js in self.JSCode:
-                if re.findall(pattern, js, re.IGNORECASE) != []:
+                if re.search(pattern, js, re.IGNORECASE) is not None:
                     return True
         return False
 
@@ -1966,8 +1966,14 @@ class PDFStream(PDFDictionary):
                 if length.getType() == "integer":
                     self.size = length.getRawValue()
                 elif length.getType() == "reference":
-                    self.updateNeeded = True
-                    self.referencesInElements["/Length"] = [length.getId(), ""]
+                    alreadyResolved = (
+                        "/Length" in self.referencesInElements
+                        and self.referencesInElements["/Length"][0] == length.getId()
+                        and self.referencesInElements["/Length"][1] != ""
+                    )
+                    if not alreadyResolved:
+                        self.updateNeeded = True
+                        self.referencesInElements["/Length"] = [length.getId(), ""]
                 elif isForceMode:
                     self.addError("No permitted type for /Length element")
                 else:
@@ -2467,17 +2473,17 @@ class PDFStream(PDFDictionary):
         encStream = str(self.encodedStream)
         decStream = str(self.decodedStream)
         if (
-            re.findall(pattern, value, re.IGNORECASE) != []
-            or re.findall(pattern, rawValue, re.IGNORECASE) != []
-            or re.findall(pattern, encValue, re.IGNORECASE) != []
-            or re.findall(pattern, rawStream, re.IGNORECASE) != []
-            or re.findall(pattern, encStream, re.IGNORECASE) != []
-            or re.findall(pattern, decStream, re.IGNORECASE) != []
+            re.search(pattern, value, re.IGNORECASE) is not None
+            or re.search(pattern, rawValue, re.IGNORECASE) is not None
+            or re.search(pattern, encValue, re.IGNORECASE) is not None
+            or re.search(pattern, rawStream, re.IGNORECASE) is not None
+            or re.search(pattern, encStream, re.IGNORECASE) is not None
+            or re.search(pattern, decStream, re.IGNORECASE) is not None
         ):
             return True
         if self.containsJS():
             for js in self.JSCode:
-                if re.findall(pattern, js, re.IGNORECASE) != []:
+                if re.search(pattern, js, re.IGNORECASE) is not None:
                     return True
         return False
 
@@ -3298,8 +3304,14 @@ class PDFObjectStream(PDFStream):
                 if length.getType() == "integer":
                     self.size = length.getRawValue()
                 elif length.getType() == "reference":
-                    self.updateNeeded = True
-                    self.referencesInElements["/Length"] = [length.getId(), ""]
+                    alreadyResolved = (
+                        "/Length" in self.referencesInElements
+                        and self.referencesInElements["/Length"][0] == length.getId()
+                        and self.referencesInElements["/Length"][1] != ""
+                    )
+                    if not alreadyResolved:
+                        self.updateNeeded = True
+                        self.referencesInElements["/Length"] = [length.getId(), ""]
                 elif isForceMode:
                     self.addError("No permitted type for /Length element")
                 else:
@@ -4272,9 +4284,8 @@ class PDFCrossRefSubSection:
         return ids
 
     def getIndex(self, objectId):
-        objectIds = list(range(self.firstObject, self.firstObject + self.numObjects))
-        if objectId in objectIds:
-            return objectIds.index(objectId)
+        if self.firstObject <= objectId < self.firstObject + self.numObjects:
+            return objectId - self.firstObject
         return None
 
     def getNextFree(self, numEntry):
@@ -4635,7 +4646,7 @@ class PDFBody:
 
     def encodeChars(self):
         errorMessage = ""
-        for thisId in self.objects:
+        for thisId in list(self.objects):
             indirectObject = self.objects[thisId]
             if indirectObject is not None:
                 obj = indirectObject.getObject()
@@ -4714,6 +4725,9 @@ class PDFBody:
 
     def getNumURIs(self):
         return len(self.uriList)
+
+    def getNumObjectsWithJS(self):
+        return len(self.containingJS)
 
     def getObject(self, thisId, indirect=False):
         if thisId in self.objects:
@@ -5681,9 +5695,11 @@ class PDFFile:
         self.numObjects = 0
         self.numStreams = 0
         self.numURIs = 0
+        self.numObjectsWithJS = 0
         self.numEncodedStreams = 0
         self.numDecodingErrors = 0
         self.maxObjectId = 0
+        self._glyphFontCache = {}
 
     def addBody(self, newBody):
         if newBody is not None and isinstance(newBody, PDFBody):
@@ -5727,6 +5743,9 @@ class PDFFile:
 
     def addNumURIs(self, num):
         self.numURIs += num
+
+    def addNumObjectsWithJS(self, num):
+        self.numObjectsWithJS += num
 
     def addTrailer(self, newTrailerArray):
         if (
@@ -7557,7 +7576,7 @@ class PDFFile:
         """
         matchedObjects = []
         versions = range(self.updates + 1) if version is None else [version]
-        fontCache = {}
+        fontCache = self._glyphFontCache
         pattern = re.escape(toSearch)
         for v in versions:
             versionMatches = []
@@ -7699,11 +7718,11 @@ class PDFFile:
                         if obj is not None:
                             value = obj.getValue()
                             if (
-                                re.findall(
+                                re.search(
                                     r"\D" + str(thisId) + r"\s{1,3}\d{1,3}\s{1,3}R",
                                     value,
                                 )
-                                != []
+                                is not None
                             ):
                                 matchedObjects.append(indirectObject.thisId)
         elif version > self.updates or version < 0:
@@ -7716,10 +7735,10 @@ class PDFFile:
                     if obj is not None:
                         value = obj.getValue()
                         if (
-                            re.findall(
+                            re.search(
                                 r"\D" + str(thisId) + r"\s{1,3}\d{1,3}\s{1,3}R", value
                             )
-                            != []
+                            is not None
                         ):
                             matchedObjects.append(indirectObject.thisId)
         return sorted(matchedObjects)
@@ -7751,6 +7770,7 @@ class PDFFile:
             "Objects": str(self.numObjects),
             "Streams": str(self.numStreams),
             "URIs": str(self.numURIs),
+            "Objects with JS": str(self.numObjectsWithJS),
             "Comments": str(len(self.comments)),
             "Errors": self.errors,
             "Versions": [],
@@ -8419,6 +8439,7 @@ class PDFFile:
         errorMessage = ""
         if obj is None:
             return (-1, "Object is None")
+        self._glyphFontCache = {}
         if version is None:
             for i in range(self.updates, -1, -1):
                 ret = self.body[i].setObject(thisId, obj, modification=mod)
@@ -8500,6 +8521,7 @@ class PDFFile:
             self.addNumEncodedStreams(self.body[v].getNumEncodedStreams())
             self.addNumDecodingErrors(self.body[v].getNumDecodingErrors())
             self.addNumURIs(self.body[v].getNumURIs())
+            self.addNumObjectsWithJS(self.body[v].getNumObjectsWithJS())
             trailer, streamTrailer = self.trailer[v]
             if trailer is not None:
                 if trailer.getDictEntry("/Encrypt") is not None:
@@ -8622,16 +8644,19 @@ class PDFFile:
                 thisId for thisId in xrefNewObjects if thisId not in presentAnywhere
             ]
         else:
+            xrefNewObjectsSet = set(xrefNewObjects)
+            actualObjectsSet = set(actualObjects)
             hiddenObjects = [
-                thisId for thisId in actualObjects if thisId not in xrefNewObjects
+                thisId for thisId in actualObjects if thisId not in xrefNewObjectsSet
             ]
             missingObjects = [
-                thisId for thisId in xrefNewObjects if thisId not in actualObjects
+                thisId for thisId in xrefNewObjects if thisId not in actualObjectsSet
             ]
         offsetMismatches = []
         checkedCount = 0
+        hiddenObjectsSet = set(hiddenObjects)
         for thisId in actualObjects:
-            if thisId in hiddenObjects:
+            if thisId in hiddenObjectsSet:
                 continue
             entry = None
             if crossRefSection is not None:
@@ -8989,6 +9014,7 @@ class PDFParser:
             pdfFile.addNumObjects(body.getNumObjects())
             pdfFile.addNumStreams(body.getNumStreams())
             pdfFile.addNumURIs(body.getNumURIs())
+            pdfFile.addNumObjectsWithJS(body.getNumObjectsWithJS())
             pdfFile.addNumEncodedStreams(body.getNumEncodedStreams())
             pdfFile.addNumDecodingErrors(body.getNumDecodingErrors())
             isFirstBody = False
