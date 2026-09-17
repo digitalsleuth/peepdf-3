@@ -852,7 +852,7 @@ def getPeepCaseReport(
     full=False,
 ):
     """
-    Consolidated case-report export: metadata (Info/XMP), changelog, 
+    Consolidated case-report export: metadata (Info/XMP), changelog,
     JS findings, a digital-signature placeholder (not yet supported), and provenance.
     Returns a JSON string.
     """

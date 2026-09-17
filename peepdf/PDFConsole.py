@@ -2933,7 +2933,7 @@ class PDFConsole(cmd.Cmd):
         context.enter()
         # Hooking the eval function
         context.eval("eval=evalOverride")
-        # Without clearing previous context first this call would report stale output 
+        # Without clearing previous context first this call would report stale output
         # left over from a previous, unrelated js_eval invocation.
         context.eval("resetEvalCode()")
         try:
@@ -3669,9 +3669,7 @@ class PDFConsole(cmd.Cmd):
         else:
             self.help_modify()
             return False
-        if not thisId.isdigit() or (
-            version is not None and not version.isdigit()
-        ):
+        if not thisId.isdigit() or (version is not None and not version.isdigit()):
             self.help_modify()
             return False
         if version is not None:
