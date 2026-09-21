@@ -10514,13 +10514,13 @@ class PDFParser:
     @staticmethod
     def isBackslashEscaped(content, position):
         """
-        Checks whether the character at `position` is escaped by a
+        Checks whether the character at 'position' is escaped by a
         backslash. A single backslash immediately before it is a real
         escape. Only an odd number of them leaves the last one "live"
         to escape what follows.
         @param content: The string being scanned
         @param position: Index of the character to check
-        @return: A boolean, True if `position` is escaped
+        @return: A boolean, True if 'position' is escaped
         """
         count = 0
         i = position - 1

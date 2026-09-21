@@ -141,7 +141,7 @@ FILE_WRITE = 1
 FILE_ADD = 2
 VAR_WRITE = 3
 VAR_ADD = 4
-# `ocr` warns (and asks, when interactive) above this many pages
+# 'ocr' warns (and asks, when interactive) above this many pages
 OCR_PAGE_WARNING_THRESHOLD = 200
 newLine = os.linesep
 filter2RealFilterDict = {
