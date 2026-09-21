@@ -44,7 +44,7 @@ def _buildCodecTable(codecName):
 
 
 """
-WinAnsiEncoding and MacRomanEncoding are, for `search` purposes, close
+WinAnsiEncoding and MacRomanEncoding are, for 'search' purposes, close
 enough matches to common Windows-1252 and Mac OS Roman codecs.
 """
 WIN_ANSI_ENCODING = _buildCodecTable("cp1252")
@@ -475,7 +475,7 @@ def decodeContentStreamText(content, fontTables):
     table (tracked via Tf), returning the recovered visible text for
     substring searching. Text with no resolvable font table is passed
     through as-is (latin-1), so this fails 'gracefully' rather than losing
-    coverage that the plain `search` already provides.
+    coverage that the plain 'search' already provides.
 
     @param content: Decoded content-stream text (str).
     @param fontTables: dict of resource font name (without "/").
