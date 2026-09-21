@@ -141,6 +141,8 @@ FILE_WRITE = 1
 FILE_ADD = 2
 VAR_WRITE = 3
 VAR_ADD = 4
+# `ocr` warns (and asks, when interactive) above this many pages
+OCR_PAGE_WARNING_THRESHOLD = 200
 newLine = os.linesep
 filter2RealFilterDict = {
     "b64": "base64",
@@ -335,11 +337,11 @@ class PDFConsole(cmd.Cmd):
         fileName = args[-1]
         options = args[:-1]
         if len(options) != len(set(options)) or any(
-            opt not in ("full", "html") for opt in options
+            opt not in ("nojs", "html") for opt in options
         ):
             self.help_case_report()
             return False
-        full = "full" in options
+        includeJS = "nojs" not in options
         useHtml = "html" in options
 
         statsDict = self.pdfFile.getStats()
@@ -350,7 +352,7 @@ class PDFConsole(cmd.Cmd):
             VERSION,
             jsAnalysisPerformed,
             forceMode=pdfCoreModule.isForceMode,
-            full=full,
+            includeJS=includeJS,
         )
         content = getPeepCaseReportHTML(reportJSON) if useHtml else reportJSON
         try:
@@ -360,16 +362,20 @@ class PDFConsole(cmd.Cmd):
             message = f'[!] Error: Could not write to file "{fileName}": {exc}'
             self.log_output("case_report " + argv, message)
             return False
-        message = f"[+] Case report ({len(content.encode('utf-8'))} bytes) written to file {fileName}"
+        message = f"[+] Case report ({len(content.encode('utf-8'))} bytes) written to file {os.path.abspath(os.path.normpath(fileName))}"
         self.log_output("case_report " + argv, message)
 
     def help_case_report(self):
-        print(f"{newLine}Usage: case_report [full] [html] $file_name")
+        print(f"{newLine}Usage: case_report [nojs] [html] $file_name")
         print(
             f"Exports a consolidated case report (hashes, metadata, changelog, "
             f"JS/vuln findings) to $file_name.{newLine}"
         )
-        print("full: inline full JS code instead of just object id lists")
+        print(
+            "nojs: leave the JavaScript findings out of the report. Otherwise the "
+            "report states what JS analysis was actually performed on the open "
+            "document (full, if it was analysed with deobfuscation; summary, if not)"
+        )
         print(f"html: write a human-readable HTML report instead of JSON{newLine}")
 
     def do_changelog(self, argv):
@@ -715,7 +721,9 @@ class PDFConsole(cmd.Cmd):
             if ret[0] == -1:
                 error = ret[1]
                 if error.find("Error") != -1:
-                    message = f"[!] Error: {ret[1]}"
+                    message = (
+                        error if error.startswith("[!]") else f"[!] Error: {error}"
+                    )
                     self.log_output("create " + argv, message)
                     return False
                 message = f"[!] Warning: {ret[1]}"
@@ -3631,6 +3639,10 @@ class PDFConsole(cmd.Cmd):
 
     def do_modify(self, argv):
         validModifyTypes = ["object", "stream"]
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("modify " + argv, message)
+            return False
         args = self.parseArgs(argv)
         if args is None:
             message = "[!] Error: The command line arguments have not been parsed successfully"
@@ -3686,12 +3698,26 @@ class PDFConsole(cmd.Cmd):
             return False
         objectType = obj.getType()
         if elementType == "object":
-            ret = self.modifyObject(obj, 0, contentFile)
-            if ret[0] == -1:
-                message = "[!] Error: The object has not been modified"
-                self.log_output("modify " + argv, message)
-                return False
-            obj = ret[1]
+            if contentFile is not None and objectType in ("array", "dictionary"):
+                with open(contentFile, "rb") as objectFile:
+                    text = objectFile.read().decode("latin-1")
+                ret = PDFParser().parseObjectText(text, objectType, thisId)
+                if ret[0] == -1:
+                    message = f'[!] Error: "{contentFile}" does not hold a valid {objectType}: {ret[1]}'
+                    self.log_output("modify " + argv, message)
+                    return False
+                obj = ret[1]
+            else:
+                if self.isCommand and (contentFile is None or objectType == "stream"):
+                    message = "[!] Error: With -C the new value must be given by file (a stream's content, with modify stream)"
+                    self.log_output("modify " + argv, message)
+                    return False
+                ret = self.modifyObject(obj, 0, contentFile)
+                if ret[0] == -1:
+                    message = "[!] Error: The object has not been modified"
+                    self.log_output("modify " + argv, message)
+                    return False
+                obj = ret[1]
         elif elementType == "stream":
             if objectType != "stream":
                 message = "[!] Error: The specified object is not an stream object"
@@ -3699,16 +3725,15 @@ class PDFConsole(cmd.Cmd):
                 return False
             if contentFile is not None:
                 with open(contentFile, "rb") as streamOut:
-                    streamContent = streamOut.read()
-            elif self.use_rawinput:
-                ## TODO May modify for use with -C at a later time with self.isCommand.
+                    streamContent = streamOut.read().decode("latin-1")
+            elif self.use_rawinput and not self.isCommand:
                 streamContent = input(
                     f"{newLine}Please, specify the stream content"
                     f"(if the content includes EOL characters use a file instead): "
                     f"{newLine * 2}"
                 )
             else:
-                message = "[!] Error: In script mode you must specify a file storing the stream content"
+                message = "[!] Error: In script mode or with -C you must specify a file storing the stream content"
                 self.log_output("modify " + argv, message)
                 return False
             obj.setDecodedStream(streamContent)
@@ -3838,7 +3863,23 @@ class PDFConsole(cmd.Cmd):
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("ocr " + argv, message)
             return False
-        pdfText = PDFParser().getText(fileName)
+        if len(args) > 1:
+            message = (
+                "[!] Error: ocr only takes one argument, or none for output to stdout"
+            )
+            self.log_output("ocr " + argv, message)
+            return False
+        numPages = self.pdfFile.getNumPages()
+        if numPages is not None and numPages > OCR_PAGE_WARNING_THRESHOLD:
+            print(
+                f"[*] Warning: This may take some time, as this file is {numPages} pages long."
+            )
+            if self.use_rawinput and not self.isCommand:
+                res = input("Continue (Y/N)? ")
+                if res.strip().lower() not in ("y", "yes"):
+                    self.log_output("ocr " + argv, "[*] OCR cancelled")
+                    return
+        pdfText = PDFParser().getText(fileName, warn=False)
         if pdfText is None:
             message = "[!] Error: No textual content found"
             self.log_output("ocr " + fileName, message)
@@ -3849,12 +3890,6 @@ class PDFConsole(cmd.Cmd):
                 outputFile.close()
             message = f"[+] The content has been written to {outputFile.name}."
             self.log_output("ocr" + argv, message)
-        elif len(args) > 1:
-            message = (
-                "[!] Error: ocr only takes one argument, or none for output to stdout"
-            )
-            self.log_output("ocr " + argv, message)
-            return False
         else:
             self.log_output("ocr " + fileName, pdfText)
 
@@ -4410,6 +4445,13 @@ class PDFConsole(cmd.Cmd):
         print("Usage: reset $var_name")
         print(f"Resets the variable value to the default value if applicable {newLine}")
 
+    @staticmethod
+    def saveFailure(detail):
+        detail = str(detail).removeprefix("[!] Error: ")
+        if not detail:
+            return "[!] Error: Saving failed"
+        return f"[!] Error: Saving failed: {detail}"
+
     def do_save(self, argv):
         if self.pdfFile is None:
             message = "[!] Error: You must open a file"
@@ -4432,7 +4474,7 @@ class PDFConsole(cmd.Cmd):
                 headerFile=self.variables["header_file"][0],
             )
             if ret[0] == -1:
-                message = "[!] Error: Saving failed"
+                message = self.saveFailure(ret[1])
             else:
                 message = "[+] File saved successfully"
             self.log_output("save " + argv, message)
@@ -4472,7 +4514,7 @@ class PDFConsole(cmd.Cmd):
                 headerFile=self.variables["header_file"][0],
             )
             if ret[0] == -1:
-                message = "[!] Error: Saving failed"
+                message = self.saveFailure(ret[1])
             else:
                 message = "[+] Version saved successfully"
             self.log_output("save_version " + argv, message)
@@ -4722,9 +4764,7 @@ class PDFConsole(cmd.Cmd):
                 return False
             if varName == "output_limit":
                 if not value.isdigit():
-                    message = (
-                        "[!] Error: The value for this variable must be an integer"
-                    )
+                    message = "[!] Error: The value for this variable must be a whole number (0 = no limit)"
                     self.log_output("set " + argv, message)
                     return False
                 value = int(value)
@@ -4749,7 +4789,7 @@ class PDFConsole(cmd.Cmd):
             '\toutput:\t\t\tSpecifies where the output of a command will go. Options are "stdout", "file", and "variable". Default is "stdout".'
         )
         print(
-            "\toutput_limit:\t\tvariable to specify the maximum number of lines to be shown at once when the output is long (no limit = -1). By default the limit is 500 lines."
+            "\toutput_limit:\t\tvariable to specify the maximum number of lines to be shown at once when the output is long (no limit = 0). By default the limit is 500 lines."
         )
         print(f"\tvt_key:\t\t\tVirusTotal API key. {newLine}")
 
@@ -4788,6 +4828,146 @@ class PDFConsole(cmd.Cmd):
         print("\toutput\r")
         print("\toutput_limit\r")
         print(f"\tvt_key {newLine}")
+
+    def do_signatures(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("signatures " + argv, message)
+            return False
+        args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("signatures " + argv, message)
+            return False
+        if len(args) > 1 or (len(args) == 1 and args[0] != "verbose"):
+            self.help_signatures()
+            return False
+        verbose = bool(args)
+
+        signatures = self.pdfFile.getSignatures()
+        if not signatures:
+            message = "No digital signatures found"
+            self.log_output("signatures " + argv, message)
+            return
+
+        if not verbose:
+            table = PrettyTable(
+                ["Field", "Version", "SubFilter", "Integrity", "Authenticity", "Signer"]
+            )
+            table.set_style(TableStyle.SINGLE_BORDER)
+            table.align = "l"
+            for sig in signatures:
+                signerSubject = sig["signer"]["subject"] if sig["signer"] else ""
+                table.add_row(
+                    [
+                        sig["field_name"] or f'object {sig["object_id"]}',
+                        sig["version"] if sig["version"] is not None else "-",
+                        sig["sub_filter"] or sig["unsupported_reason"] or "",
+                        sig["content_integrity"] or "-",
+                        sig["signature_authenticity"] or "-",
+                        signerSubject,
+                    ]
+                )
+            output = str(table)
+        else:
+            blocks = []
+            for sig in signatures:
+                lines = [
+                    f'Field: {sig["field_name"] or "(unnamed)"} (object {sig["object_id"]}, version {sig["version"]})'
+                ]
+                if sig["unsupported_reason"]:
+                    lines.append(f'  Unsupported: {sig["unsupported_reason"]}')
+                    blocks.append(newLine.join(lines))
+                    continue
+                lines.append(
+                    f'  Filter: {sig["filter"]}  SubFilter: {sig["sub_filter"]}'
+                )
+                lines.append(f'  ByteRange: {sig["byte_range"]}')
+                lines.append(
+                    f'  Modified after signing: {sig["modified_after_signing"]}'
+                )
+                lines.append(f'  Content integrity: {sig["content_integrity"]}')
+                lines.append(
+                    f'  Signature authenticity: {sig["signature_authenticity"]}'
+                )
+                lines.append(f'  Signing time: {sig["signing_time"]}')
+                if sig.get("claimed_signing_time"):
+                    lines.append(
+                        f'  Signing time claimed in /M (not authenticated): {sig["claimed_signing_time"]}'
+                    )
+                lines.append(
+                    f'  Digest / signature algorithm: {sig["digest_algorithm"]} / {sig["signature_algorithm"]}'
+                )
+                signer = sig["signer"]
+                if signer:
+                    lines.append(f'  Signer subject: {signer["subject"]}')
+                    lines.append(f'  Signer issuer: {signer["issuer"]}')
+                    lines.append(f'  Certificate version: {signer["version"]}')
+                    lines.append(f'  Serial number: {signer["serial_number"]}')
+                    lines.append(
+                        f'  Certificate validity: {signer["not_before"]} - {signer["not_after"]}'
+                    )
+                    publicKey = signer["public_key"]
+                    keyText = f'{publicKey["algorithm"]} ({publicKey["bits"]} bits)'
+                    if "curve" in publicKey:
+                        keyText += f', curve {publicKey["curve"]}'
+                    lines.append(f"  Public key: {keyText}")
+                    lines.append(
+                        f'  Certificate signature algorithm: {signer["signature_algorithm"]}'
+                    )
+                    for label, key in (
+                        ("MD5", "md5"),
+                        ("SHA-1", "sha1"),
+                        ("SHA-256", "sha256"),
+                    ):
+                        lines.append(
+                            f'  {label} fingerprint: {signer["fingerprints"][key]}'
+                        )
+                    lines.append(f'  Self-signed: {signer["self_signed"]}')
+                    lines.append(
+                        f'  Signing time within certificate validity: {signer["signing_time_within_validity"]}'
+                    )
+                for note in sig.get("notes") or []:
+                    lines.append(f"  Note: {note}")
+                chain = sig["certificate_chain"] or []
+                if chain:
+                    lines.append(
+                        f"  Embedded certificate chain, leaf to root ({len(chain)}; not validated):"
+                    )
+                    for position, cert in enumerate(chain, 1):
+                        tags = [
+                            t
+                            for t, on in (
+                                ("signer", cert["is_signer"]),
+                                ("self-signed", cert["self_signed"]),
+                            )
+                            if on
+                        ]
+                        lines.append(
+                            f'    {position}. {cert["subject"]}'
+                            + (f' [{", ".join(tags)}]' if tags else "")
+                        )
+                        lines.append(f'       Issuer: {cert["issuer"]}')
+                        lines.append(
+                            f'       Serial: {cert["serial_number"]}  Valid: {cert["not_before"]} - {cert["not_after"]}'
+                        )
+                        lines.append(f'       SHA-1: {cert["fingerprints"]["sha1"]}')
+                blocks.append(newLine.join(lines))
+            output = (newLine * 2).join(blocks)
+        self.log_output("signatures " + argv, output)
+
+    def help_signatures(self):
+        print(f"{newLine}Usage: signatures [verbose]")
+        print(
+            f"Verifies embedded digital signatures: content integrity (was the "
+            f"signed byte range altered since signing) and signature "
+            f"authenticity (does it verify against the embedded signer "
+            f"certificate). Does not check certificate chain-of-trust or "
+            f"revocation.{newLine}"
+        )
+        print(
+            f"verbose: show full per-signature detail instead of a summary table{newLine}"
+        )
 
     def do_stream(self, argv):
         if self.pdfFile is None:
@@ -5894,16 +6074,16 @@ class PDFConsole(cmd.Cmd):
                             )
         elif printOutput:
             if niceOutput:
-                niceOutput = f"{newLine}{niceOutput}{newLine}"
+                niceOutput = f"\n{niceOutput}\n"
                 if (
-                    self.variables["output_limit"][0] is None
-                    or self.variables["output_limit"][0] == -1
+                    not self.variables["output_limit"][0]  # None or 0: no limit
                     or not self.use_rawinput
                 ):
-                    print(niceOutput)
+                    for line in niceOutput.split("\n"):
+                        print(line)
                 else:
                     limit = int(self.variables["output_limit"][0])
-                    lines = niceOutput.split(newLine)
+                    lines = niceOutput.split("\n")
                     if self.isCommand:
                         for line in lines:
                             print(line)
@@ -5940,7 +6120,9 @@ class PDFConsole(cmd.Cmd):
         if objectType not in ("array", "stream", "dictionary"):
             if contentFile is not None and iteration == 0:
                 with open(contentFile, "rb") as fileContent:
-                    content = fileContent.read()
+                    content = fileContent.read().decode("latin-1").rstrip("\r\n")
+                if objectType in {"integer", "real"}:
+                    newObjectType = "number"
             else:
                 if objectType in {"string", "hexstring"}:
                     res = input(
@@ -5972,18 +6154,18 @@ class PDFConsole(cmd.Cmd):
                         )
                     else:
                         return (0, obj)
-                content = self.checkInputContent(newObjectType, content)
-                if content is None:
-                    return (-1, "[!] Error: Content not valid for the object type")
-                if newObjectType != objectType:
-                    if newObjectType == "string":
-                        obj = PDFString(content)
-                    elif newObjectType == "hexstring":
-                        obj = PDFHexString(content)
-                    elif newObjectType == "number":
-                        obj.setValue(content)
-                else:
-                    obj.setRawValue(content)
+            content = self.checkInputContent(newObjectType, content)
+            if content is None:
+                return (-1, "[!] Error: Content not valid for the object type")
+            if newObjectType != objectType:
+                if newObjectType == "string":
+                    obj = PDFString(content)
+                elif newObjectType == "hexstring":
+                    obj = PDFHexString(content)
+                elif newObjectType == "number":
+                    obj.setValue(content)
+            else:
+                obj.setRawValue(content)
         elif objectType == "array":
             newElements = []
             elements = obj.getElements()
@@ -6019,7 +6201,7 @@ class PDFConsole(cmd.Cmd):
                     elif ret == "m":
                         if contentFile is not None:
                             with open(contentFile, "rb") as fileContent:
-                                streamContent = fileContent.read()
+                                streamContent = fileContent.read().decode("latin-1")
                         else:
                             streamContent = input(
                                 f"{newLine}Please specify the stream content "

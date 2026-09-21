@@ -25,6 +25,7 @@
 Initial script to launch the tool
 """
 
+import gc
 import sys
 import os
 import argparse
@@ -732,6 +733,9 @@ def main():
             errorLogger.error(errorMessage)
             errorLogger.error(str(e))
     finally:
+        # Shutdown would otherwise collect over every parsed object (~11 s on a
+        # 127,000-object file); the process is ending, so skip them.
+        gc.freeze()
         if os.path.exists(errorsFile) and os.path.getsize(errorsFile) != 0:
             message = f"{newLine}Please don't forget to report the errors found in file {errorsFile}:{newLine * 2}"
             message += f"- Create an issue at https://github.com/digitalsleuth/peepdf-3{newLine}"

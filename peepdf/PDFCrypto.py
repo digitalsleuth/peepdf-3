@@ -33,6 +33,14 @@ from aespython import key_expander, aes_cipher, cbc_mode
 
 warnings.filterwarnings("ignore")
 
+
+def packPermissions(value):
+    """
+    /P is 32 bits, writers store it signed or unsigned
+    """
+    return struct.pack("<I", int(value) & 0xFFFFFFFF)
+
+
 paddingString = b"\x28\xbf\x4e\x5e\x4e\x75\x8a\x41\x64\x00\x4e\x56\xff\xfa\x01\x08\x2e\x2e\x00\xb6\xd0\x68\x3e\x80\x2f\x0c\xa9\xfe\x64\x53\x69\x7a"
 
 
@@ -74,9 +82,7 @@ def computeEncryptionKey(
                 password = password[:32]
             elif lenPass < 32:
                 password += paddingString[: 32 - lenPass]
-            md5input = (
-                password + dictOwnerPass + struct.pack("<i", int(pElement)) + fileID
-            )
+            md5input = password + dictOwnerPass + packPermissions(pElement) + fileID
             if revision > 3 and not encryptMetadata:
                 md5input += b"\xff" * 4
             key = hashlib.md5(md5input).digest()
@@ -96,7 +102,7 @@ def computeEncryptionKey(
                 intermediateKey = computeHardenedHash(password, kSalt)
             else:
                 intermediateKey = hashlib.sha256(password + kSalt).digest()
-            ret = decryptData(b"\0" * 16 + dictUE, intermediateKey)
+            ret = decryptData(b"\0" * 16 + dictUE, intermediateKey, unpad=False)
         elif passwordType == "OWNER":
             password = password[:127]
             kSalt = dictOwnerPass[40:48]
@@ -106,7 +112,7 @@ def computeEncryptionKey(
                 intermediateKey = hashlib.sha256(
                     password + kSalt + dictUserPass
                 ).digest()
-            ret = decryptData(b"\0" * 16 + dictOE, intermediateKey)
+            ret = decryptData(b"\0" * 16 + dictOE, intermediateKey, unpad=False)
         return ret
     except:
         return (
@@ -402,12 +408,30 @@ def xor(byteVal, key):
     return "".join(chr(ord(x) ^ ord(y)) for (x, y) in zip(byteVal, key))
 
 
-def decryptData(data, password=None, keyLength=None, mode="CBC"):
+def unpadData(data):
+    """
+    Removes PKCS#7 padding (what encryptData adds). Anything that isn't
+    validly padded is returned untouched.
+    """
+    if not data:
+        return data
+    padLength = ord(data[-1]) if isinstance(data, str) else data[-1]
+    if not 1 <= padLength <= 16 or padLength > len(data):
+        return data
+    padding = data[-padLength:]
+    if all((ord(x) if isinstance(x, str) else x) == padLength for x in padding):
+        return data[:-padLength]
+    return data
+
+
+def decryptData(data, password=None, keyLength=None, mode="CBC", unpad=True):
     """
     Created from the demonstration of the pythonaes package.
 
     Copyright (c) 2010, Adam Newman http://www.caller9.com/
     Licensed under the MIT license http://www.opensource.org/licenses/mit-license.php
+
+    unpad=False is for data that never had padding (the AES-256 key entries).
     """
     decryptedData = ""
     aesMode = None
@@ -440,6 +464,8 @@ def decryptData(data, password=None, keyLength=None, mode="CBC"):
         decryptedBytes = aesMode.decrypt_block(ciphertext)
         for byte in decryptedBytes:
             decryptedData += chr(byte)
+    if unpad:
+        decryptedData = unpadData(decryptedData)
     return (0, decryptedData)
 
 
@@ -593,7 +619,7 @@ def computePermsAESV3(
         case status = -1.
     """
     try:
-        block = struct.pack("<i", permissionNum) + b"\xff\xff\xff\xff"
+        block = packPermissions(permissionNum) + b"\xff\xff\xff\xff"
         block += b"T" if encryptMetadata else b"F"
         block += b"adb"
         block += bytes(random.randint(0, 255) for _ in range(4))

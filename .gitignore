@@ -5,3 +5,4 @@ jserror*
 peepdf_error*
 dist*
 archive
+.pytest_cache

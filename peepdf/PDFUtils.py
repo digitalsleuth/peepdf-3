@@ -474,6 +474,11 @@ def unescapeString(string: str):
             elif string[i + 1] == "f":
                 i += 1
                 unescapedParts.append("\f")
+            elif string[i + 1] in ("\r", "\n"):
+                # A backslash before an EOL continues the string, both go
+                if string[i + 1] == "\r" and string[i + 2 : i + 3] == "\n":
+                    i += 1
+                i += 1
             elif string[i + 1] in octalDigits:
                 digits = string[i + 1]
                 j = i + 2
@@ -849,15 +854,16 @@ def getPeepCaseReport(
     VERSION,
     jsAnalysisPerformed,
     forceMode=False,
-    full=False,
+    includeJS=True,
 ):
     """
     Consolidated case-report export: metadata (Info/XMP), changelog,
-    JS findings, a digital-signature placeholder (not yet supported), and provenance.
+    JS findings, a digital-signature extraction, and provenance.
     Returns a JSON string.
     """
     reportDict = json.loads(getPeepJSON(statsDict, VERSION))
     analysis = reportDict["peepdf_analysis"]
+    analysis["basic"]["num_objects_with_js"] = int(statsDict["Objects with JS"])
 
     metadataSection = []
     for k, objects in enumerate(pdfFile.getMetadata()):
@@ -889,10 +895,12 @@ def getPeepCaseReport(
         )
     analysis["changelog"] = changelogSection
 
+    # What the report says about JS is derived from what was actually done.
+    jsMode = "none" if not includeJS else "full" if jsAnalysisPerformed else "summary"
     jsFindings = []
     for versionIndex, statsVersion in enumerate(statsDict["Versions"]):
         jsObjectsEntry = statsVersion.get("Objects with JS code")
-        if not jsObjectsEntry:
+        if not includeJS or not jsObjectsEntry:
             continue
         for objId in jsObjectsEntry[1]:
             obj = pdfFile.getObject(objId, versionIndex)
@@ -906,15 +914,20 @@ def getPeepCaseReport(
                 "num_stages": len(code),
                 "errors": errors,
             }
-            if full:
+            if jsMode == "full":
                 finding["code"] = code
             elif code:
                 finding["code_preview"] = code[0][:500]
             jsFindings.append(finding)
-    analysis["js_findings"] = jsFindings
-    analysis["js_analysis_performed"] = bool(jsAnalysisPerformed)
+    if int(statsDict["Objects with JS"]) > 0:
+        analysis["js_findings"] = jsFindings
+        analysis["js_report_mode"] = jsMode
+        analysis["js_analysis_performed"] = bool(jsAnalysisPerformed)
 
-    analysis["digital_signature"] = {"supported": False, "status": None}
+    analysis["digital_signature"] = {
+        "supported": True,
+        "signatures": pdfFile.getSignatures(),
+    }
 
     analysis["provenance"] = {
         "generated": dt.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z"),
@@ -955,6 +968,7 @@ def getPeepCaseReportHTML(caseReportJSON):
             ("Updates", basic["updates"]),
             ("Objects", basic["num_objects"]),
             ("Streams", basic["num_streams"]),
+            ("Objects with JS", basic.get("num_objects_with_js", 0)),
             ("Generated", analysis["date"]),
             ("peepdf version", analysis["peepdf_info"]["version"]),
         ]
@@ -1021,14 +1035,104 @@ def getPeepCaseReportHTML(caseReportJSON):
         if jsRows
         else "<p>No JavaScript found.</p>"
     )
-    jsNote = (
-        "Full JS analysis (deobfuscation) was performed."
-        if analysis.get("js_analysis_performed")
-        else "Full JS analysis was NOT performed - only the original/beautified "
-        "source is shown, not deobfuscated stages."
-    )
+    jsMessages = {
+        ("full", True): "Full JS analysis was performed.",
+        ("summary", False): "Summary JS analysis was performed - only the "
+        "original/beautified source is shown, not deobfuscated stages.",
+        ("none", False): "No JS analysis was performed.",
+        ("none", True): "JS analysis results were excluded from this report - "
+        "full JS analysis had already been run on the document.",
+    }
+    jsMode = analysis.get("js_report_mode")
+    jsDeobfuscated = bool(analysis.get("js_analysis_performed"))
+    jsSectionHtml = ""
+    if "js_findings" in analysis:
+        jsSectionHtml = (
+            f"<h2>JavaScript findings</h2>\n<p>{esc(jsMessages.get((jsMode, jsDeobfuscated)))}</p>\n"
+            + ("" if jsMode == "none" else f"{jsTable}\n")
+        )
 
-    signatureHtml = "<p>Digital signature verification is not yet supported.</p>"
+    signatures = analysis.get("digital_signature", {}).get("signatures", [])
+    if not signatures:
+        signatureHtml = "<p>No digital signatures found.</p>"
+    else:
+        sigRows = ""
+        for sig in signatures:
+            if sig.get("unsupported_reason"):
+                sigRows += (
+                    f"<tr><td>{esc(sig['field_name'] or sig['object_id'])}</td>"
+                    f"<td>{esc(sig.get('version'))}</td>"
+                    f"<td colspan='4' class='warn'>Unsupported: {esc(sig['unsupported_reason'])}</td></tr>"
+                )
+                continue
+            signer = sig.get("signer") or {}
+            flags = []
+            if sig.get("modified_after_signing"):
+                flags.append("modified after signing")
+            if sig.get("content_integrity") != "valid":
+                flags.append(f"integrity: {sig.get('content_integrity')}")
+            if sig.get("signature_authenticity") != "valid":
+                flags.append(f"authenticity: {sig.get('signature_authenticity')}")
+            flags.extend(sig.get("notes") or [])
+            flagsText = esc("; ".join(flags)) if flags else "&mdash;"
+            signingTimeText = sig.get("signing_time")
+            if not signingTimeText and sig.get("claimed_signing_time"):
+                signingTimeText = (
+                    f"{sig['claimed_signing_time']} (claimed in /M, not authenticated)"
+                )
+            sigRows += (
+                f"<tr><td>{esc(sig['field_name'] or sig['object_id'])}</td>"
+                f"<td>{esc(sig.get('version'))}</td>"
+                f"<td>{esc(sig['sub_filter'])}</td>"
+                f"<td>{esc(signer.get('subject'))}</td>"
+                f"<td>{esc(signingTimeText)}</td>"
+                f"<td class='warn'>{flagsText}</td></tr>"
+            )
+        signatureHtml = (
+            "<table><tr><th>Field</th><th>Version</th><th>SubFilter</th><th>Signer</th>"
+            f"<th>Signing time</th><th>Flags</th></tr>{sigRows}</table>"
+        )
+        for sig in signatures:
+            chain = sig.get("certificate_chain") or []
+            if not chain:
+                continue
+            chainRows = ""
+            for position, cert in enumerate(chain, 1):
+                tags = [
+                    label
+                    for label, on in (
+                        ("signer", cert.get("is_signer")),
+                        ("self-signed", cert.get("self_signed")),
+                    )
+                    if on
+                ]
+                publicKey = cert.get("public_key") or {}
+                keyText = f"{publicKey.get('algorithm')} ({publicKey.get('bits')} bits)"
+                if publicKey.get("curve"):
+                    keyText += f", curve {publicKey['curve']}"
+                fingerprints = cert.get("fingerprints") or {}
+                chainRows += (
+                    f"<tr><td>{position}</td>"
+                    f"<td>{esc(cert['subject'])}</td>"
+                    f"<td>{esc(cert['issuer'])}</td>"
+                    f"<td>{esc(cert.get('version'))}</td>"
+                    f"<td>{esc(cert['serial_number'])}</td>"
+                    f"<td>{esc(cert['not_before'])}<br>{esc(cert['not_after'])}</td>"
+                    f"<td>{esc(keyText)}<br>{esc(cert.get('signature_algorithm'))}</td>"
+                    f"<td><pre>MD5: {esc(fingerprints.get('md5'))}\n"
+                    f"SHA-1: {esc(fingerprints.get('sha1'))}\n"
+                    f"SHA-256: {esc(fingerprints.get('sha256'))}</pre></td>"
+                    f"<td>{esc(', '.join(tags)) if tags else '&mdash;'}</td></tr>"
+                )
+            signatureHtml += (
+                f"<p><strong>Embedded certificate chain for "
+                f"{esc(sig['field_name'] or sig['object_id'])}</strong> "
+                "(leaf to root; listed as embedded in the signature, not "
+                "validated against a trust store)</p>"
+                "<table><tr><th>#</th><th>Subject</th><th>Issuer</th><th>Version</th>"
+                "<th>Serial</th><th>Valid from / until</th><th>Public key / signature algorithm</th>"
+                f"<th>Fingerprints</th><th>Flags</th></tr>{chainRows}</table>"
+            )
 
     return f"""<!DOCTYPE html>
 <html>
@@ -1053,10 +1157,7 @@ pre {{ white-space: pre-wrap; margin: 0; font-size: 0.85em; }}
 {metadataTable}
 <h2>Changelog</h2>
 {changelogTable}
-<h2>JavaScript findings</h2>
-<p>{esc(jsNote)}</p>
-{jsTable}
-<h2>Digital signature</h2>
+{jsSectionHtml}<h2>Digital signature</h2>
 {signatureHtml}
 </body>
 </html>

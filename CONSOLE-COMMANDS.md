@@ -6,8 +6,11 @@ There are a lot of commands that can be used in the interactive console of peepd
 Showing information
 
     bytes
+    case_report
     changelog
     errors
+    extract
+    extract_stream
     hash
     info
     json
@@ -16,14 +19,17 @@ Showing information
     objects
     ocr
     offsets
+    pieceinfo
     rawobject
     rawstream
     references
     save_version
+    signatures
     stream
     streams
     tree
     xml
+    xref
 ```
 
 ```
@@ -88,9 +94,11 @@ Console
 ## bytes
 
 ```
-Usage: bytes offset num_bytes [file]
+Usage: bytes offset num_bytes [hex] [file]
 
 Show or store in the specified file "num_bytes" of the file beginning from "offset"
+
+Use "hex" to get a hex-formatted output regardless of the content. To dump the result to a file when using "hex", give "hex" first and then the file name.
 
 PPDF> bytes 0 100
 
@@ -101,13 +109,39 @@ PPDF> bytes 0 100
     > endobj
 
 2 0 obj <
+
+PPDF> bytes 0 40 hex
+
+25 50 44 46 2d 31 2e 37 0d 0a 25 b5 b5 b5 b5 0d   |%PDF-1.7..%.....|
+0a 31 20 30 20 6f 62 6a 0d 0a 3c 3c 2f 54 79 70   |.1 0 obj..<</Typ|
+65 2f 43 61 74 61 6c 6f                           |e/Catalo        |
+```
+## case_report
+
+```
+Usage: case_report [nojs] [html] $file_name
+
+Exports a consolidated case report (hashes, metadata, changelog, JS/vuln findings, digital signatures) to $file_name. The report is JSON by default.
+
+nojs: leave the JavaScript findings out of the report. Otherwise the report states what JS analysis was actually performed on the open document (full, if it was analysed with deobfuscation; summary, if not)
+html: write a human-readable HTML report instead of JSON
+
+PPDF> case_report nojs report.json
+
+[+] Case report (32628 bytes) written to file report.json
+
+PPDF> case_report html report.html
+
+[+] Case report (2643 bytes) written to file report.html
 ```
 ## changelog
 
 ```
-Usage: changelog [version]
+Usage: changelog [version] [detailed]
 
-Show the changelog of the document or version of the document
+Show the changelog of the document or version of the document. Every version is also checked for objects present in the body but not declared in its xref table (hidden objects), for objects in the xref but not in the body (missing), for a trailer /Size that doesn't match the highest object id actually present, and for body object or stream counts that don't match the actual object / stream data.
+
+detailed: also show, for every modified object, a key-by-key diff between the two versions
 
 PPDF> changelog
 
@@ -116,6 +150,29 @@ Changes in version 1:
 	Modification date: 2009-03-05T21:46:22+08:00
 	Added objects: [48]
 	Modified objects: [27, 29, 31]
+
+PPDF> changelog detailed
+
+-- snip --
+
+Changes in version 2: 
+	Title: 
+	Author: Test PDF Author
+	Creator: Acrobat PDFMaker 22 for Word
+	Producer: Adobe PDF Library 22.3.86
+	Modification date: D:20230925132114-04'00'
+	Added objects: [120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130]
+	Modified objects (3, version 1 -> 2): [2, 90, 93]
+
+Object 2:
+    ~ /Length: 3886 -> 3885
+    Stream changed: 3886 -> 3885 bytes
+
+Object 90:
+    ~ /ModDate: D:20230925131933-04'00' -> D:20230925132114-04'00'
+
+Object 93:
+    ~ /Contents: [ 95 0 R 96 0 R 97 0 R 98 0 R 99 0 R 100 0 R 101 0 R 102 0 R ] -> 121 0 R
 ```
 ## clear
 
@@ -155,7 +212,13 @@ Warning: stream objects cannot be compressed. If the Catalog object is compresse
 
 The object stream has been created successfully 
 ```
-Here it's important to highlight that despite the warnings, the objects are compressed successfully, but the PDF specification says that stream objects cannot be compressed.
+Stream objects (and the encryption dictionary) are not compressed: the PDF specification doesn't allow it, so they are skipped and reported in the warning, and every other selected object goes into the new object stream.
+
+The command fails, and leaves the document exactly as it was, when:
+
+- There is nothing left to compress (for example, every selected object is a stream): `There are no objects to compress`.
+- The document is encrypted and was not decrypted, so the new object stream can't be encrypted with the document's key: `The document is encrypted and was not decrypted`.
+- A selected object doesn't exist and force mode is off.
 
 ## decode
 
@@ -163,8 +226,9 @@ Here it's important to highlight that despite the warnings, the objects are comp
 Usage: decode variable var_name filter1 [filter2 ...]
 Usage: decode file file_name filter1 [filter2 ...]
 Usage: decode raw offset num_bytes filter1 [filter2 ...]
+Usage: decode string encoded_string filter1 [filter2 ...]
 
-Decode the content of the specified variable, file or raw bytes using the following filters or algorithms:
+Decode the content of the specified variable, file, raw bytes or string using the following filters or algorithms:
   base64,b64: Base64
   asciihex,ahx: /ASCIIHexDecode
   ascii85,a85: /ASCII85Decode
@@ -173,8 +237,8 @@ Decode the content of the specified variable, file or raw bytes using the follow
   runlength,rl: /RunLengthDecode
   ccittfax,ccf: /CCITTFaxDecode
   jbig2: /JBIG2Decode (Not implemented)
-  dct: /DCTDecode (Not implemented)
-  jpx: /JPXDecode (Not implemented)
+  dct: /DCTDecode
+  jpx: /JPXDecode
 
 PPDF> bytes 70 37
 
@@ -185,6 +249,10 @@ c9 c9 57 08 cf 2f ca 49 51 54 54 d2 31 d6 b4 06 |..W../.IQTT.1...|
 PPDF> decode raw 70 37 fl
 
 app.alert("Hello World!!",3);
+
+PPDF> decode string SGVsbG8gd29ybGQ= base64
+
+Hello world
 ```
 ## decrypt
 
@@ -208,18 +276,19 @@ Options: -x: The file is executed when the actual PDF file is opened
 Usage: encode variable var_name filter1 [filter2 ...]
 Usage: encode file file_name filter1 [filter2 ...]
 Usage: encode raw offset num_bytes filter1 [filter2 ...]
+Usage: encode string my_string filter1 [filter2 ...]
 
-Encode the content of the specified variable, file or raw bytes using the following filters or algorithms:
+Encode the content of the specified variable, file, raw bytes or string using the following filters or algorithms:
   base64,b64: Base64
   asciihex,ahx: /ASCIIHexDecode
   ascii85,a85: /ASCII85Decode (in beta)
   lzw: /LZWDecode
   flatedecode,fl: /FlateDecode
   runlength,rl: /RunLengthDecode (in beta)
-  ccittfax,ccf: /CCITTFaxDecode (Not implemented)
+  ccittfax,ccf: /CCITTFaxDecode
   jbig2: /JBIG2Decode (Not implemented)
-  dct: /DCTDecode (Not implemented)
-  jpx: /JPXDecode (Not implemented)
+  dct: /DCTDecode
+  jpx: /JPXDecode
 
 PPDF> bytes 49 29
 
@@ -230,6 +299,10 @@ PPDF> encode raw 49 29 fl
 78 9c 4b 2c 28 d0 4b cc 49 2d 2a d1 50 f2 48 cd |x.K,(.K.I-*.P.H.|
 c9 c9 57 08 cf 2f ca 49 51 54 54 d2 31 d6 b4 06 |..W../.IQTT.1...|
 00 96 69 09 15                                  |..i..           | 
+
+PPDF> encode string Hello asciihex
+
+48656c6c6f
 ```
 ## encode_strings
 
@@ -265,9 +338,9 @@ PPDF> rawobject 4
 ## encrypt
 
 ```
-Usage: encrypt [password]
+Usage: encrypt [password] [rc4|aes|aes256]
 
-Encrypt the file with the default or specified password
+Encrypt the file with the default or specified password, using RC4 (default, 128-bit), AES (AESV2, 128-bit) or AES256 (AESV3, 256-bit)
 ```
 ## errors
 
@@ -287,6 +360,43 @@ No entries in xref section (1)
 Usage: exit
 
 Exits from the console
+```
+## extract
+
+```
+Usage: extract uri|js [version]
+
+Extracts all the given type elements of the specified version after being decoded and decrypted (if necessary)
+
+PPDF> extract js
+
+// peepdf comment: Javascript code located in object 3 (version 0)
+
+function showAlert() {
+    alert("Alert from JS file");
+}
+
+PPDF> extract uri
+
+http://java.sun.com/global/mh/suncom/index.html 223
+http://java.sun.com/global/mh/java/ 224
+http://java.sun.com/global/mh/solaris/ 225
+-- snip --
+```
+## extract_stream
+
+```
+Usage: extract_stream object_id [version] [raw] file_name
+
+Extracts the stream content of the specified object straight to a file. By default the DECODED stream is written (filters removed). Use the "raw" option to write the stream exactly as stored in the file, before decoding.
+
+PPDF> extract_stream 4 stream4.txt
+
+[+] Stream content (43 bytes) written to file stream4.txt
+
+PPDF> extract_stream 4 raw stream4.bin
+
+[+] Stream content (208 bytes) written to file stream4.bin
 ```
 ## filters
 
@@ -337,8 +447,9 @@ Usage: hash object|rawobject|stream|rawstream object_id [version]
 Usage: hash raw offset size
 Usage: hash file fileName
 Usage: hash variable varName
+Usage: hash string my_string
 
-Generates the hash (MD5/SHA1/SHA256) of the specified source: raw bytes of the file, objects and streams, and the content of files or variables
+Generates the hash (MD5/SHA1/SHA256) of the specified source: raw bytes of the file, objects and streams, and the content of files, variables or strings. The hash of a raw stream is taken over the stream data only (see "rawstream")
 
 PPDF> hash rawstream 10
 
@@ -351,6 +462,12 @@ PPDF> hash variable myVar
 MD5: 852ce9336716bd31de5fca2587c2f156
 SHA1: 7632ca7738817cf66d8f772430be8db7b00aac96
 SHA256: b2a4305f1fa2d2d1a1bb363cbb1e6680161d78b89beb3aafe160ff1d694426b2
+
+PPDF> hash string hello
+
+MD5: 5d41402abc4b2a76b9719d911017c592
+SHA1: aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d
+SHA256: 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
 ```
 ## help
 
@@ -406,6 +523,36 @@ Version 1:
 	Object streams (4): [94, 1, 3, 4]
 	Encoded (21): [119, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 1, 3, 4, 5]
 	Objects with URIs (2): [59, 61]
+
+PPDF> info 398
+
+Offset: 3916
+Size: 526
+MD5: a0c01bd5af0bca2c720245787bf6b53c
+Object: stream
+Stream MD5: f08f297fabf29713ad078aee11bb022c
+Raw Stream MD5: 0b4d200f39e4c6375b1115e0ffd8f2ac
+Length: 426
+Encoded: Yes 
+Filters: /FlateDecode
+Filter Parameters: No 
+Decoding errors: No 
+References: []
+```
+For a stream, "Length" is the /Length the file declares, and the "Raw Stream" hashes are taken over the stream data only (the end-of-line marker before "endstream" is not part of the stream). "Real length" is only shown when the stream data has a different length than the one declared, which can point to a tampered or damaged stream:
+
+```
+PPDF> info 5
+
+Offset: 6027
+Size: 88
+MD5: 40aa1a2a7a2f33f361f10f1645813ae7
+Object: stream
+Stream MD5: 8e0099335f841651200d4b413fcd4230
+Length: 44
+Real length: 39
+Encoded: No 
+References: []
 ```
 ## js_analyse
 
@@ -413,8 +560,9 @@ Version 1:
 Usage: js_analyse variable var_name
 Usage: js_analyse file file_name
 Usage: js_analyse object object_id [version]
+Usage: js_analyse string javascript_code
 
-Analyses the Javascript code stored in the specified variable, file or object This command perform some substitutions in the code in order to obtain the last stage of the Javascript code and search for escaped bytes and shellcodes. It's not always possible to be successful with this analysis, so maybe a manual approach with other commands will be necessary.
+Analyses the Javascript code stored in the specified string, variable, file or object This command perform some substitutions in the code in order to obtain the last stage of the Javascript code and search for escaped bytes and shellcodes. It's not always possible to be successful with this analysis, so maybe a manual approach with other commands will be necessary.
 
 PPDF> js_analyse object 13
 
@@ -461,8 +609,9 @@ URLs in shellcode: http://bikpakoc.cn/nuc/exe.php
 Usage: js_beautify variable var_name
 Usage: js_beautify file file_name
 Usage: js_beautify object object_id [version]
+Usage: js_beautify string javascript_code
 
-Beautifies the Javascript code stored in the specified variable, file or object 
+Beautifies the Javascript code stored in the specified string, variable, file or object 
 
 PPDF> stream 15
 
@@ -525,8 +674,9 @@ var tX1PnUHy = new Array(); function lRUWC(E79yB, NPvAvQ){ while (E79yB.length *
 Usage: js_eval variable var_name
 Usage: js_eval file file_name
 Usage: js_eval object object_id [version]
+Usage: js_eval string javascript_code
 
-Executes the Javascript code stored in the specified variable, file or object 
+Executes the Javascript code stored in the specified string, variable, file or object 
 
 PPDF> set jscode "var a = 8; a = a + 2; print('The content of the variable is '+a);"
 
@@ -542,8 +692,9 @@ First, we put Javascript code in a variable. After that we can use the js_eval c
 Usage: js_jjdecode variable $var_name
 Usage: js_jjdecode file $file_name
 Usage: js_jjdecode object $object_id [$version]
+Usage: js_jjdecode string $encoded_js_code
 
-Decodes the Javascript code stored in the specified variable, file or object using the jjencode/decode algorithm by Yosuke Hasegawa (http://utf-8.jp/public/jjencode.html)
+Decodes the Javascript code stored in the specified string, variable, file or object using the jjencode/decode algorithm by Yosuke Hasegawa (http://utf-8.jp/public/jjencode.html)
 
 PPDF> show encoded_stream
 
@@ -558,8 +709,9 @@ var shellcode = unescape("%u00E8..."); var executable = ""; var rop9 = ""; rop9 
 ```
 Usage: js_join variable var_name
 Usage: js_join file file_name
+Usage: js_join string my_string
 
-Joins some strings separated by quotes and stored in the specified variable or file in a unique one
+Joins some strings separated by quotes and stored in the specified variable, file or string in a unique one
 
 Example:
 
@@ -574,8 +726,9 @@ PPDF> js_join variable aux
 ```
 Usage: js_unescape variable var_name
 Usage: js_unescape file file_name
+Usage: js_unescape string escaped_string
 
-Unescapes the escaped characters stored in the specified variable or file
+Unescapes the escaped characters stored in the specified variable, file or string
 
 Example:
 
@@ -640,24 +793,57 @@ Enable malformed output when saving the file:
 ## metadata
 
 ```
-Usage: metadata [version]
+Usage: metadata [version] [detailed]
 
-Show the metadata of the document or version of the document
+Show the metadata of the document or version of the document, including any /PieceInfo found anywhere in the document (see "pieceinfo" to view just that on its own, per version)
+
+detailed: also show the raw /Info dictionary and the XMP stream contents
 
 PPDF> metadata
 
-Info Object in version 0:
+(Run "metadata detailed" to also see the raw /Info dictionary and XMP stream contents.)
 
-<< /Title
-/ModDate D:2008312053854+10'00'
-/CreationDate D:2008312053854+10'00'
-/Producer Scribus PDF Library 1.3.3.12
-/Trapped /False
-/Creator Scribus 1.3.3.12
-/Keywords
-/Author
- >>
- ```
+Version 0 metadata summary: 
+
+  Title: 
+  Author: Test PDF Author
+  Creator: Acrobat PDFMaker 22 for Word
+  Producer: Adobe PDF Library 22.3.86
+  Creation date: D:20230925131929-04'00'
+  Modification date: D:20231007144138-04'00'
+  Subject: 
+
+Version 1 metadata summary: 
+
+  Title: 
+  Author: Test PDF Author
+  Creator: Acrobat PDFMaker 22 for Word
+  Producer: Adobe PDF Library 22.3.86
+  Creation date: D:20230925131929-04'00'
+  Modification date: D:20231007144138-04'00'
+  Subject: 
+
+  XMP DocumentID: uuid:15dc9243-e0bf-43c4-b898-fcccdf721288
+  XMP InstanceID: uuid:4142976e-51fd-44f2-aec0-34c287b7e59c
+
+PPDF> metadata detailed
+
+-- snip --
+
+Info Object in version 0: 
+
+<< /Author Test PDF Author
+/Comments 
+/Company 
+/CreationDate D:20230925131929-04'00'
+/Creator Acrobat PDFMaker 22 for Word
+/Keywords 
+/ModDate D:20231007144138-04'00'
+/Producer Adobe PDF Library 22.3.86
+/SourceModified 
+/Subject 
+/Title  >>
+```
 ## modify
 
 ```
@@ -716,6 +902,19 @@ PPDF> object 4
 
 << /Kids [ 9 0 R ] /Count 18 /Resources 1 0 R /Type /Pages >>
 ```
+The file holds the new content: for `modify stream` the whole stream (any bytes, and it's compressed again if the stream has a filter), for `modify object` the value of a simple object (number, string or hex string), where a trailing line break is ignored. A value that doesn't fit the object's type leaves the object unchanged.
+
+For an array or a dictionary the file holds the whole new object in PDF syntax, which replaces the old one (nested arrays, dictionaries, strings and references are fine). It must be an array for an array and a dictionary for a dictionary, with every `[`, `<<`, `(` and `<` closed and nothing after it, otherwise nothing is changed. What `rawobject` shows can be given back as it is, including the `4 0 obj` ... `endobj` around it, as long as the number is the object's own. That makes editing an object from the command line a matter of `rawobject 4 > object4.txt`, editing the file and `modify object 4 object4.txt`. The new content of a stream object (as opposed to its dictionary) is given with `modify stream`.
+
+With `-C` `modify` never stops to ask a question, because there is nobody to answer. The new value must be given by file, for a stream, a simple object, an array or a dictionary; anything else fails with an error and leaves the document as it was. In script mode a stream must be given by file too:
+
+```
+$ peepdf.py -C "rawobject 4 > object4.txt" file.pdf
+$ peepdf.py -C "modify object 4 object4.txt" -C "modify stream 5 new_content.txt" -C "save patched.pdf" file.pdf
+[+] Object modified successfully
+[+] Object modified successfully
+[+] File saved successfully
+```
 ## object
 
 ```
@@ -763,6 +962,8 @@ Version 1: Objects (7): [5, 7, 36, 44, 45, 46, 47]
 Usage: ocr [$output_filename]
 Extract text from the PDF, optional output to file.
 
+Documents over 200 pages get a warning, and an interactive session is asked to confirm before it continues. When a script (-s) or a single command (-C) is run, only the warning is shown and the extraction continues. In the GUI, the Console tab asks in a dialog before running "ocr" on such a document.
+
 PPDF> ocr
 
 Planet PDF JavaScript Learning Center 
@@ -776,6 +977,12 @@ PPDF> ocr PDF_Content.txt
 
 [+] The content has been written to PDF_Content.txt.
 
+PPDF> ocr
+
+[*] Warning: This may take some time, as this file is 756 pages long.
+Continue (Y/N)? n
+[*] OCR cancelled
+
 ```
 
 ## offsets
@@ -787,28 +994,24 @@ Shows the physical map of the file or the specified version of the document The 
 
 PPDF> offsets
 
-Start (d)	End (d)		Size (d)	Type and Id
-
----------	---------	---------	--------------------
-
-00000000					Header
-00000016	00000047	00000032	Object 1 
-00000049	00000070	00000022	Object 2 
-00000072	00000120	00000049	Object 3 
-00000122	00000393	00000272	Object 5 
-00000395	00000519	00000125	Object 7 
-00000521	00000744	00000224	Object 9 
+Version 0: 
+┌───────────┬──────────┬──────────┬─────────────┐
+│ Start (d) │ End (d)  │ Size (d) │ Type and Id │
+├───────────┼──────────┼──────────┼─────────────┤
+│ 00000000  │          │          │ Header      │
+│ 00000017  │ 00000191 │ 00000175 │ Object 1    │
+│ 00000194  │ 00000247 │ 00000054 │ Object 2    │
+│ 00000250  │ 00000525 │ 00000276 │ Object 3    │
 
 -- snip --
 
-Version 1: 
-
-00079883	00080154	00000272	Object 5 
-00080156	00080298	00000143	Object 7 
-00080300	00080487	00000188	Object 36 
-00080489	00080508	00000020	Object 44 
+│ 00015369  │ 00015377 │ 00000009 │ XrefSection │
+│ 00015380  │ 00015557 │ 00000178 │ Trailer     │
+│ 00015558  │          │          │ EOF         │
+└───────────┴──────────┴──────────┴─────────────┘
 
 ```
+The size of an object is the number of bytes it takes in the file, from the start of "N 0 obj" to the end of "endobj". This is also true for an encrypted document: the sizes are those of the file, not of the decrypted objects.
 
 ## open
 
@@ -820,6 +1023,21 @@ Open and parse the specified file
 Options:
   -f: Sets force parsing mode to ignore errors
   -l: Sets loose parsing mode for problematic files
+```
+## pieceinfo
+
+```
+Usage: pieceinfo
+
+Shows every /PieceInfo entry found in the document, carrying their own metadata such as DocumentID/OriginalDocumentID/LastModified.
+
+PPDF> pieceinfo
+
+┌────────┬─────────────┬──────────────────────────────────────────────┬──────────────────────────────────────────────┬───────────────────┐
+│ Object │ Application │ DocumentID                                   │ OriginalDocumentID                           │ LastModified      │
+├────────┼─────────────┼──────────────────────────────────────────────┼──────────────────────────────────────────────┼───────────────────┤
+│ 90795  │ InDesign    │ xmp.did:780a6ade-dc79-4c31-a54a-260fb5bea548 │ xmp.did:147e8572-2a0f-4e8b-bfd4-f58153c4d884 │ D:20230323075532Z │
+└────────┴─────────────┴──────────────────────────────────────────────┴──────────────────────────────────────────────┴───────────────────┘
 ```
 ## quit
 
@@ -874,6 +1092,8 @@ startxref
 Usage: rawstream object_id [version]
 
 Shows the stream content of the specified document version before being decoded and decrypted
+
+The bytes shown are exactly the stream data: the end-of-line marker before "endstream" is not part of the stream, so their number matches the /Length of the stream and their hash matches the one other tools calculate for it.
 
 PPDF> rawstream 1
 
@@ -984,6 +1204,9 @@ Saves the file to disk
 ```
 It's recommended to use this command when we make modifications in the document to keep it free of conflicts. For example, if we don't save the changes we can have inconsistent results when we use "object" and "rawobject" commands, because one of them is related to the file before the modifications and the other one after them.
 
+If the file can't be saved, the reason is shown after the message.
+
+
 ## save_version
 
 ```
@@ -993,11 +1216,11 @@ Saves the selected file version to disk
 ## sctest
 
 ```
-Usage: sctest variable var_name
-Usage: sctest file file_name
-Usage: sctest raw offset num_bytes
+Usage: sctest [-v] variable var_name
+Usage: sctest [-v] file file_name
+Usage: sctest [-v] raw offset num_bytes
 
-Wrapper of the sctest tool (libemu) to emulate shellcodes
+Wrapper of the sctest tool (libemu) to emulate shellcodes. -v = verbose, there may be a lot of data
 
 PPDF> sctest file /tmp/shellcode
 
@@ -1007,11 +1230,15 @@ verbose = 0 Hook me Captain Cook! userhooks.c:127 user_hook_ExitThread ExitThrea
 ## search
 
 ```
-Usage: search [hex] string
+Usage: search [glyph] [hex] string
 
 Search the specified string or hexadecimal string in the objects (decoded and encrypted streams included)
 
+glyph: also search page text shown through custom-encoded fonts (glyph codes decoded via /ToUnicode or /Differences plus the Adobe Glyph List, best-effort, it does not account for all fonts)
+
 Example: search hex \x34\x35
+
+Example: search glyph interesting_text
 
 PPDF> search javascript
 
@@ -1020,6 +1247,10 @@ PPDF> search javascript
 PPDF> search hex \x4a\x61\x76\x61
 
 [4]
+
+PPDF> search glyph pdf
+
+Version 0: [3]
 ```
 ## set
 
@@ -1033,9 +1264,9 @@ Special variables:
 
 	header_file:		READ ONLY. Specifies the file header to be used when "malformed_options" are active.
 	malformed_options:	READ ONLY. Variable to store the malformed options used to save the file.
-	output:			Specifies where the output of a command will go. Options are "stdout", "file", and "variable". Default is "stdout".
-	output_limit:		variable to specify the maximum number of lines to be shown at once when the output is long (no limit = -1). By default there is no limit.
-	vt_key:			VirusTotal API key. 
+	output:				Specifies where the output of a command will go. Options are "stdout", "file", and "variable". Default is "stdout".
+	output_limit:		variable to specify the maximum number of lines to be shown at once when the output is long (no limit = 0). By default the limit is 500 lines.
+	vt_key:				VirusTotal API key. 
   
 The "set output" way to store the commands output has been deprecated, use instead ">" and ">>" for files, and "$>" and "$>>" for variables:
 
@@ -1101,6 +1332,10 @@ d6 d8 e3 b2 61 75 0c 2b 1f a6 b6 17 5a cd ea 3a |....au.+....Z..:|
 92 ed a6 50 e9 56 fa 4b f5 6f e2 67 e0 43 e6 56 |...P.V.K.o.g.C.V|
 7d d8 58 10 a9 70 a8 e0 3b 25 d1 29 e3 ab 2a 7b |}.X..p..;%.)...{|
 -- snip --
+
+Long output is shown in pages of "output_limit" lines in the interactive console. Press <enter> to see the next page or "q" to stop. To show everything at once, use 0:
+
+PPDF> set output_limit 0
 ```
 ## show
 
@@ -1123,6 +1358,54 @@ PPDF> show myHelloVar
 
 Hello World!!
 ```
+## signatures
+
+```
+Usage: signatures [verbose]
+
+Verifies embedded digital signatures: content integrity (was the signed byte range altered since signing) and signature authenticity (does it verify against the embedded signer certificate). Does not check certificate chain-of-trust or revocation.
+
+verbose: show full per-signature detail instead of a summary table
+
+PPDF> signatures
+
+┌────────────┬─────────┬──────────────────────┬───────────┬──────────────┬──────────────────────────────────────────────────────────────────────────────────────┐
+│ Field      │ Version │ SubFilter            │ Integrity │ Authenticity │ Signer                                                                               │
+├────────────┼─────────┼──────────────────────┼───────────┼──────────────┼──────────────────────────────────────────────────────────────────────────────────────┤
+│ Signature1 │ 0       │ /adbe.pkcs7.detached │ valid     │ valid        │ Email Address: fred.flintstone@bedrock.com, Common Name: fred.flintstone@bedrock.com │
+└────────────┴─────────┴──────────────────────┴───────────┴──────────────┴──────────────────────────────────────────────────────────────────────────────────────┘
+
+PPDF> signatures verbose
+
+Field: Signature1 (object 10, version 0)
+  Filter: /Adobe.PPKLite  SubFilter: /adbe.pkcs7.detached
+  ByteRange: [0, 32976, 40532, 487]
+  Modified after signing: False
+  Content integrity: valid
+  Signature authenticity: valid
+  Signing time: 2016-09-01T15:51:37+00:00
+  Digest / signature algorithm: sha1 / rsassa_pkcs1v15
+  Signer subject: Email Address: fred.flintstone@bedrock.com, Common Name: fred.flintstone@bedrock.com
+  Signer issuer: Common Name: GlobalSign PersonalSign 1 CA - SHA256 - G2, Organization: GlobalSign nv-sa, Country: BE
+  Certificate version: 3
+  Serial number: 66B455C317BDB0EBB5DD59C465EC2D28
+  Certificate validity: 2014-11-13T13:41:30+00:00 - 2017-11-13T13:41:30+00:00
+  Public key: RSA (2048 bits)
+  Certificate signature algorithm: SHA256withRSA
+  MD5 fingerprint: 46:D6:07:D8:B0:06:D0:E7:D3:D4:76:D0:80:F2:49:65
+  SHA-1 fingerprint: F2:4D:D3:DF:F5:87:C5:79:9C:B6:93:7B:A3:40:BB:17:47:F2:F8:16
+  SHA-256 fingerprint: C8:43:AB:65:00:1F:5E:67:B3:41:CE:3A:33:38:53:4A:89:4F:AC:10:01:F4:A1:9F:C2:8E:F3:D5:D1:62:EC:F1
+  Self-signed: False
+  Signing time within certificate validity: True
+  Note: SHA1 is a weak digest algorithm
+  Embedded certificate chain, leaf to root (3; not validated):
+    1. Email Address: fred.flintstone@bedrock.com, Common Name: fred.flintstone@bedrock.com [signer]
+       Issuer: Common Name: GlobalSign PersonalSign 1 CA - SHA256 - G2, Organization: GlobalSign nv-sa, Country: BE
+       Serial: 66B455C317BDB0EBB5DD59C465EC2D28  Valid: 2014-11-13T13:41:30+00:00 - 2017-11-13T13:41:30+00:00
+       SHA-1: F2:4D:D3:DF:F5:87:C5:79:9C:B6:93:7B:A3:40:BB:17:47:F2:F8:16
+-- snip --
+```
+Signatures using /adbe.pkcs7.detached, /adbe.pkcs7.sha1, /ETSI.CAdES.detached and /adbe.x509.rsa_sha1 are verified, and so are the permissions signatures found under /Perms (/DocMDP, /UR3, /UR). Signatures are searched in every version of the document, and the "Version" column shows the one where each was found. A document timestamp (/DocTimeStamp, /ETSI.RFC3161) is listed but reported as unsupported at this time (sampling required for validation).
 ## stream
 
 ```
@@ -1242,15 +1525,24 @@ Checks the hash of the specified source on VirusTotal: raw bytes of the file, ob
 PPDF> set vt_key <YOUR_API_KEY>
 PPDF> vtcheck
 
-Detection rate:  2/59
-Last analysis date: 20190611-154209
-Report link: https://www.virustotal.com/gui/file/6ec5f11bc11a91f2d1b04eeebca52d8c8b83acf022b098d41d9977e7fe911f24
+Detection rate: 32/64
+Last analysis date: 20251208-015105
+Report link: https://www.virustotal.com/gui/file/e4280fd86313a5830acc651f58d118037500087deb6da63338d73adb1fddda9d
+Names: rce_foxit.pdf, RCE Foxit.pdf
 Scan results: 
 
-Engine	Engine Version	Engine Update	Result
-----------------------------------------------------------
-Avast	18.4.3895.0	20190611	PDF:UrlMal-inf [Trj]
-AVG	18.4.3895.0	20190611	PDF:UrlMal-inf [Trj]
+┌──────────────────────┬─────────────────────────┬───────────────┬─────────────────────────────────────────────────────┐
+│ Engine               │ Engine Version          │ Engine Update │ Result                                              │
+├──────────────────────┼─────────────────────────┼───────────────┼─────────────────────────────────────────────────────┤
+│ ALYac                │ 2.0.0.10                │ 20251207      │ Trojan.Generic.38360229                             │
+│ AVG                  │ 23.9.8494.0             │ 20251207      │ JS:CVE-2018-9948-A [Expl]                           │
+│ Arcabit              │ 2025.0.0.23             │ 20251208      │ Trojan.Generic.D24954A5                             │
+│ Avast                │ 23.9.8494.0             │ 20251207      │ JS:CVE-2018-9948-A [Expl]                           │
+│ Avira                │ 8.3.3.24                │ 20251208      │ JS/CVE-2018-9948.G                                  │
+-- snip --
+│ ZoneAlarm            │ 6.21-110947004          │ 20251208      │ Exp/MSFFFmnt-A                                      │
+│ alibabacloud         │ 2.2.0                   │ 20250321      │ Exploit:Javascript/CVE-2018-9948.A                  │
+└──────────────────────┴─────────────────────────┴───────────────┴─────────────────────────────────────────────────────┘
 ```
 ## xml
 
@@ -1344,4 +1636,41 @@ PPDF> xor file xored_test 0x63
 
 Hi, this is a test file!
 
+```
+## xref
+
+```
+Usage: xref [version]
+
+Shows the cross reference table (classic and/or stream) of the document or the specified version: each object's id, generation number, type ("n" in use, "f" free, "c" compressed inside an object stream), and its offset, next-free link, or ObjStm location accordingly.
+
+PPDF> xref
+
+Version 0:
+
+  xref table (offset 32280):
+┌────────┬───────┬──────┬──────────────┐
+│ Object │ Gen   │ Type │ Details      │
+├────────┼───────┼──────┼──────────────┤
+│ 0      │ 65535 │ f    │ next free 10 │
+│ 1      │ 0     │ n    │ offset 17    │
+│ 2      │ 0     │ n    │ offset 166   │
+│ 3      │ 0     │ n    │ offset 222   │
+-- snip --
+│ 29     │ 0     │ n    │ offset 31928 │
+│ 30     │ 0     │ n    │ offset 31973 │
+└────────┴───────┴──────┴──────────────┘
+
+  Xref stream (in object 30):
+┌────────┬───────┬──────┬──────────────────────────┐
+│ Object │ Gen   │ Type │ Details                  │
+├────────┼───────┼──────┼──────────────────────────┤
+│ 0      │ 65535 │ f    │ next free 0              │
+│ 1      │ 0     │ n    │ offset 17                │
+-- snip --
+│ 9      │ 0     │ n    │ offset 1453              │
+│ 10     │ -     │ c    │ in ObjStm 21 at index 10 │
+│ 11     │ -     │ c    │ in ObjStm 21 at index 11 │
+│ 12     │ -     │ c    │ in ObjStm 21 at index 12 │
+-- snip --
 ```
