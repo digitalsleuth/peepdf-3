@@ -288,18 +288,6 @@ def asciiHexEncode(stream):
     return (0, encodedStream)
 
 
-def doubleDecode(stream):
-    i = 0
-    decodedStream = stream.encode()
-    while i < 2:
-        decodedStream = decodedStream.hex()
-        utf8_bytes = bytes.fromhex(decodedStream)
-        decode_from_utf8 = utf8_bytes.decode("utf-8")
-        decodedStream = decode_from_utf8.encode("latin-1")
-        i += 1
-    return decodedStream
-
-
 def flateDecode(stream, parameters):
     """
     Method to decode streams using the Flate algorithm
@@ -307,22 +295,13 @@ def flateDecode(stream, parameters):
     @param stream: A PDF stream
     @return: A tuple (status, statusContent), where statusContent is the decoded PDF stream in case status = 0 or an error in case status = -1
     """
-    decodedStream = ""
     try:
-        doubleDecodedStream = doubleDecode(stream)
-        decodedStream = zlib.decompress(doubleDecodedStream).decode("latin-1")
+        if not isinstance(stream, bytes):
+            decodedStream = zlib.decompress(stream.encode("latin-1")).decode("latin-1")
+        else:
+            decodedStream = zlib.decompress(stream).decode("latin-1")
     except:
-        pass
-    if decodedStream == "":
-        try:
-            if not isinstance(stream, bytes):
-                decodedStream = (zlib.decompress(stream.encode("latin-1"))).decode(
-                    "latin-1"
-                )
-            else:
-                decodedStream = zlib.decompress(stream).decode("latin-1")
-        except:
-            return (-1, "Error decompressing string with FlateDecode")
+        return (-1, "Error decompressing string with FlateDecode")
 
     if not parameters:
         return (0, decodedStream)
