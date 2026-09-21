@@ -25,6 +25,7 @@
 GUI entry point
 """
 
+import gc
 import os
 import sys
 import base64
@@ -255,7 +256,9 @@ def main():
     window.show()
     if len(sys.argv) > 1:
         window.open_file(sys.argv[1])
-    sys.exit(app.exec())
+    exitCode = app.exec()
+    gc.freeze()
+    sys.exit(exitCode)
 
 
 if __name__ == "__main__":

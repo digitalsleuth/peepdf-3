@@ -42,7 +42,7 @@ Changelog = "https://github.com/digitalsleuth/peepdf-3/blob/main/CHANGELOG.md"
 Wiki = "https://github.com/digitalsleuth/peepdf-3/wiki"
 
 [project.optional-dependencies]
-gui == ["PyQt6>=6.4"]
+gui = ["PyQt6>=6.4"]
 
 [project.scripts]
 peepdf = "peepdf.peepdf:main"
