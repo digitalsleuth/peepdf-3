@@ -1,4 +1,5 @@
-#    peepdf-3 is a tool to analyse and modify PDF files
+#!/usr/bin/env python3
+#
 #    https://github.com/digitalsleuth/peepdf-3
 #    Original Author: Jose Miguel Esparza <jesparza AT eternal-todo.com>
 #    Updated for Python 3 by Corey Forman (digitalsleuth - https://github.com/digitalsleuth/peepdf-3)

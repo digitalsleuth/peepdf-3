@@ -69,12 +69,19 @@ try:
     from peepdf.PDFVulns import vulnsDict
     from peepdf.PDFConsole import PDFConsole, OCR_PAGE_WARNING_THRESHOLD
     from peepdf.PDFUtils import DTFMT
+    from peepdf.PDFComments import (
+        commentNotes,
+        commentObjectTag,
+        oneLine,
+        printableText,
+    )
 except ModuleNotFoundError:
     from PDFCore import PDFParser, VERSION
     import PDFCore as pdfCoreModule
     from PDFVulns import vulnsDict
     from PDFConsole import PDFConsole, OCR_PAGE_WARNING_THRESHOLD
     from PDFUtils import DTFMT
+    from PDFComments import commentNotes, commentObjectTag, oneLine, printableText
 
 
 _ROOT_PATH = os.path.dirname(
@@ -96,6 +103,7 @@ _CONSOLE_MUTATING_COMMANDS = frozenset(
     }
 )
 MONO_FONT = "Consolas" if os.name == "nt" else "Monospace"
+MAX_COMMENT_ROWS = 5000
 
 
 def hexdumpColumns(data, width=16, offsetFormat="hex"):
@@ -104,14 +112,16 @@ def hexdumpColumns(data, width=16, offsetFormat="hex"):
     """
     if not data:
         return "", "", ""
+    if isinstance(data, str):
+        data = data.encode("latin-1")
     offsetLines = []
     hexLines = []
     asciiLines = []
     for i in range(0, len(data), width):
         chunk = data[i : i + width]
         offsetLines.append(f"{i:08d}" if offsetFormat == "decimal" else f"{i:08x}")
-        hexLines.append(" ".join(f"{ord(c) & 0xFF:02x}" for c in chunk))
-        asciiLines.append("".join(c if 32 <= ord(c) < 127 else "." for c in chunk))
+        hexLines.append(" ".join(f"{b:02x}" for b in chunk))
+        asciiLines.append("".join(chr(b) if 32 <= b < 127 else "." for b in chunk))
     return "\n".join(offsetLines), "\n".join(hexLines), "\n".join(asciiLines)
 
 
@@ -241,6 +251,7 @@ class MainWindow(QMainWindow):
         self.console = None
         self._currentSelection = None
         self._currentRawStream = None
+        self._currentDecodedStream = None
         self._hexOffsetFormat = "hex"
         self._activeParseWorker = None
         self._loadingProgress = None
@@ -466,6 +477,8 @@ class MainWindow(QMainWindow):
         self._buildObjectTab()
         self._buildErrorsTab()
         self._buildSuspiciousTab()
+        self._buildCommentsTab()
+        self._buildAttachmentsTab()
         self._buildConsoleTab()
         self.treeFilterEdit.installEventFilter(self)
 
@@ -524,6 +537,7 @@ class MainWindow(QMainWindow):
         self.infoView.setReadOnly(True)
         self.infoView.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.infoView.setFont(QFont(MONO_FONT, 10))
+        self.infoView.setPlainText("Load a file to display available file info.")
         self.tabs.addTab(self.infoView, "Document Info")
 
     def _buildMetadataTab(self):
@@ -531,6 +545,9 @@ class MainWindow(QMainWindow):
         self.metadataView.setReadOnly(True)
         self.metadataView.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.metadataView.setFont(QFont(MONO_FONT, 10))
+        self.metadataView.setPlainText(
+            "Load a file to display available file metadata."
+        )
         self.tabs.addTab(self.metadataView, "Metadata")
 
     def _buildVersionInfoTab(self):
@@ -559,7 +576,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.versionInfoView)
 
         self.versionInfoTabIndex = self.tabs.addTab(container, "Version Info")
-        self.tabs.setTabEnabled(self.versionInfoTabIndex, True)
 
     def _buildChangelogTab(self):
         container = QWidget()
@@ -602,6 +618,8 @@ class MainWindow(QMainWindow):
         self.decodedValueView.setFont(monoFont)
         self.objSubTabs.addTab(self.decodedValueView, "Decoded Value")
 
+        self._buildDecodedHexTab(monoFont)
+
         self.rawValueView = QPlainTextEdit()
         self.rawValueView.setReadOnly(True)
         self.rawValueView.setFont(monoFont)
@@ -619,73 +637,95 @@ class MainWindow(QMainWindow):
         self.objectTabContainer = container
 
     def _buildHexTab(self, monoFont):
+        (
+            splitter,
+            self.hexOffsetView,
+            self.hexBytesView,
+            self.hexAsciiView,
+            self.hexOffsetHeaderButton,
+        ) = self._buildHexColumns(monoFont)
+        self.hexSplitter = splitter
+        self.rawHexTabIndex = self.objSubTabs.addTab(splitter, "Raw Stream (hex)")
+
+    def _buildDecodedHexTab(self, monoFont):
+        (
+            splitter,
+            self.decodedHexOffsetView,
+            self.decodedHexBytesView,
+            self.decodedHexAsciiView,
+            self.decodedHexOffsetHeaderButton,
+        ) = self._buildHexColumns(monoFont)
+        self.decodedHexTabIndex = self.objSubTabs.addTab(
+            splitter, "Decoded Stream (hex)"
+        )
+
+    def _buildHexColumns(self, monoFont):
+        """
+        Builds one set of offset/hex/ASCII columns for a hex viewer tab.
+        Returns (splitter, offsetView, bytesView, asciiView, offsetHeaderButton).
+        """
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(6)
-        self.hexSplitter = splitter
 
-        self.hexOffsetView = self._makeHexColumn(monoFont)
-        self.hexBytesView = self._makeHexColumn(monoFont)
-        self.hexAsciiView = self._makeHexColumn(monoFont)
+        offsetView = self._makeHexColumn(monoFont)
+        bytesView = self._makeHexColumn(monoFont)
+        asciiView = self._makeHexColumn(monoFont)
 
-        fm = self.hexOffsetView.fontMetrics()
+        fm = offsetView.fontMetrics()
         offsetMinWidth = fm.horizontalAdvance("0") * 10 + 12
-        scrollBarExtent = self.hexBytesView.style().pixelMetric(
+        scrollBarExtent = bytesView.style().pixelMetric(
             QStyle.PixelMetric.PM_ScrollBarExtent
         )
         hexMinWidth = fm.horizontalAdvance("00 " * 16) + 12 + scrollBarExtent
         asciiMinWidth = fm.horizontalAdvance("0") * 17 + 12
 
-        self.hexOffsetView.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        offsetView.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        asciiView.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        bytesView.verticalScrollBar().valueChanged.connect(
+            offsetView.verticalScrollBar().setValue
         )
-        self.hexAsciiView.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self.hexBytesView.verticalScrollBar().valueChanged.connect(
-            self.hexOffsetView.verticalScrollBar().setValue
-        )
-        self.hexBytesView.verticalScrollBar().valueChanged.connect(
-            self.hexAsciiView.verticalScrollBar().setValue
+        bytesView.verticalScrollBar().valueChanged.connect(
+            asciiView.verticalScrollBar().setValue
         )
 
         # The Offset header doubles as a toggle button: click it to switch
         # between hexadecimal and decimal offsets.
-        self.hexOffsetHeaderButton = QPushButton(self._hexOffsetHeaderText())
-        self.hexOffsetHeaderButton.setFlat(True)
-        self.hexOffsetHeaderButton.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.hexOffsetHeaderButton.setToolTip(
+        offsetHeaderButton = QPushButton(self._hexOffsetHeaderText())
+        offsetHeaderButton.setFlat(True)
+        offsetHeaderButton.setCursor(Qt.CursorShape.PointingHandCursor)
+        offsetHeaderButton.setToolTip(
             "Click to toggle between hexadecimal and decimal offsets"
         )
-        self.hexOffsetHeaderButton.setStyleSheet(
+        offsetHeaderButton.setStyleSheet(
             "QPushButton { font-weight: bold; padding: 2px; text-align: left; "
             "border: none; background: transparent; }"
             "QPushButton:hover { text-decoration: underline; }"
         )
-        self.hexOffsetHeaderButton.clicked.connect(self._toggleHexOffsetFormat)
+        offsetHeaderButton.clicked.connect(self._toggleHexOffsetFormat)
 
         hexHeader = QLabel("Hex")
         hexHeader.setStyleSheet("font-weight: bold; padding: 2px;")
         asciiHeader = QLabel("ASCII")
         asciiHeader.setStyleSheet("font-weight: bold; padding: 2px;")
         self._hexColumnHeaderHeight = max(
-            self.hexOffsetHeaderButton.sizeHint().height(),
+            offsetHeaderButton.sizeHint().height(),
             hexHeader.sizeHint().height(),
             asciiHeader.sizeHint().height(),
         )
         hexContentMinHeight = round(
             fm.lineSpacing() * 16
-            + 2 * self.hexBytesView.frameWidth()
-            + 2 * self.hexBytesView.document().documentMargin()
+            + 2 * bytesView.frameWidth()
+            + 2 * bytesView.document().documentMargin()
         )
-        for view in (self.hexOffsetView, self.hexBytesView, self.hexAsciiView):
+        for view in (offsetView, bytesView, asciiView):
             view.setMinimumHeight(hexContentMinHeight)
 
         offsetGroup = self._hexColumnGroup(
-            self.hexOffsetHeaderButton, self.hexOffsetView, offsetMinWidth
+            offsetHeaderButton, offsetView, offsetMinWidth
         )
-        hexGroup = self._hexColumnGroup(hexHeader, self.hexBytesView, hexMinWidth)
-        asciiGroup = self._hexColumnGroup(asciiHeader, self.hexAsciiView, asciiMinWidth)
+        hexGroup = self._hexColumnGroup(hexHeader, bytesView, hexMinWidth)
+        asciiGroup = self._hexColumnGroup(asciiHeader, asciiView, asciiMinWidth)
 
         splitter.addWidget(offsetGroup)
         splitter.addWidget(hexGroup)
@@ -695,7 +735,7 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(2, 0)
         splitter.setSizes([offsetMinWidth, hexMinWidth, asciiMinWidth])
 
-        self.objSubTabs.addTab(splitter, "Raw Stream (hex)")
+        return splitter, offsetView, bytesView, asciiView, offsetHeaderButton
 
     @staticmethod
     def _makeHexColumn(font):
@@ -704,6 +744,16 @@ class MainWindow(QMainWindow):
         view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         view.setFont(font)
         return view
+
+    def _setHexColumns(self, offsetView, bytesView, asciiView, data):
+        offsetText, hexText, asciiText = (
+            hexdumpColumns(data, offsetFormat=self._hexOffsetFormat)
+            if data
+            else ("", "", "")
+        )
+        offsetView.setPlainText(offsetText)
+        bytesView.setPlainText(hexText)
+        asciiView.setPlainText(asciiText)
 
     @staticmethod
     def _hexColumnGroup(header, view, minWidth):
@@ -721,17 +771,29 @@ class MainWindow(QMainWindow):
 
     def _toggleHexOffsetFormat(self):
         self._hexOffsetFormat = "decimal" if self._hexOffsetFormat == "hex" else "hex"
-        self.hexOffsetHeaderButton.setText(self._hexOffsetHeaderText())
-        if self._currentRawStream:
-            offsetText, _hexText, _asciiText = hexdumpColumns(
-                self._currentRawStream, offsetFormat=self._hexOffsetFormat
-            )
-            # Make sure the hex offsets realign with the scroll position
-            # because setPlainText resets the position to 0 when the hex/dec
-            # view is changed.
-            currentScrollValue = self.hexBytesView.verticalScrollBar().value()
-            self.hexOffsetView.setPlainText(offsetText)
-            self.hexOffsetView.verticalScrollBar().setValue(currentScrollValue)
+        headerText = self._hexOffsetHeaderText()
+        self.hexOffsetHeaderButton.setText(headerText)
+        self.decodedHexOffsetHeaderButton.setText(headerText)
+        self._refreshHexOffsetColumn(
+            self.hexOffsetView, self.hexBytesView, self._currentRawStream
+        )
+        self._refreshHexOffsetColumn(
+            self.decodedHexOffsetView,
+            self.decodedHexBytesView,
+            self._currentDecodedStream,
+        )
+
+    def _refreshHexOffsetColumn(self, offsetView, bytesView, data):
+        if not data:
+            return
+        offsetText, _hexText, _asciiText = hexdumpColumns(
+            data, offsetFormat=self._hexOffsetFormat
+        )
+        # Make sure the hex offsets realign with the scroll position because
+        # setPlainText resets the position to 0 when the hex/dec view changes.
+        currentScrollValue = bytesView.verticalScrollBar().value()
+        offsetView.setPlainText(offsetText)
+        offsetView.verticalScrollBar().setValue(currentScrollValue)
 
     def _buildErrorsTab(self):
         self.errorsView = QPlainTextEdit()
@@ -744,6 +806,22 @@ class MainWindow(QMainWindow):
         self.suspiciousTree.setHeaderHidden(True)
         self.suspiciousTree.itemDoubleClicked.connect(self._onSuspiciousItemActivated)
         self.suspiciousTabIndex = self.tabs.addTab(self.suspiciousTree, "Suspicious")
+
+    def _buildCommentsTab(self):
+        self.commentsTree = QTreeWidget()
+        self.commentsTree.setHeaderLabels(["Comment", "Author", "Modified", "Notes"])
+        self.commentsTree.setHeaderHidden(True)
+        self.commentsTree.setColumnWidth(0, 460)
+        self.commentsTree.itemDoubleClicked.connect(self._onCommentItemActivated)
+        self.commentsTabIndex = self.tabs.addTab(self.commentsTree, "Comments")
+
+    def _buildAttachmentsTab(self):
+        self.attachmentsTree = QTreeWidget()
+        self.attachmentsTree.setHeaderLabels(["Attachment", "Size", "MIME Type", "MD5"])
+        self.attachmentsTree.setHeaderHidden(True)
+        self.attachmentsTree.setColumnWidth(0, 460)
+        self.attachmentsTree.itemDoubleClicked.connect(self._onAttachmentItemActivated)
+        self.attachmentsTabIndex = self.tabs.addTab(self.attachmentsTree, "Attachments")
 
     @staticmethod
     def _consoleWelcomeText():
@@ -807,7 +885,7 @@ class MainWindow(QMainWindow):
         aboutBox.setWindowTitle(f"About peepdf-3 v{VERSION}")
         aboutBox.setTextFormat(Qt.TextFormat.RichText)
         aboutBox.setText(
-            "peepdf-3 Structure viewer GUI<br><br>"
+            "peepdf-3 GUI<br><br>"
             '<a href="https://github.com/digitalsleuth/peepdf-3">'
             "https://github.com/digitalsleuth/peepdf-3</a>"
         )
@@ -844,12 +922,21 @@ class MainWindow(QMainWindow):
         self.suspiciousTree.clear()
         self.suspiciousTree.setHeaderHidden(True)
         self.tabs.setTabText(self.suspiciousTabIndex, "Suspicious")
+        self.commentsTree.clear()
+        self.commentsTree.setHeaderHidden(True)
+        self.tabs.setTabText(self.commentsTabIndex, "Comments")
+        self.attachmentsTree.clear()
+        self.attachmentsTree.setHeaderHidden(True)
+        self.tabs.setTabText(self.attachmentsTabIndex, "Attachments")
         self.versionInfoView.setPlainText(
             "Select a version in the tree on the left to see its summary, "
             'or click "Show All Versions" above to see them all at once.'
         )
+        self.metadataView.setPlainText(
+            "Load a file to display available file metadata."
+        )
+        self.infoView.setPlainText("Load a file to display available file info.")
         self.showAllVersionsButton.setEnabled(False)
-        # self.tabs.setTabEnabled(self.versionInfoTabIndex, False)
         if self._changelogProgress is not None:
             self._changelogProgress.close()
             self._changelogProgress = None
@@ -935,7 +1022,6 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(fileName)
         self._updateDecryptActionState()
 
-        # self.tabs.setTabEnabled(self.versionInfoTabIndex, True)
         self.showAllVersionsButton.setEnabled(True)
         self.computeChangelogButton.setEnabled(True)
 
@@ -949,6 +1035,8 @@ class MainWindow(QMainWindow):
         stats = self.pdf.getStats()
         self._populateErrorsTab(stats)
         self._populateSuspiciousTab(stats)
+        self._populateCommentsTab()
+        self._populateAttachmentsTab()
         self.tabs.setCurrentIndex(0)
 
     def _offerDecrypt(self):
@@ -1269,6 +1357,8 @@ class MainWindow(QMainWindow):
         stats = self.pdf.getStats()
         self._populateErrorsTab(stats)
         self._populateSuspiciousTab(stats)
+        self._populateCommentsTab()
+        self._populateAttachmentsTab()
         if selected is not None:
             self._selectTreeObject(*selected)
         self.tabs.setCurrentIndex(currentTabIndex)
@@ -1329,7 +1419,6 @@ class MainWindow(QMainWindow):
         self.fileName = os.path.abspath(self.pdf.getPath())
         self.setWindowTitle(f"peepdf-3 v{VERSION} - {os.path.basename(self.fileName)}")
         self.statusBar().showMessage(self.fileName)
-        # self.tabs.setTabEnabled(self.versionInfoTabIndex, True)
         self.showAllVersionsButton.setEnabled(True)
         self.computeChangelogButton.setEnabled(True)
         self._updateDecryptActionState()
@@ -2003,6 +2092,251 @@ class MainWindow(QMainWindow):
             return
         self._selectTreeObject(data["id"], data["version"])
 
+    def _populateCommentsTab(self):
+        """
+        Annotation comments by page (replies under what they answer), then the
+        ones a later version removed and the ones no page lists, then the %
+        comments of the file syntax. A double click opens the object.
+        """
+        self.commentsTree.clear()
+        annotations = self.pdf.getComments()
+        syntaxComments = self.pdf.getSyntaxComments()
+        total = len(annotations) + len(syntaxComments)
+        byId = {c["object_id"]: c for c in annotations if c["object_id"] is not None}
+        shown = 0
+
+        def objectData(objectId, version):
+            return {"id": objectId, "version": version}
+
+        def commentItem(comment, seen):
+            nonlocal shown
+            shown += 1
+            seen.add(id(comment))
+            text = f'{comment["subtype"]} {commentObjectTag(comment)}'
+            if comment["contents"]:
+                text += f': {oneLine(comment["contents"], 100)}'
+            item = QTreeWidgetItem(
+                [
+                    text,
+                    comment["author"] or "",
+                    comment["modified"] or comment["created"] or "",
+                    "; ".join(commentNotes(comment)),
+                ]
+            )
+            item.setToolTip(0, comment["contents"] or comment["rich_text"] or "")
+            version = (
+                comment["history"][-1]["version"]
+                if comment["history"]
+                else comment["version"]
+            )
+            if comment["object_id"] is not None:
+                item.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    objectData(comment["object_id"], version),
+                )
+            elif comment["page_object_id"] is not None:
+                item.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    objectData(comment["page_object_id"], version),
+                )
+            for replyId in comment["replies"] + comment["group_members"]:
+                reply = byId.get(replyId)
+                if (
+                    reply is not None
+                    and id(reply) not in seen
+                    and shown < MAX_COMMENT_ROWS
+                ):
+                    item.addChild(commentItem(reply, seen))
+            return item
+
+        def size(item):
+            return 1 + sum(size(item.child(i)) for i in range(item.childCount()))
+
+        def category(label, comments):
+            node = QTreeWidgetItem([label, "", "", ""])
+            seen = set()
+            for comment in comments:
+                if id(comment) not in seen and shown < MAX_COMMENT_ROWS:
+                    node.addChild(commentItem(comment, seen))
+            node.setText(
+                0,
+                f"{label} ({sum(size(node.child(i)) for i in range(node.childCount()))})",
+            )
+            return node
+
+        roots = [c for c in annotations if c["depth"] == 0]
+        if annotations:
+            annotationRoot = QTreeWidgetItem(
+                [f"Annotations ({len(annotations)})", "", "", ""]
+            )
+            pages = sorted(
+                {
+                    c["page"]
+                    for c in roots
+                    if c["status"] == "present" and c["page"] is not None
+                }
+            )
+            for page in pages:
+                annotationRoot.addChild(
+                    category(
+                        f"Page {page}",
+                        [
+                            c
+                            for c in roots
+                            if c["status"] == "present" and c["page"] == page
+                        ],
+                    )
+                )
+            for status, label in (
+                ("removed", "Removed by a later version"),
+                ("orphan", "Not listed on any page"),
+            ):
+                members = [c for c in roots if c["status"] == status]
+                if members:
+                    annotationRoot.addChild(category(label, members))
+            self.commentsTree.addTopLevelItem(annotationRoot)
+            annotationRoot.setExpanded(True)
+
+        if syntaxComments:
+            syntaxRoot = QTreeWidgetItem(
+                [f"In the file syntax ({len(syntaxComments)})", "", "", ""]
+            )
+            for comment in syntaxComments:
+                if shown >= MAX_COMMENT_ROWS:
+                    break
+                shown += 1
+                where = comment["location"]
+                if comment["version"] is not None:
+                    where = f'version {comment["version"]}, {where}'
+                item = QTreeWidgetItem(
+                    [
+                        f'Offset {comment["offset"]}: {oneLine(printableText(comment["text"]), 100)}',
+                        "",
+                        "",
+                        where,
+                    ]
+                )
+                item.setToolTip(0, printableText(comment["text"]))
+                if comment["object_id"] is not None and comment["version"] is not None:
+                    item.setData(
+                        0,
+                        Qt.ItemDataRole.UserRole,
+                        objectData(comment["object_id"], comment["version"]),
+                    )
+                syntaxRoot.addChild(item)
+            self.commentsTree.addTopLevelItem(syntaxRoot)
+            syntaxRoot.setExpanded(True)
+
+        if shown < total:
+            self.commentsTree.addTopLevelItem(
+                QTreeWidgetItem(
+                    [
+                        f"{total - shown} more not shown: use the comments command",
+                        "",
+                        "",
+                        "",
+                    ]
+                )
+            )
+        self.tabs.setTabText(self.commentsTabIndex, f"Comments ({total})")
+        if total == 0:
+            self.commentsTree.addTopLevelItem(
+                QTreeWidgetItem(["No comments found.", "", "", ""])
+            )
+        self.commentsTree.setHeaderHidden(total == 0)
+
+    def _onCommentItemActivated(self, item, _column):
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        self._selectTreeObject(data["id"], data["version"])
+
+    def _populateAttachmentsTab(self):
+        """
+        Attachments grouped by where they're reachable from.
+        """
+        self.attachmentsTree.clear()
+        attachments = self.pdf.getAttachments()
+        total = len(attachments)
+
+        def attachmentItem(attachment):
+            size = attachment["size"]
+            sizeText = f"{size:,} bytes" if isinstance(size, int) else "-"
+            item = QTreeWidgetItem(
+                [
+                    attachment["file_name"] or "(unnamed)",
+                    sizeText,
+                    attachment["mime_type"] or "",
+                    attachment["checksum_md5"] or "",
+                ]
+            )
+            tooltipParts = [attachment["location"]]
+            if attachment["description"]:
+                tooltipParts.append(attachment["description"])
+            item.setToolTip(0, "\n".join(tooltipParts))
+            if (
+                attachment["nav_id"] is not None
+                and attachment["nav_version"] is not None
+            ):
+                item.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    {"id": attachment["nav_id"], "version": attachment["nav_version"]},
+                )
+            return item
+
+        byPage = [a for a in attachments if a["page"] is not None]
+        orphanAnnotations = [
+            a for a in attachments if a["page"] is None and a["source"] == "annotation"
+        ]
+        documentLevel = [a for a in attachments if a["source"] == "embedded_files"]
+
+        if byPage:
+            for page in sorted({a["page"] for a in byPage}):
+                members = [a for a in byPage if a["page"] == page]
+                pageNode = QTreeWidgetItem([f"Page {page} ({len(members)})", "", ""])
+                for attachment in members:
+                    pageNode.addChild(attachmentItem(attachment))
+                self.attachmentsTree.addTopLevelItem(pageNode)
+                pageNode.setExpanded(True)
+
+        if orphanAnnotations:
+            orphanNode = QTreeWidgetItem(
+                [f"Not linked to any page ({len(orphanAnnotations)})", "", ""]
+            )
+            for attachment in orphanAnnotations:
+                orphanNode.addChild(attachmentItem(attachment))
+            self.attachmentsTree.addTopLevelItem(orphanNode)
+            orphanNode.setExpanded(True)
+
+        if documentLevel:
+            docNode = QTreeWidgetItem(
+                [
+                    f"Document-level, no page (Names tree) ({len(documentLevel)})",
+                    "",
+                    "",
+                ]
+            )
+            for attachment in documentLevel:
+                docNode.addChild(attachmentItem(attachment))
+            self.attachmentsTree.addTopLevelItem(docNode)
+            docNode.setExpanded(True)
+
+        self.tabs.setTabText(self.attachmentsTabIndex, f"Attachments ({total})")
+        if total == 0:
+            self.attachmentsTree.addTopLevelItem(
+                QTreeWidgetItem(["No attachments found.", "", ""])
+            )
+        self.attachmentsTree.setHeaderHidden(total == 0)
+
+    def _onAttachmentItemActivated(self, item, _column):
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        self._selectTreeObject(data["id"], data["version"])
+
     ## Object data ##
 
     def _onTreeContextMenu(self, pos):
@@ -2017,14 +2351,80 @@ class MainWindow(QMainWindow):
         objId = data["id"]
         version = data["version"]
         obj = self.pdf.getObject(objId, version)
-        if obj is None or not obj.containsJS():
+        if obj is None:
+            return
+        hasJS = obj.containsJS()
+        isStream = obj.getType() == "stream"
+        if not hasJS and not isStream:
             return
         menu = QMenu(self)
-        analyseAction = menu.addAction("Analyse JS...")
-        analyseAction.triggered.connect(
-            lambda checked=False, oid=objId, v=version: self._analyseObjectJS(oid, v)
-        )
+        if hasJS:
+            analyseAction = menu.addAction("Analyse JS...")
+            analyseAction.triggered.connect(
+                lambda checked=False, oid=objId, v=version: self._analyseObjectJS(
+                    oid, v
+                )
+            )
+        if isStream:
+            extractMenu = menu.addMenu("Extract Stream")
+            decodedAction = extractMenu.addAction("Decoded")
+            decodedAction.triggered.connect(
+                lambda checked=False, oid=objId, v=version: self._extractStream(
+                    oid, v, decoded=True
+                )
+            )
+            rawAction = extractMenu.addAction("Raw")
+            rawAction.triggered.connect(
+                lambda checked=False, oid=objId, v=version: self._extractStream(
+                    oid, v, decoded=False
+                )
+            )
         menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _extractStream(self, objId, version, decoded):
+        """
+        Saves an object's stream content to a file the user picks.
+        Options: Decoded, Raw, file save location.
+        """
+        if self.pdf is None or self.fileName is None:
+            return
+        obj = self.pdf.getObject(objId, version)
+        if obj is None or obj.getType() != "stream":
+            return
+        value = obj.getStream() if decoded else obj.getRawStream()
+        if decoded and value in (-1, ""):
+            QMessageBox.warning(
+                self,
+                "Extract Stream",
+                f"The stream in object {objId} cannot be decoded.",
+            )
+            return
+        if isinstance(value, str):
+            value = value.encode("latin-1")
+
+        baseName = os.path.splitext(os.path.basename(self.fileName))[0]
+        directory = os.path.dirname(self.fileName)
+        defaultName = os.path.join(
+            directory, f"object_{objId}_v{version}_{baseName}.stream"
+        )
+
+        saveName, _selectedFilter = QFileDialog.getSaveFileName(
+            self,
+            "Extract Stream",
+            defaultName,
+            "Stream Files (*.stream);;All Files (*)",
+        )
+        if not saveName:
+            return
+        try:
+            with open(saveName, "wb") as outFile:
+                outFile.write(value)
+        except OSError as exc:
+            QMessageBox.critical(
+                self, "Extract Stream", f"Could not write to {saveName}:\n{exc}"
+            )
+            return
+        self.statusBar().showMessage(f"Stream extracted to {saveName}", 5000)
 
     def _analyseObjectJS(self, objId, version):
         """
@@ -2144,9 +2544,13 @@ class MainWindow(QMainWindow):
         self.decodedValueView.clear()
         self.rawValueView.clear()
         self._currentRawStream = None
+        self._currentDecodedStream = None
         self.hexOffsetView.clear()
         self.hexBytesView.clear()
         self.hexAsciiView.clear()
+        self.decodedHexOffsetView.clear()
+        self.decodedHexBytesView.clear()
+        self.decodedHexAsciiView.clear()
         self.objStatsTable.setRowCount(0)
 
     def _showObject(self, objId, version):
@@ -2181,21 +2585,39 @@ class MainWindow(QMainWindow):
             except Exception:
                 rawStream = None
             self._currentRawStream = rawStream
-            offsetText, hexText, asciiText = (
-                hexdumpColumns(rawStream, offsetFormat=self._hexOffsetFormat)
-                if rawStream
-                else ("", "", "")
+            self._setHexColumns(
+                self.hexOffsetView, self.hexBytesView, self.hexAsciiView, rawStream
             )
-            self.hexOffsetView.setPlainText(offsetText)
-            self.hexBytesView.setPlainText(hexText)
-            self.hexAsciiView.setPlainText(asciiText)
-            self.objSubTabs.setTabEnabled(2, True)
+            self.objSubTabs.setTabEnabled(self.rawHexTabIndex, True)
+
+            try:
+                decodedStream = obj.getStream()
+            except Exception:
+                decodedStream = None
+            if decodedStream in (-1, ""):
+                decodedStream = None
+            self._currentDecodedStream = decodedStream
+            self._setHexColumns(
+                self.decodedHexOffsetView,
+                self.decodedHexBytesView,
+                self.decodedHexAsciiView,
+                decodedStream,
+            )
+            self.objSubTabs.setTabEnabled(self.decodedHexTabIndex, True)
         else:
             self._currentRawStream = None
-            self.hexOffsetView.clear()
-            self.hexBytesView.clear()
-            self.hexAsciiView.clear()
-            self.objSubTabs.setTabEnabled(2, False)
+            self._currentDecodedStream = None
+            self._setHexColumns(
+                self.hexOffsetView, self.hexBytesView, self.hexAsciiView, None
+            )
+            self._setHexColumns(
+                self.decodedHexOffsetView,
+                self.decodedHexBytesView,
+                self.decodedHexAsciiView,
+                None,
+            )
+            self.objSubTabs.setTabEnabled(self.rawHexTabIndex, False)
+            self.objSubTabs.setTabEnabled(self.decodedHexTabIndex, False)
 
         try:
             stats = obj.getStats()

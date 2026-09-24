@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+#
 #    peepdf-3 is a tool to analyse and modify PDF files
 #    https://github.com/digitalsleuth/peepdf-3
 #    Original Author: Jose Miguel Esparza <jesparza AT eternal-todo.com>
@@ -57,6 +59,11 @@ try:
     from peepdf.JSAnalysis import analyseJS, isJavascript
     from peepdf.PDFFilters import decodeStream, encodeStream
     from peepdf.PDFSignature import getSignatures as _getSignatures
+    from peepdf.PDFComments import (
+        getComments as _getComments,
+        scanSyntaxComments as _scanSyntaxComments,
+    )
+    from peepdf.PDFAttachments import getAttachments as _getAttachments
     from peepdf.PDFFontEncoding import (
         decodeContentStreamText,
         getBaseEncodingTable,
@@ -96,6 +103,11 @@ except ModuleNotFoundError:
     from JSAnalysis import analyseJS, isJavascript
     from PDFFilters import decodeStream, encodeStream
     from PDFSignature import getSignatures as _getSignatures
+    from PDFComments import (
+        getComments as _getComments,
+        scanSyntaxComments as _scanSyntaxComments,
+    )
+    from PDFAttachments import getAttachments as _getAttachments
     from PDFFontEncoding import (
         decodeContentStreamText,
         getBaseEncodingTable,
@@ -668,7 +680,9 @@ class PDFName(PDFObject):
         self.uriList = []
         self.references = []
         self.compressedIn = None
-        if name[0] == "/":
+        if name == "":
+            self.rawValue = self.value = self.encryptedValue = "/"
+        elif name[0] == "/":
             self.rawValue = self.value = self.encryptedValue = name
         else:
             self.rawValue = self.value = self.encryptedValue = f"/{name}"
@@ -740,7 +754,7 @@ class PDFString(PDFObject):
     String object of a PDF document
     """
 
-    def __init__(self, string, isRawSyntax=True):
+    def __init__(self, string, isRawSyntax=True, IS_HASH=False):
         self.objType = "string"
         self.errors = []
         self.compressedIn = None
@@ -759,6 +773,7 @@ class PDFString(PDFObject):
         self.references = []
         self.referencesInElements = {}
         self.isRawSyntax = isRawSyntax
+        self.IS_HASH = IS_HASH
         ret = self.update()
         if ret[0] == -1:
             if isForceMode:
@@ -785,6 +800,11 @@ class PDFString(PDFObject):
                 self.value = self.value.encode("latin-1").decode("utf-16")
             except (UnicodeDecodeError, UnicodeEncodeError):
                 pass
+        if self.IS_HASH:
+            hashBytes = self.value
+            if isinstance(hashBytes, str):
+                hashBytes = hashBytes.encode("latin-1")
+            self.value = hashBytes.hex()
         if isJavascript(self.value) or self.referencedJSObject:
             self.containsJScode = True
             (
@@ -972,7 +992,12 @@ class PDFHexString(PDFObject):
                 if self.IS_ID:
                     self.value = f"<{self.rawValue}>"
                 if self.IS_HASH:
-                    self.value = self.rawValue
+                    hashBytes = (
+                        self.value.encode("latin-1")
+                        if isinstance(self.value, str)
+                        else self.value
+                    )
+                    self.value = hashBytes.hex()
             except:
                 errorMessage = "[!] Error in hexadecimal conversion"
                 self.addError(errorMessage)
@@ -2509,6 +2534,21 @@ class PDFStream(PDFDictionary):
         else:
             self.decodedStream = stream
 
+    def completeEolTrim(self, newSize):
+        """
+        Finishes the EOL trim createPDFStream had to defer because /Length
+        was still an unresolved reference at parse time.
+        """
+        if self.eolTrimmed:
+            return
+        trimmed = trimStreamEnd(self.rawStream, newSize)
+        if self.encodedStream == self.rawStream:
+            self.encodedStream = trimmed
+        if self.decodedStream == self.rawStream:
+            self.decodedStream = trimmed
+        self.rawStream = trimmed
+        self.eolTrimmed = True
+
     def contains(self, string):
         pattern = re.escape(string)
         value = str(self.value)
@@ -2571,7 +2611,8 @@ class PDFStream(PDFDictionary):
                                     self.decodedStream = ""
                                 else:
                                     return (-1, errorMessage)
-                            self.decodedStream = ret[1]
+                            else:
+                                self.decodedStream = ret[1]
                         else:
                             self.decodedStream = ret[1]
                     elif filterParamsType == "dictionary":
@@ -2595,7 +2636,8 @@ class PDFStream(PDFDictionary):
                                     self.decodedStream = ""
                                 else:
                                     return (-1, errorMessage)
-                            self.decodedStream = ret[1]
+                            else:
+                                self.decodedStream = ret[1]
                         else:
                             self.decodedStream = ret[1]
                     elif isForceMode:
@@ -2636,7 +2678,8 @@ class PDFStream(PDFDictionary):
                                             self.decodedStream = ""
                                         else:
                                             return (-1, errorMessage)
-                                    self.decodedStream = ret[1]
+                                    else:
+                                        self.decodedStream = ret[1]
                                 else:
                                     self.decodedStream = ret[1]
                             elif filterParamsType == "array":
@@ -2682,7 +2725,8 @@ class PDFStream(PDFDictionary):
                                             self.decodedStream = ""
                                         else:
                                             return (-1, errorMessage)
-                                    self.decodedStream = ret[1]
+                                    else:
+                                        self.decodedStream = ret[1]
                                 else:
                                     self.decodedStream = ret[1]
                             elif isForceMode:
@@ -3155,7 +3199,7 @@ class PDFStream(PDFDictionary):
             value = self.referencesInElements["/Length"][1]
             if value.isdigit():
                 self.size = int(value)
-                self.cleanStream()
+                self.completeEolTrim(self.size)
             else:
                 return (
                     -1,
@@ -3969,7 +4013,7 @@ class PDFObjectStream(PDFStream):
         if "/Length" in self.referencesInElements:
             value = self.referencesInElements["/Length"][1]
             self.size = int(value)
-            self.cleanStream()
+            self.completeEolTrim(self.size)
         self.updateNeeded = False
         if self.isEncodedStream:
             ret = self.decode()
@@ -5764,6 +5808,7 @@ class PDFFile:
         self.JSCode = ""
         self.crossRefTable = []
         self.comments = []
+        self.commentsMD5 = None
         self.version = ""
         self.headerOffset = 0
         self.garbageHeader = ""
@@ -7272,6 +7317,37 @@ class PDFFile:
         """
         return _getSignatures(self, version)
 
+    def getComments(self, version=None):
+        """
+        The markup annotations as of 'version', with who wrote them, when, their
+        reply thread, and whether they are still present, removed, or were never
+        linked to a page.
+        """
+        return _getComments(self, version)
+
+    def getSyntaxComments(self, version=None):
+        """
+        The % comments of the file syntax as read from the file.
+        With 'version', only those up to and including that version.
+        """
+        if self.commentsMD5 != self.md5 and self.path and os.path.isfile(self.path):
+            with open(self.path, "rb") as savedFile:
+                self.comments = _scanSyntaxComments(savedFile.read())
+            self.commentsMD5 = self.md5
+        if version is None:
+            return self.comments
+        return [
+            c
+            for c in self.comments
+            if c["version"] is not None and c["version"] <= version
+        ]
+
+    def getAttachments(self, version=None):
+        """
+        Every attachment in the document as of 'version'.
+        """
+        return _getAttachments(self, version)
+
     def getChangeLog(self, version=None):
         lastVersionObjects = []
         actualVersionObjects = []
@@ -8015,7 +8091,7 @@ class PDFFile:
             "Streams": str(self.numStreams),
             "URIs": str(self.numURIs),
             "Objects with JS": str(self.numObjectsWithJS),
-            "Comments": str(len(self.comments)),
+            "Comments": str(len(self.getSyntaxComments())),
             "Errors": self.errors,
             "Versions": [],
             "IDs": newLine,
@@ -9158,6 +9234,8 @@ class PDFParser:
         pdfFile.setMD5(hashlib.md5(fileContent).hexdigest())
         pdfFile.setSHA1(hashlib.sha1(fileContent).hexdigest())
         pdfFile.setSHA256(hashlib.sha256(fileContent).hexdigest())
+        pdfFile.comments = _scanSyntaxComments(fileContent)
+        pdfFile.commentsMD5 = pdfFile.getMD5()
 
         # Getting the number of updates in the file
         while fileContent.find(b"%%EOF") != -1:
@@ -9354,7 +9432,8 @@ class PDFParser:
                 self.tagFileIdElements(trailer.getDictEntry("/ID"))
             if streamTrailer is not None:
                 self.tagFileIdElements(streamTrailer.getDictEntry("/ID"))
-
+                if xrefObject is not None:
+                    xrefObject.getObject().update(onlyElements=True)
             if fileId is not None and pdfFile.getFileId() == "":
                 objectType = fileId.getType()
                 if objectType == "array":
@@ -9384,10 +9463,14 @@ class PDFParser:
         """
         if idArray is None or idArray.getType() != "array":
             return
+        retagged = False
         for element in idArray.getElements():
             if element is not None and element.getType() == "hexstring":
                 element.IS_ID = True
                 element.update()
+                retagged = True
+        if retagged:
+            idArray.update()
 
     def parsePDFSections(self, content, forceMode=False, looseMode=False):
         """
@@ -9556,6 +9639,9 @@ class PDFParser:
                 value = ret[1]
                 if value.value == "<< >>":
                     elements[key] = PDFString(rawValue)
+                if key == "/CheckSum" and value.getType() in ("string", "hexstring"):
+                    value.IS_HASH = True
+                    value.update()
                 elements[key] = value
             ret = self.readObject(rawContent[self.charCounter :], "name")
             if ret[0] == -1:
@@ -9643,11 +9729,22 @@ class PDFParser:
             if length is not None and length.getType() == "integer"
             else None
         )
-        stream = trimStreamEnd(stream, declaredLength)
+        deferEolTrim = (
+            declaredLength is None
+            and length is not None
+            and length.getType() == "reference"
+        )
+        if not deferEolTrim:
+            stream = trimStreamEnd(stream, declaredLength)
         if "/Type" in elements and elements["/Type"].getValue() == "/ObjStm":
             try:
                 pdfStream = PDFObjectStream(
-                    rawStreamDict, stream, elements, rawNames, {}, eolTrimmed=True
+                    rawStreamDict,
+                    stream,
+                    elements,
+                    rawNames,
+                    {},
+                    eolTrimmed=not deferEolTrim,
                 )
             except Exception as e:
                 errorMessage = "[!] Error creating PDFObjectStream"
@@ -9657,7 +9754,11 @@ class PDFParser:
         else:
             try:
                 pdfStream = PDFStream(
-                    rawStreamDict, stream, elements, rawNames, eolTrimmed=True
+                    rawStreamDict,
+                    stream,
+                    elements,
+                    rawNames,
+                    eolTrimmed=not deferEolTrim,
                 )
             except Exception as e:
                 errorMessage = "[!] Error creating PDFStream"

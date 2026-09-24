@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+#
 #    peepdf-3 is a tool to analyse and modify PDF files
 #    https://github.com/digitalsleuth/peepdf-3
 #    Original Author: Jose Miguel Esparza <jesparza AT eternal-todo.com>
@@ -28,6 +30,7 @@ import sys
 import os
 import re
 import hashlib
+import json
 import traceback
 from base64 import b64encode, b64decode
 from datetime import datetime as dt, timezone
@@ -70,6 +73,13 @@ try:
         spacesChars,
         delimiterChars,
     )
+    from peepdf.PDFComments import (
+        commentNotes,
+        commentObjectLabel,
+        commentObjectTag,
+        oneLine,
+        printableText,
+    )
     from peepdf.PDFFilters import decodeStream, encodeStream
     from peepdf.PDFVulns import vulnsDict
     from peepdf.PDFEnDec import JJDecoder
@@ -108,6 +118,13 @@ except ModuleNotFoundError:
         VERSION,
         spacesChars,
         delimiterChars,
+    )
+    from PDFComments import (
+        commentNotes,
+        commentObjectLabel,
+        commentObjectTag,
+        oneLine,
+        printableText,
     )
     from PDFFilters import decodeStream, encodeStream
     from PDFVulns import vulnsDict
@@ -258,6 +275,87 @@ class PDFConsole(cmd.Cmd):
         if self.use_rawinput:
             print(f"{newLine}[+] Exiting the interactive console{newLine}")
         self.leaving = True
+
+    def do_attachments(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("attachments " + argv, message)
+            return False
+        args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("attachments " + argv, message)
+            return False
+        if len(args) > 1 or (len(args) == 1 and args[0] != "verbose"):
+            self.help_attachments()
+            return False
+        verbose = bool(args)
+
+        attachments = self.pdfFile.getAttachments()
+        if not attachments:
+            message = "No attachments found"
+            self.log_output("attachments " + argv, message)
+            return
+
+        if not verbose:
+            table = PrettyTable(["Location", "File Name", "Size", "MIME Type"])
+            table.set_style(TableStyle.SINGLE_BORDER)
+            table.align = "l"
+            for attachment in attachments:
+                size = attachment["size"]
+                table.add_row(
+                    [
+                        attachment["location"],
+                        attachment["file_name"] or "(unnamed)",
+                        f"{size:,}" if isinstance(size, int) else "-",
+                        attachment["mime_type"] or "-",
+                    ]
+                )
+            output = str(table)
+        else:
+            blocks = []
+            for attachment in attachments:
+                lines = [
+                    f'{attachment["location"]}: {attachment["file_name"] or "(unnamed)"}'
+                ]
+                source = (
+                    "Names tree (document-level)"
+                    if attachment["source"] == "embedded_files"
+                    else "annotation"
+                )
+                lines.append(f"  Source: {source}")
+                if attachment["object_id"] is not None:
+                    lines.append(f'  Object: {attachment["object_id"]}')
+                if attachment["stream_id"] is not None:
+                    lines.append(
+                        f'  Embedded file stream: object {attachment["stream_id"]}'
+                    )
+                if attachment["name_tree_key"] is not None:
+                    lines.append(f'  Names tree key: {attachment["name_tree_key"]}')
+                if attachment["description"]:
+                    lines.append(f'  Description: {attachment["description"]}')
+                size = attachment["size"]
+                lines.append(
+                    f"  Size: {size:,} bytes"
+                    if isinstance(size, int)
+                    else "  Size: unknown"
+                )
+                lines.append(f'  MIME type: {attachment["mime_type"] or "unknown"}')
+                if attachment["checksum_md5"]:
+                    lines.append(f'  Checksum (MD5): {attachment["checksum_md5"]}')
+                blocks.append(newLine.join(lines))
+            output = (newLine * 2).join(blocks)
+        self.log_output("attachments " + argv, output)
+
+    def help_attachments(self):
+        print(f"{newLine}Usage: attachments [verbose]")
+        print(
+            f"Lists every attachment in the document, via page /FileAttachment "
+            f"annotations and the /Names /EmbeddedFiles tree.{newLine}"
+        )
+        print(
+            f"verbose: show full per-attachment detail instead of a summary table{newLine}"
+        )
 
     def do_bytes(self, argv):
         if self.pdfFile is None:
@@ -613,6 +711,292 @@ class PDFConsole(cmd.Cmd):
     def help_clear(self):
         print(f"{newLine}Usage: clear")
         print(f"Clears the screen{newLine}")
+
+    _oneLine = staticmethod(oneLine)
+    _commentNotes = staticmethod(commentNotes)
+    _commentObjectLabel = staticmethod(commentObjectLabel)
+    _commentObjectTag = staticmethod(commentObjectTag)
+
+    def _commentDetail(self, comment):
+        lines = [
+            f'{self._commentObjectLabel(comment)}: {comment["subtype"]}, '
+            f'{"page " + str(comment["page"]) if comment["page"] is not None else "no page"}, '
+            f'first defined in version {comment["version"]}'
+        ]
+        for label, key in (
+            ("Author", "author"),
+            ("Subject", "subject"),
+            ("Created", "created"),
+            ("Modified", "modified"),
+            ("Name", "name"),
+        ):
+            if comment[key]:
+                lines.append(f"  {label}: {comment[key]}")
+        if comment["contents"]:
+            lines.append(f'  Contents: {comment["contents"]}')
+        if comment["rich_text"] and comment["rich_text"] != self._oneLine(
+            comment["contents"]
+        ):
+            lines.append(f'  Rich text: {comment["rich_text"]}')
+        if comment["reply_to"] is not None:
+            kind = "Group" if comment["reply_type"] == "Group" else "Reply"
+            lines.append(f'  {kind} to: object {comment["reply_to"]}')
+        replies = [r for r in comment["replies"] if r is not None]
+        if replies:
+            lines.append(f'  Replies: {", ".join(str(r) for r in replies)}')
+        groupMembers = [r for r in comment["group_members"] if r is not None]
+        if groupMembers:
+            lines.append(f'  Grouped with: {", ".join(str(r) for r in groupMembers)}')
+        if comment["state"]:
+            lines.append(
+                f'  Review state: {comment["state_model"]}: {comment["state"]}'
+            )
+        if comment["flags"]:
+            lines.append(f'  Flags: {", ".join(comment["flags"])}')
+        if comment["rect"]:
+            lines.append(f'  Rectangle: {comment["rect"]}')
+        if comment["popup_id"] is not None:
+            lines.append(f'  Popup: object {comment["popup_id"]}')
+        attachment = comment.get("attachment")
+        if attachment:
+            size = (
+                f'{attachment["size"]} bytes'
+                if attachment["size"] is not None
+                else "size unknown"
+            )
+            lines.append(
+                f'  Attachment: {attachment["file_name"] or "(no name)"} ({size}, {attachment["mime_type"] or "type unknown"}), stream object {attachment["stream_id"]}'
+            )
+            if attachment["description"]:
+                lines.append(f'  Attachment description: {attachment["description"]}')
+        if comment["status"] == "removed":
+            lines.append(f'  Status: removed by version {comment["removed_in"]}')
+        elif comment["status"] == "orphan":
+            lines.append("  Status: orphan, no version's page lists it")
+        if comment["edited"]:
+            lines.append("  History:")
+            for entry in comment["history"]:
+                said = self._oneLine(entry["contents"], 80) or "(no text)"
+                lines.append(
+                    f'    version {entry["version"]}: {said} [{entry["author"] or "?"}, {entry["modified"] or "no date"}]'
+                )
+        return newLine.join(lines)
+
+    def _commentThreads(self, comments):
+        byId = {c["object_id"]: c for c in comments if c["object_id"] is not None}
+        lines = []
+
+        def show(comment, indent):
+            notes = self._commentNotes(comment)
+            group = " (group)" if comment["reply_type"] == "Group" and indent else ""
+            who = " ".join(
+                part for part in (comment["author"] or "?", comment["modified"]) if part
+            )
+            lines.append(
+                f'{"  " * indent}{comment["subtype"]} {self._commentObjectTag(comment)}{group} {who}'
+                f'{": " + self._oneLine(comment["contents"], 90) if comment["contents"] else ""}'
+                f'{" [" + "; ".join(notes) + "]" if notes else ""}'
+            )
+            for replyId in comment["replies"] + comment["group_members"]:
+                if replyId in byId:
+                    show(byId[replyId], indent + 1)
+
+        page = object()
+        for comment in comments:
+            if comment["depth"] != 0:
+                continue
+            if comment["page"] != page:
+                page = comment["page"]
+                lines.append(f"Page {page}" if page is not None else "Not on a page")
+            show(comment, 1)
+        return newLine.join(lines)
+
+    def _commentSummary(self, comments):
+        counts = lambda key: sorted(
+            (
+                (k, sum(1 for c in comments if c[key] == k))
+                for k in {c[key] for c in comments if c[key]}
+            ),
+            key=lambda item: (-item[1], str(item[0])),
+        )
+        stamps = sorted(
+            c["created"] or c["modified"]
+            for c in comments
+            if c["created"] or c["modified"]
+        )
+        replies = [
+            c
+            for c in comments
+            if c["reply_to"] is not None and c["reply_type"] != "Group"
+        ]
+        lines = [
+            f'Comments: {len(comments)} (present {sum(c["status"] == "present" for c in comments)}, '
+            f'removed {sum(c["status"] == "removed" for c in comments)}, '
+            f'orphan {sum(c["status"] == "orphan" for c in comments)})',
+            "Types: " + ", ".join(f"{k} {n}" for k, n in counts("subtype")),
+            "Authors: " + ", ".join(f"{k} {n}" for k, n in counts("author")[:10]),
+        ]
+        if stamps:
+            lines.append(f"Dates: {stamps[0]} to {stamps[-1]}")
+        lines.append(f"Replies: {len(replies)}")
+        if counts("state"):
+            lines.append(
+                "Review states: " + ", ".join(f"{k} {n}" for k, n in counts("state"))
+            )
+        lines.append(
+            f'Hidden: {sum(1 for c in comments if "Hidden" in c["flags"] or "NoView" in c["flags"])}'
+        )
+        lines.append(f'Edited: {sum(c["edited"] for c in comments)}')
+        lines.append(
+            f'File attachments: {sum(1 for c in comments if c["subtype"] == "FileAttachment")}'
+        )
+        return newLine.join(lines)
+
+    _printable = staticmethod(printableText)
+
+    def _syntaxComments(self, argv, mode, version):
+        comments = self.pdfFile.getSyntaxComments(version)
+        if not comments:
+            self.log_output("comments " + argv, "No comments found in the file syntax")
+            return
+        if mode == "json":
+            output = json.dumps(comments, indent=2)
+        elif mode == "verbose":
+            blocks = []
+            for c in comments:
+                lines = [
+                    f'Offset {c["offset"]} (0x{c["offset"]:x}), '
+                    f'{"version " + str(c["version"]) if c["version"] is not None else "not in any version"}, '
+                    f'{c["location"]}, {c["length"]} bytes'
+                    f'{" (first " + str(len(c["text"])) + " shown)" if c["truncated"] else ""}',
+                    f'  {self._printable(c["text"])}',
+                ]
+                if self._printable(c["text"]) != c["text"]:
+                    lines.append(f'  Hex: {c["text"].encode("latin-1").hex()}')
+                blocks.append(newLine.join(lines))
+            output = (newLine * 2).join(blocks)
+        else:
+            table = PrettyTable(["Offset", "Version", "Location", "Length", "Text"])
+            table.set_style(TableStyle.SINGLE_BORDER)
+            table.align = "l"
+            for c in comments:
+                table.add_row(
+                    [
+                        c["offset"],
+                        c["version"] if c["version"] is not None else "-",
+                        c["location"],
+                        c["length"],
+                        self._oneLine(self._printable(c["text"]), 70),
+                    ]
+                )
+            output = str(table)
+        self.log_output("comments " + argv, output)
+
+    def do_comments(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("comments " + argv, message)
+            return False
+        args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("comments " + argv, message)
+            return False
+        modes = ("verbose", "thread", "summary", "json")
+        mode = "table"
+        page = version = None
+        syntax = False
+        i = 0
+        while i < len(args):
+            word = args[i]
+            if word == "syntax" and not syntax:
+                syntax = True
+            elif word in modes and mode == "table":
+                mode = word
+            elif (
+                word in ("page", "version")
+                and i + 1 < len(args)
+                and args[i + 1].isdigit()
+            ):
+                if word == "page":
+                    page = int(args[i + 1])
+                else:
+                    version = int(args[i + 1])
+                i += 1
+            else:
+                self.help_comments()
+                return False
+            i += 1
+        if syntax and (mode in ("thread", "summary") or page is not None):
+            self.help_comments()
+            return False
+        if version is not None and version > self.pdfFile.getNumUpdates():
+            message = "[!] Error: The version number is not valid"
+            self.log_output("comments " + argv, message)
+            return False
+        if syntax:
+            self._syntaxComments(argv, mode, version)
+            return
+        comments = self.pdfFile.getComments(version)
+        if page is not None:
+            comments = [c for c in comments if c["page"] == page]
+        if not comments:
+            self.log_output("comments " + argv, "No comments found")
+            return
+        if mode == "json":
+            output = json.dumps(comments, indent=2, default=str)
+        elif mode == "summary":
+            output = self._commentSummary(comments)
+        elif mode == "thread":
+            output = self._commentThreads(comments)
+        elif mode == "verbose":
+            output = (newLine * 2).join(self._commentDetail(c) for c in comments)
+        else:
+            table = PrettyTable(
+                ["Page", "Object", "Type", "Author", "Modified", "Contents", "Notes"]
+            )
+            table.set_style(TableStyle.SINGLE_BORDER)
+            table.align = "l"
+            for c in comments:
+                contents = self._oneLine(c["contents"], 60)
+                if c["reply_to"] is not None:
+                    kind = "group" if c["reply_type"] == "Group" else "re"
+                    contents = f'({kind}: {c["reply_to"]}) {contents}'.strip()
+                attachment = c.get("attachment")
+                if attachment and attachment["file_name"]:
+                    contents = f'{contents} [{attachment["file_name"]}]'.strip()
+                table.add_row(
+                    [
+                        c["page"] if c["page"] is not None else "-",
+                        self._commentObjectTag(c),
+                        c["subtype"],
+                        c["author"] or "",
+                        c["modified"] or c["created"] or "",
+                        contents,
+                        "; ".join(self._commentNotes(c)),
+                    ]
+                )
+            output = str(table)
+        self.log_output("comments " + argv, output)
+
+    def help_comments(self):
+        print(
+            f"{newLine}Usage: comments [verbose|thread|summary|json] [page $number] [version $number]"
+        )
+        print("       comments syntax [verbose|json] [version $number]")
+        print(
+            f"Lists the comments with author, date and text. Comments a later version removed, and "
+            f"annotations not listed on a page (orphans) are shown and marked.{newLine}"
+        )
+        print(
+            "verbose: everything known about each comment, including its edit history"
+        )
+        print("thread: replies grouped under the comment they answer")
+        print("summary: counts by type, author and review state")
+        print("json: all the fields, as JSON")
+        print("page: only the comments on that page")
+        print("version: the document as it stood at that version")
+        print(f"syntax: the % comments in the file itself.{newLine}")
 
     def do_create(self, argv):
         message = ""
@@ -6074,7 +6458,9 @@ class PDFConsole(cmd.Cmd):
                             )
         elif printOutput:
             if niceOutput:
-                niceOutput = f"\n{niceOutput}\n"
+                interactiveSession = not self.isCommand and self.use_rawinput
+                leadingBlankLine = "\n" if interactiveSession else ""
+                niceOutput = f"{leadingBlankLine}{niceOutput}\n"
                 if (
                     not self.variables["output_limit"][0]  # None or 0: no limit
                     or not self.use_rawinput
