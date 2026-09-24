@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+#
 #    peepdf-3 is a tool to analyse and modify PDF files
 #    https://github.com/digitalsleuth/peepdf-3
 #    Original Author: Jose Miguel Esparza <jesparza AT eternal-todo.com>
@@ -37,8 +39,10 @@ from lxml import etree
 
 try:
     from peepdf.PDFVulns import vulnsDict, vulnsVersion
+    from peepdf.PDFComments import commentNotes, commentObjectTag, printableText
 except ModuleNotFoundError:
     from PDFVulns import vulnsDict, vulnsVersion
+    from PDFComments import commentNotes, commentObjectTag, printableText
 
 DTFMT = "%Y%m%d-%H%M%S"
 jsErrorsFile = None
@@ -929,6 +933,11 @@ def getPeepCaseReport(
         "signatures": pdfFile.getSignatures(),
     }
 
+    analysis["comments"] = {
+        "annotations": pdfFile.getComments(),
+        "syntax": pdfFile.getSyntaxComments(),
+    }
+
     analysis["provenance"] = {
         "generated": dt.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z"),
         "peepdf_version": VERSION,
@@ -1134,6 +1143,52 @@ def getPeepCaseReportHTML(caseReportJSON):
                 f"<th>Fingerprints</th><th>Flags</th></tr>{chainRows}</table>"
             )
 
+    commentsSection = analysis.get("comments", {})
+    annotations = commentsSection.get("annotations", [])
+    syntaxComments = commentsSection.get("syntax", [])
+    if annotations:
+        annotationRows = ""
+        for comment in annotations:
+            contents = comment["contents"] or ""
+            attachment = comment.get("attachment")
+            if attachment and attachment.get("file_name"):
+                size = attachment.get("size")
+                contents += f"\n[{attachment['file_name']}{f', {size} bytes' if size is not None else ''}]"
+            if comment["reply_to"] is not None:
+                kind = "group" if comment["reply_type"] == "Group" else "re"
+                contents = f"({kind}: {comment['reply_to']}) {contents}"
+            annotationRows += (
+                f"<tr><td>{esc(comment['page'] if comment['page'] is not None else '-')}</td>"
+                f"<td>{esc(commentObjectTag(comment))}</td>"
+                f"<td>{esc(comment['subtype'])}</td>"
+                f"<td>{esc(comment['author'])}</td>"
+                f"<td>{esc(comment['modified'] or comment['created'])}</td>"
+                f"<td><pre>{esc(contents.strip())}</pre></td>"
+                f"<td class='warn'>{esc('; '.join(commentNotes(comment))) or '&mdash;'}</td></tr>"
+            )
+        annotationHtml = (
+            "<table><tr><th>Page</th><th>Object</th><th>Type</th><th>Author</th>"
+            f"<th>Modified</th><th>Contents</th><th>Notes</th></tr>{annotationRows}</table>"
+        )
+    else:
+        annotationHtml = "<p>No annotation comments found.</p>"
+    if syntaxComments:
+        syntaxRows = ""
+        for comment in syntaxComments:
+            syntaxRows += (
+                f"<tr><td>{comment['offset']}</td>"
+                f"<td>{esc(comment['version'] if comment['version'] is not None else '-')}</td>"
+                f"<td>{esc(comment['location'])}</td>"
+                f"<td>{comment['length']}</td>"
+                f"<td><pre>{esc(printableText(comment['text']))}</pre></td></tr>"
+            )
+        syntaxHtml = (
+            "<table><tr><th>Offset</th><th>Version</th><th>Location</th><th>Length</th>"
+            f"<th>Text</th></tr>{syntaxRows}</table>"
+        )
+    else:
+        syntaxHtml = "<p>No comments found in the file syntax.</p>"
+
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -1159,6 +1214,10 @@ pre {{ white-space: pre-wrap; margin: 0; font-size: 0.85em; }}
 {changelogTable}
 {jsSectionHtml}<h2>Digital signature</h2>
 {signatureHtml}
+<h2>Comments</h2>
+{annotationHtml}
+<h3>Comments in the file syntax</h3>
+{syntaxHtml}
 </body>
 </html>
 """

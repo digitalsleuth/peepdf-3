@@ -247,7 +247,7 @@ def main():
         from gui.main_window import MainWindow
 
     app = QApplication(sys.argv)
-    app.setApplicationName("peepdf")
+    app.setApplicationName("peepdf-3")
     icon = QPixmap()
     icon.loadFromData(base64.b64decode(__fingerprint__))
     app.setWindowIcon(QIcon(icon))
