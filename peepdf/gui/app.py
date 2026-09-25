@@ -243,8 +243,18 @@ def main():
 
     try:
         from peepdf.gui.main_window import MainWindow
+        from peepdf.PDFCore import VERSION
     except ModuleNotFoundError:
         from gui.main_window import MainWindow
+        from PDFCore import VERSION
+
+    try:
+        from ctypes import windll
+
+        app_id = f"digitalsleuth.peepdf-3.gui.v{VERSION.replace('.','-')}"
+        windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    except ImportError:
+        pass
 
     app = QApplication(sys.argv)
     app.setApplicationName("peepdf-3")
