@@ -182,6 +182,24 @@ class _ChangelogWorker(QThread):
             self.resultReady.emit("", str(exc))
 
 
+class _ImageClipWorker(QThread):
+    """
+    Runs getImageClipping() off the GUI thread: it reads every page's content.
+    """
+
+    resultReady = pyqtSignal(list, str)  # images, errorMessage
+
+    def __init__(self, pdf, parent=None):
+        super().__init__(parent)
+        self.pdf = pdf
+
+    def run(self):
+        try:
+            self.resultReady.emit(self.pdf.getImageClipping(), "")
+        except Exception as exc:
+            self.resultReady.emit([], str(exc))
+
+
 class _LoadingDialog(QDialog):
     canceled = pyqtSignal()
 
@@ -212,6 +230,20 @@ class _LoadingDialog(QDialog):
         self.close()
 
 
+class _ImageClipItem(QTreeWidgetItem):
+
+    def __init__(self, strings, sortKeys):
+        super().__init__(strings)
+        self.sortKeys = sortKeys
+
+    def __lt__(self, other):
+        tree = self.treeWidget()
+        column = tree.sortColumn() if tree is not None else 0
+        if isinstance(other, _ImageClipItem) and 0 <= column < len(self.sortKeys):
+            return self.sortKeys[column] < other.sortKeys[column]
+        return super().__lt__(other)
+
+
 class _ObjectTreeItem(QTreeWidgetItem):
     """
     The QTreeWidgetItem for the Object/Type tree.
@@ -220,14 +252,19 @@ class _ObjectTreeItem(QTreeWidgetItem):
     and not simply text.
     """
 
+    def __init__(self, strings, kind=None, version=0, objId=None):
+        super().__init__(strings)
+        self.kind = kind
+        self.version = version
+        self.objId = objId
+        self.typeKey = strings[1].lower() if len(strings) > 1 else ""
+
     def __lt__(self, other):
-        if not isinstance(other, QTreeWidgetItem):
+        if not isinstance(other, _ObjectTreeItem):
             return super().__lt__(other)
-        myData = self.data(0, Qt.ItemDataRole.UserRole) or {}
-        otherData = other.data(0, Qt.ItemDataRole.UserRole) or {}
         tree = self.treeWidget()
-        if myData.get("kind") == "version" and otherData.get("kind") == "version":
-            result = myData.get("version", 0) < otherData.get("version", 0)
+        if self.kind == "version" and other.kind == "version":
+            result = self.version < other.version
             if (
                 tree is not None
                 and tree.header().sortIndicatorOrder() == Qt.SortOrder.DescendingOrder
@@ -235,11 +272,10 @@ class _ObjectTreeItem(QTreeWidgetItem):
                 result = not result
             return result
         column = tree.sortColumn() if tree is not None else 0
-        if column == 0:
-            try:
-                return int(self.text(0)) < int(other.text(0))
-            except ValueError:
-                pass
+        if column == 0 and self.objId is not None and other.objId is not None:
+            return self.objId < other.objId
+        if column == 1:
+            return self.typeKey < other.typeKey
         return self.text(column).lower() < other.text(column).lower()
 
 
@@ -261,6 +297,8 @@ class MainWindow(QMainWindow):
         self._afterJSAnalysis = None
         self._activeChangelogWorker = None
         self._changelogProgress = None
+        self._activeImageClipWorker = None
+        self._imageClipProgress = None
         self._activeObjectJSProcess = None
         self._objectJSProgress = None
         self._lastTreeSnapshot = None
@@ -436,6 +474,7 @@ class MainWindow(QMainWindow):
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._onTreeContextMenu)
         treeHeader = self.tree.header()
+        treeHeader.sortIndicatorChanged.connect(self._onTreeSortChanged)
         objectColumnWidth = treeHeader.fontMetrics().horizontalAdvance("Object") + 24
         typeColumnWidth = treeHeader.fontMetrics().horizontalAdvance("Type") + 24
         treeHeader.setStretchLastSection(False)
@@ -479,6 +518,7 @@ class MainWindow(QMainWindow):
         self._buildSuspiciousTab()
         self._buildCommentsTab()
         self._buildAttachmentsTab()
+        self._buildImageClipTab()
         self._buildConsoleTab()
         self.treeFilterEdit.installEventFilter(self)
 
@@ -823,6 +863,62 @@ class MainWindow(QMainWindow):
         self.attachmentsTree.itemDoubleClicked.connect(self._onAttachmentItemActivated)
         self.attachmentsTabIndex = self.tabs.addTab(self.attachmentsTree, "Attachments")
 
+    def _buildImageClipTab(self):
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        toolbar = QHBoxLayout()
+        self.analyseImageClipButton = QPushButton("Analyse Image Clipping")
+        self.analyseImageClipButton.setEnabled(False)
+        self.analyseImageClipButton.setToolTip(
+            "Shows how much of each placed image is visible through the page box, "
+            "Form XObject /BBox and clip paths around it"
+        )
+        self.analyseImageClipButton.clicked.connect(self._analyseImageClipping)
+        toolbar.addWidget(self.analyseImageClipButton, 0, Qt.AlignmentFlag.AlignVCenter)
+        toolbar.addStretch(1)
+        layout.addLayout(toolbar)
+
+        self.imageClipTree = QTreeWidget()
+        self.imageClipTree.setHeaderLabels(
+            [
+                "Image",
+                "Location",
+                "Pixels",
+                "Placed (pt)",
+                "Visible",
+                "Clipped by",
+                "Print boxes",
+            ]
+        )
+        self.imageClipTree.setRootIsDecorated(False)
+        self.imageClipTree.setColumnWidth(0, 90)
+        self.imageClipTree.setColumnWidth(1, 240)
+        self.imageClipTree.itemDoubleClicked.connect(self._onImageClipItemActivated)
+        imageClipHeader = self.imageClipTree.header()
+        imageClipHeader.setSectionsClickable(True)
+        imageClipHeader.setSortIndicatorShown(True)
+        imageClipHeader.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+        imageClipHeader.sortIndicatorChanged.connect(self._onImageClipSortChanged)
+        layout.addWidget(self.imageClipTree)
+        self._resetImageClipTab()
+
+        self.imageClipTabIndex = self.tabs.addTab(container, "Image Clipping")
+
+    def _resetImageClipTab(self):
+        self.imageClipTree.clear()
+        self._clearImageClipSortIndicator()
+        self.imageClipTree.addTopLevelItem(
+            QTreeWidgetItem(
+                [
+                    'Click "Analyse Image Clipping" to check how much of each image is visible.'
+                ]
+            )
+        )
+        if hasattr(self, "imageClipTabIndex"):
+            self.tabs.setTabText(self.imageClipTabIndex, "Image Clipping")
+
     @staticmethod
     def _consoleWelcomeText():
         return (
@@ -943,6 +1039,12 @@ class MainWindow(QMainWindow):
         self._activeChangelogWorker = None
         self.changelogView.setPlainText(self._changelogPlaceholderText())
         self.computeChangelogButton.setEnabled(False)
+        if self._imageClipProgress is not None:
+            self._imageClipProgress.close()
+            self._imageClipProgress = None
+        self._activeImageClipWorker = None
+        self._resetImageClipTab()
+        self.analyseImageClipButton.setEnabled(False)
         if self._activeJSAnalysisProcess is not None:
             self._activeJSAnalysisProcess.kill()
             self._activeJSAnalysisProcess = None
@@ -1024,6 +1126,7 @@ class MainWindow(QMainWindow):
 
         self.showAllVersionsButton.setEnabled(True)
         self.computeChangelogButton.setEnabled(True)
+        self.analyseImageClipButton.setEnabled(True)
 
         if pdf.isEncrypted():
             self._offerDecrypt()
@@ -1703,14 +1806,14 @@ class MainWindow(QMainWindow):
                 if version == 0
                 else f"Version {version} (update)"
             )
-            versionItem = _ObjectTreeItem([label, ""])
+            versionItem = _ObjectTreeItem([label, ""], "version", version)
             versionItem.setData(
                 0, Qt.ItemDataRole.UserRole, {"kind": "version", "version": version}
             )
             self.tree.addTopLevelItem(versionItem)
             for objId in sorted(objectsIn.keys()):
                 objType, _refs = objectsIn[objId]
-                child = _ObjectTreeItem([str(objId), objType])
+                child = _ObjectTreeItem([str(objId), objType], "object", version, objId)
                 child.setData(
                     0,
                     Qt.ItemDataRole.UserRole,
@@ -1723,11 +1826,18 @@ class MainWindow(QMainWindow):
         self.tree.resizeColumnToContents(1)
         for i in range(self.tree.topLevelItemCount()):
             self.tree.topLevelItem(i).setExpanded(numUpdates == 0)
-        self.tree.setSortingEnabled(True)
-        self.tree.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+        header = self.tree.header()
+        header.setSectionsClickable(True)
+        header.setSortIndicatorShown(True)
+        header.blockSignals(True)
+        header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
+        header.blockSignals(False)
         self._treeExpandedBeforeFilter = None
         if self.treeFilterEdit.text().strip():
             self._applyTreeFilter()
+
+    def _onTreeSortChanged(self, column, order):
+        self.tree.sortItems(column, order)
 
     def _focusTreeFilter(self):
         if self.treeFilterEdit.isEnabled():
@@ -1888,6 +1998,129 @@ class MainWindow(QMainWindow):
         self.changelogView.setPlainText(
             output.rstrip("\n") if output else "No changelog output."
         )
+
+    def _analyseImageClipping(self):
+        if self.pdf is None:
+            return
+        worker = _ImageClipWorker(self.pdf, self)
+        self._activeImageClipWorker = worker
+        worker.resultReady.connect(
+            lambda images, err, w=worker: self._onImageClipFinished(w, images, err)
+        )
+        worker.finished.connect(worker.deleteLater)
+
+        progress = _LoadingDialog("Analysing image clipping, please wait...", self)
+        progress.canceled.connect(lambda w=worker: self._cancelImageClip(w))
+        self._imageClipProgress = progress
+
+        self.analyseImageClipButton.setEnabled(False)
+        progress.show()
+        QApplication.processEvents()
+        worker.start()
+
+    def _cancelImageClip(self, worker):
+        if self._activeImageClipWorker is worker:
+            self._activeImageClipWorker = None
+        if self._imageClipProgress is not None:
+            self._imageClipProgress.close()
+            self._imageClipProgress = None
+        self.analyseImageClipButton.setEnabled(True)
+
+    def _onImageClipFinished(self, worker, images, errorMessage):
+        if self._activeImageClipWorker is not worker:
+            return
+        self._activeImageClipWorker = None
+        if self._imageClipProgress is not None:
+            self._imageClipProgress.close()
+            self._imageClipProgress = None
+        self.analyseImageClipButton.setEnabled(True)
+        if errorMessage:
+            QMessageBox.critical(
+                self, "Error", f"Failed to analyse image clipping:\n{errorMessage}"
+            )
+            return
+        self._populateImageClipTab(images)
+
+    def _clearImageClipSortIndicator(self):
+        header = self.imageClipTree.header()
+        header.blockSignals(True)
+        header.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+        header.blockSignals(False)
+
+    def _onImageClipSortChanged(self, column, order):
+        if column >= 0:
+            self.imageClipTree.sortItems(column, order)
+
+    def _populateImageClipTab(self, images):
+        self.imageClipTree.clear()
+        self._clearImageClipSortIndicator()
+        clippedCount = sum(1 for image in images if image["clipped"])
+        ordered = sorted(
+            images,
+            key=lambda i: (not i["clipped"], i["visible_fraction"] or 0, i["page"]),
+        )
+        for image in ordered:
+            fraction = image["visible_fraction"]
+            pixels = (
+                f'{image["width_px"]}x{image["height_px"]}'
+                if image["width_px"] is not None and image["height_px"] is not None
+                else "-"
+            )
+            hiddenBy = list(image["clipped_by"]) + [
+                f"{label} (unmeasured)" for label in image["unmeasured_clips"]
+            ]
+            printNotes = "; ".join(
+                f"past {name} ({inside * 100:.1f}% inside)"
+                for name, inside in image["print_boxes"].items()
+            )
+            pixelCount = (
+                image["width_px"] * image["height_px"]
+                if image["width_px"] is not None and image["height_px"] is not None
+                else -1
+            )
+            item = _ImageClipItem(
+                [
+                    (
+                        f'#{image["image_id"]}'
+                        if image["image_id"] is not None
+                        else "(inline)"
+                    ),
+                    image["location"],
+                    pixels,
+                    f'{image["placed_width_pt"]:g} x {image["placed_height_pt"]:g}',
+                    f"{fraction * 100:.1f}%" if fraction is not None else "-",
+                    "; ".join(hiddenBy),
+                    printNotes,
+                ],
+                [
+                    image["image_id"] if image["image_id"] is not None else -1,
+                    (image["page"], image["location"]),
+                    pixelCount,
+                    image["placed_width_pt"] * image["placed_height_pt"],
+                    fraction if fraction is not None else -1,
+                    "; ".join(hiddenBy).lower(),
+                    printNotes.lower(),
+                ],
+            )
+            if image["nav_id"] is not None and image["nav_version"] is not None:
+                item.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    {"id": image["nav_id"], "version": image["nav_version"]},
+                )
+            self.imageClipTree.addTopLevelItem(item)
+        if not images:
+            self.imageClipTree.addTopLevelItem(QTreeWidgetItem(["No images found."]))
+        self.tabs.setTabText(
+            self.imageClipTabIndex,
+            f"Image Clipping ({clippedCount} clipped)" if images else "Image Clipping",
+        )
+
+    def _onImageClipItemActivated(self, item, _column):
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        self._selectTreeObject(data["id"], data["version"])
 
     def _showVersionInfo(self, version):
         stats = self.pdf.getStats()
