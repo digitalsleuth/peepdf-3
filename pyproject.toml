@@ -7,7 +7,7 @@ exclude = ["archive*"]
 
 [project]
 name = "peepdf-3"
-version = "6.0.0-rc1"
+version = "6.0.0"
 dependencies = [
   "requests",
   "pypdf",
@@ -19,7 +19,7 @@ dependencies = [
   "prettytable>=3.12.0",
   "STPyV8",
   "asn1crypto",
-  "cryptography",
+  "cryptography"
 ]
 requires-python = ">=3.9"
 authors = [

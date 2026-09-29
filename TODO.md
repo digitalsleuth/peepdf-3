@@ -1,1 +1,1 @@
-- [ ] Read box size and stream size in /BBox to see if the image is larger than the box
+- [x] Read box size and stream size in /BBox to see if the image is larger than the box
