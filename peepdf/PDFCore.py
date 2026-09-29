@@ -64,6 +64,7 @@ try:
         scanSyntaxComments as _scanSyntaxComments,
     )
     from peepdf.PDFAttachments import getAttachments as _getAttachments
+    from peepdf.PDFImageClip import getImageClipping as _getImageClipping
     from peepdf.PDFFontEncoding import (
         decodeContentStreamText,
         getBaseEncodingTable,
@@ -108,6 +109,7 @@ except ModuleNotFoundError:
         scanSyntaxComments as _scanSyntaxComments,
     )
     from PDFAttachments import getAttachments as _getAttachments
+    from PDFImageClip import getImageClipping as _getImageClipping
     from PDFFontEncoding import (
         decodeContentStreamText,
         getBaseEncodingTable,
@@ -7347,6 +7349,14 @@ class PDFFile:
         Every attachment in the document as of 'version'.
         """
         return _getAttachments(self, version)
+
+    def getImageClipping(self, version=None):
+        """
+        Every placed image as of 'version' with the fraction of it that is
+        visible through the page box, Form XObject /BBox and clip paths
+        around it.
+        """
+        return _getImageClipping(self, version)
 
     def getChangeLog(self, version=None):
         lastVersionObjects = []

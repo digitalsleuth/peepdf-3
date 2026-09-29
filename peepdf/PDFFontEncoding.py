@@ -331,10 +331,16 @@ def parseToUnicodeCMap(cmapText):
     return table, byteWidth
 
 
-def tokenizeContentStream(content):
+_INLINE_ID = re.compile(r"\sID(?=\s)")
+_INLINE_EI = re.compile(r"\sEI(?=\s|$)")
+
+
+def tokenizeContentStream(content, inlineImages=False):
     """
     A minimal PDF content-stream tokenizer: enough to track literal/hex
     strings, names, numbers, arrays and operators for text extraction.
+    Inline images (BI ... ID data EI) are skipped, or with inlineImages=True
+    yielded as ("inline_image", the text between BI and ID).
     """
     length = len(content)
     i = 0
@@ -458,6 +464,15 @@ def tokenizeContentStream(content):
         keyword = content[start:i]
         if keyword == "":
             i += 1
+            continue
+        if keyword == "BI" and inlineImages:
+            idMatch = _INLINE_ID.search(content, i)
+            if idMatch is None:
+                i = length
+                continue
+            eiMatch = _INLINE_EI.search(content, idMatch.end())
+            yield ("inline_image", content[i : idMatch.start()])
+            i = eiMatch.end() if eiMatch else length
             continue
         if keyword == "BI":
             idIndex = content.find("ID", i)

@@ -998,6 +998,139 @@ class PDFConsole(cmd.Cmd):
         print("version: the document as it stood at that version")
         print(f"syntax: the % comments in the file itself.{newLine}")
 
+    def do_imageclip(self, argv):
+        if self.pdfFile is None:
+            message = "[!] Error: You must open a file"
+            self.log_output("imageclip " + argv, message)
+            return False
+        args = self.parseArgs(argv)
+        if args is None:
+            message = "[!] Error: The command line arguments have not been parsed successfully"
+            self.log_output("imageclip " + argv, message)
+            return False
+        verbose = clippedOnly = False
+        page = None
+        i = 0
+        while i < len(args):
+            word = args[i]
+            if word == "verbose":
+                verbose = True
+            elif word == "clipped":
+                clippedOnly = True
+            elif word == "page" and i + 1 < len(args) and args[i + 1].isdigit():
+                page = int(args[i + 1])
+                i += 1
+            else:
+                self.help_imageclip()
+                return False
+            i += 1
+
+        images = self.pdfFile.getImageClipping()
+        if page is not None:
+            images = [image for image in images if image["page"] == page]
+        if clippedOnly:
+            images = [image for image in images if image["clipped"]]
+        if not images:
+            message = "No clipped images found" if clippedOnly else "No images found"
+            self.log_output("imageclip " + argv, message)
+            return
+
+        def percent(image):
+            fraction = image["visible_fraction"]
+            return f"{fraction * 100:.1f}%" if fraction is not None else "-"
+
+        def pixels(image):
+            if image["width_px"] is None or image["height_px"] is None:
+                return "-"
+            return f'{image["width_px"]}x{image["height_px"]}'
+
+        def placed(image):
+            return f'{image["placed_width_pt"]:g}x{image["placed_height_pt"]:g}'
+
+        def printNotes(image):
+            return [
+                f"Past {name}: {fraction * 100:.1f}% inside"
+                for name, fraction in image["print_boxes"].items()
+            ]
+
+        def hiddenBy(image):
+            parts = list(image["clipped_by"])
+            parts += [f"{label} (unmeasured)" for label in image["unmeasured_clips"]]
+            return "; ".join(parts)
+
+        if not verbose:
+            table = PrettyTable(
+                [
+                    "Page",
+                    "Image",
+                    "Pixels",
+                    "Placed (pt)",
+                    "Visible",
+                    "Clipped by",
+                    "Print boxes",
+                ]
+            )
+            table.set_style(TableStyle.SINGLE_BORDER)
+            table.align = "l"
+            for image in images:
+                table.add_row(
+                    [
+                        image["page"],
+                        (
+                            f'#{image["image_id"]}'
+                            if image["image_id"] is not None
+                            else "(inline)"
+                        ),
+                        pixels(image),
+                        placed(image),
+                        percent(image),
+                        hiddenBy(image),
+                        "; ".join(
+                            note.replace("Past ", "past ") for note in printNotes(image)
+                        ),
+                    ]
+                )
+            output = str(table)
+        else:
+            blocks = []
+            for image in images:
+                what = (
+                    "inline image"
+                    if image["kind"] == "inline"
+                    else f'image {image["image_id"]}'
+                )
+                lines = [f'{image["location"]}: {what}']
+                if image["image_id"] is not None:
+                    lines.append(f'  Object: {image["image_id"]}')
+                lines.append(
+                    f"  Pixels: {pixels(image)}  Filter: {image['filter'] or 'none'}"
+                )
+                lines.append(f"  Placed size: {placed(image)} pt")
+                lines.append(f"  Visible: {percent(image)}")
+                for label in image["clipped_by"]:
+                    lines.append(f"  Clipped by: {label}")
+                for label in image["unmeasured_clips"]:
+                    lines.append(f"  Also clipped by (not measured): {label}")
+                for note in printNotes(image):
+                    lines.append(f"  {note}")
+                blocks.append(newLine.join(lines))
+            output = (newLine * 2).join(blocks)
+        self.log_output("imageclip " + argv, output)
+
+    def help_imageclip(self):
+        print(f"{newLine}Usage: imageclip [verbose] [clipped] [page $number]")
+        print(
+            f"Lists every placed image with how much of it is visible through the page box, "
+            f"Form XObject and annotation-appearance /BBox, and `re W n` clip paths around it. "
+            f"An image far larger than the box it is shown through (a photo of a signed "
+            f"document showing only the signature) has a low Visible percentage. Curved or "
+            f"concave clip paths are listed as unmeasured. Tiling patterns, soft masks and inline "
+            f"images are covered; TrimBox/BleedBox/ArtBox clip nothing and only add a note.{newLine}"
+        )
+        print("verbose: full detail per image")
+        print("clipped: only images with part of them hidden")
+        print(f"page: only images on that page{newLine}")
+
     def do_create(self, argv):
         message = ""
         validCreateTypes = ["pdf", "object_stream"]
