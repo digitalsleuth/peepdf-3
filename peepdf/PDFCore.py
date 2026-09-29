@@ -132,7 +132,7 @@ MAL_EOBJ = 3
 MAL_ESTREAM = 4
 MAL_XREF = 5
 MAL_BAD_HEAD = 6
-VERSION = "6.0.0"
+VERSION = "6.0.1"
 pdfFile = None
 newLine = os.linesep
 isForceMode = False
@@ -1507,6 +1507,30 @@ class PDFArray(PDFObject):
         self.elements = newElements
         ret = self.update()
         return ret
+
+    def getJSCode(self):
+        """
+        Gets the Javascript code of the object
+
+        @return: An array of Javascript code sections
+        """
+        return self.JSCode
+
+    def getUnescapedBytes(self):
+        """
+        Gets the escaped bytes of the object unescaped
+
+        @return: An array of unescaped bytes (string)
+        """
+        return self.unescapedBytes
+
+    def getURLs(self):
+        """
+        Gets the URLs of the object
+
+        @return: An array of URLs
+        """
+        return self.urlsFound
 
 
 class PDFDictionary(PDFObject):
