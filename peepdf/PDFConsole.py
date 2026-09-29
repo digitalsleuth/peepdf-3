@@ -1121,7 +1121,7 @@ class PDFConsole(cmd.Cmd):
         print(f"{newLine}Usage: imageclip [verbose] [clipped] [page $number]")
         print(
             f"Lists every placed image with how much of it is visible through the page box, "
-            f"Form XObject and annotation-appearance /BBox, and `re W n` clip paths around it. "
+            f"Form XObject and annotation-appearance /BBox, and 're W n' clip paths around it. "
             f"An image far larger than the box it is shown through (a photo of a signed "
             f"document showing only the signature) has a low Visible percentage. Curved or "
             f"concave clip paths are listed as unmeasured. Tiling patterns, soft masks and inline "
