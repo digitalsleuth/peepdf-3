@@ -73,7 +73,6 @@ def ppdfLog(
     }
     logLevel = levels.get(level, "INFO")
     logger = logging.getLogger(logger_name)
-    logger.setLevel(logLevel)
     if logger.hasHandlers():
         logger.handlers.clear()
     if not silent:
