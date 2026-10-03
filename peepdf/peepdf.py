@@ -286,6 +286,8 @@ def main():
         )
         return errorLogger
 
+    realStdout = sys.stdout
+    devnull = None
     try:
         # Avoid colors in the output
         if not COLORIZED_OUTPUT or args.avoidColors:
@@ -303,6 +305,9 @@ def main():
         if args.version:
             print(f"peepdf v{VERSION}")
             argsParser.exit()
+        if args.silent:
+            devnull = open(os.devnull, "w", encoding="utf-8")
+            sys.stdout = devnull
         if args.update:
             if numArgs > 1:
                 print(
@@ -431,7 +436,10 @@ def main():
                             f"[*] Warning: The file {args.scriptFile} cannot be found - check your path and try again!"
                         )
                     console = PDFConsole(
-                        pdf, VT_KEY, args.avoidColors, stdin=scriptFileObject
+                        pdf,
+                        VT_KEY,
+                        args.avoidColors,
+                        stdin=scriptFileObject,
                     )
                     console.jsErrorsFile = jsErrorsFile
                     try:
@@ -733,8 +741,9 @@ def main():
             errorLogger.error(errorMessage)
             errorLogger.error(str(e))
     finally:
-        # Shutdown would otherwise collect over every parsed object (~11 s on a
-        # 127,000-object file); the process is ending, so skip them.
+        if devnull is not None:
+            sys.stdout = realStdout
+            devnull.close()
         gc.freeze()
         if os.path.exists(errorsFile) and os.path.getsize(errorsFile) != 0:
             message = f"{newLine}Please don't forget to report the errors found in file {errorsFile}:{newLine * 2}"

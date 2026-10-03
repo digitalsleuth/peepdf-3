@@ -80,6 +80,8 @@ def ppdfLog(
         stdout = logging.StreamHandler(stream=sys.stdout)
         stdout.setLevel(logLevel)
         logger.addHandler(stdout)
+    else:
+        logger.addHandler(logging.NullHandler())
     if log_to_file:
         log_file = logging.FileHandler(file, encoding=enc)
         log_file.setLevel(logLevel)

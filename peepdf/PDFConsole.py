@@ -6519,6 +6519,7 @@ class PDFConsole(cmd.Cmd):
         @param printOutput: Boolean to specify if the output will be written to the console or not. Default value: True.
         @param bytesOutput: Boolean to specify if we want to print raw bytes or not. Default value: False.
         """
+
         if isinstance(output, bytes):
             output = output.decode("latin-1")
         errorIndex = output.find("[!] Error")
@@ -6543,7 +6544,7 @@ class PDFConsole(cmd.Cmd):
             if isinstance(longOutput, str):
                 longOutput = longOutput.encode()
             with open(self.loggingFile, "ab") as logFile:
-                logFile.write("PPDF> " + longOutput)
+                logFile.write(b"PPDF> " + longOutput)
         if self.redirect:
             if bytesToSave is None:
                 bytesToSave = [niceOutput]
