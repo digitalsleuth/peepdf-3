@@ -6,3 +6,4 @@ peepdf_error*
 dist*
 archive
 .pytest_cache
+make_version_txt.py
