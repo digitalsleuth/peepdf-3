@@ -106,6 +106,13 @@ MONO_FONT = "Consolas" if os.name == "nt" else "Monospace"
 MAX_COMMENT_ROWS = 5000
 
 
+def _jsSubprocessArguments(*args):
+    # Adding support for pyinstaller exe to run without -m
+    if getattr(sys, "frozen", False):
+        return ["--js-subprocess", *args]
+    return ["-m", "peepdf.gui._js_subprocess", *args]
+
+
 def hexdumpColumns(data, width=16, offsetFormat="hex"):
     """
     Hex viewer columns. offsetFormat is "hex" or "decimal".
@@ -725,9 +732,11 @@ class MainWindow(QMainWindow):
         bytesView.verticalScrollBar().valueChanged.connect(
             offsetView.verticalScrollBar().setValue
         )
-        bytesView.verticalScrollBar().valueChanged.connect(
-            asciiView.verticalScrollBar().setValue
-        )
+        scrollBars = [v.verticalScrollBar() for v in (offsetView, bytesView, asciiView)]
+        for source in scrollBars:
+            for target in scrollBars:
+                if target is not source:
+                    source.valueChanged.connect(target.setValue)
 
         # The Offset header doubles as a toggle button: click it to switch
         # between hexadecimal and decimal offsets.
@@ -1345,9 +1354,7 @@ class MainWindow(QMainWindow):
 
         process = QProcess(self)
         process.setProgram(sys.executable)
-        process.setArguments(
-            ["-m", "peepdf.gui._js_subprocess", "probe", absFileName, jsErrFile]
-        )
+        process.setArguments(_jsSubProcessArguments("probe", absFileName, jsErrFile))
         process.setWorkingDirectory(_ROOT_PATH)
         self._activeJSAnalysisProcess = process
         process.finished.connect(
@@ -2692,14 +2699,9 @@ class MainWindow(QMainWindow):
         process = QProcess(self)
         process.setProgram(sys.executable)
         process.setArguments(
-            [
-                "-m",
-                "peepdf.gui._js_subprocess",
-                "object",
-                os.path.abspath(self.fileName),
-                str(objId),
-                str(version),
-            ]
+            _jsSubprocessArguments(
+                "object", os.path.abspath(self.fileName), str(objId), str(version)
+            )
         )
         process.setWorkingDirectory(_ROOT_PATH)
         self._activeObjectJSProcess = process

@@ -232,6 +232,12 @@ QQAArEEAgKxBgACsQYABrEGAAaxBwAOsQeAHrEH6H6xB
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--js-subprocess":
+        try:
+            from peepdf.gui._js_subprocess import main as jsSubprocessMain
+        except ModuleNotFoundError:
+            from gui._js_subprocess import main as jsSubprocessMain
+        sys.exit(jsSubprocessMain(sys.argv[2:]))
     try:
         from PyQt6.QtWidgets import QApplication
         from PyQt6.QtGui import QPixmap, QIcon
