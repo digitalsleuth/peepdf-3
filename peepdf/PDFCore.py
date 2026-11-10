@@ -63,7 +63,10 @@ try:
         getComments as _getComments,
         scanSyntaxComments as _scanSyntaxComments,
     )
-    from peepdf.PDFAttachments import getAttachments as _getAttachments
+    from peepdf.PDFAttachments import (
+        getAttachments as _getAttachments,
+        analyzeAttachments as _analyzeAttachments,
+    )
     from peepdf.PDFImageClip import getImageClipping as _getImageClipping
     from peepdf.PDFFontEncoding import (
         decodeContentStreamText,
@@ -108,7 +111,10 @@ except ModuleNotFoundError:
         getComments as _getComments,
         scanSyntaxComments as _scanSyntaxComments,
     )
-    from PDFAttachments import getAttachments as _getAttachments
+    from PDFAttachments import (
+        getAttachments as _getAttachments,
+        analyzeAttachments as _analyzeAttachments,
+    )
     from PDFImageClip import getImageClipping as _getImageClipping
     from PDFFontEncoding import (
         decodeContentStreamText,
@@ -7373,6 +7379,13 @@ class PDFFile:
         Every attachment in the document as of 'version'.
         """
         return _getAttachments(self, version)
+
+    def analyzeAttachments(self, version=None):
+        """
+        Every attachment as of 'version', each with
+        a local static security analysis in attachment["security_analisys"]
+        """
+        return _analyzeAttachments(self, version)
 
     def getImageClipping(self, version=None):
         """

@@ -83,6 +83,7 @@ try:
     from peepdf.PDFFilters import decodeStream, encodeStream
     from peepdf.PDFVulns import vulnsDict
     from peepdf.PDFEnDec import JJDecoder
+    from peepdf.PDFAttachments import suspiciousLabel as _suspiciousLabel
 
 except ModuleNotFoundError:
     from PDFUtils import (
@@ -129,6 +130,7 @@ except ModuleNotFoundError:
     from PDFFilters import decodeStream, encodeStream
     from PDFVulns import vulnsDict
     from PDFEnDec import JJDecoder
+    from PDFAttachments import suspiciousLabel as _suspiciousLabel
 
 try:
     from colorama import init, Fore, Style
@@ -286,31 +288,43 @@ class PDFConsole(cmd.Cmd):
             message = "[!] Error: The command line arguments have not been parsed successfully"
             self.log_output("attachments " + argv, message)
             return False
-        if len(args) > 1 or (len(args) == 1 and args[0] != "verbose"):
+        validArgs = {"verbose", "scan"}
+        if len(args) > len(validArgs) or not set(args) <= validArgs:
             self.help_attachments()
             return False
-        verbose = bool(args)
-
-        attachments = self.pdfFile.getAttachments()
+        verbose = "verbose" in args
+        scan = "scan" in args
+        if scan:
+            attachments = self.pdfFile.analyzeAttachments()
+        else:
+            attachments = self.pdfFile.getAttachments()
         if not attachments:
             message = "No attachments found"
             self.log_output("attachments " + argv, message)
             return
 
         if not verbose:
-            table = PrettyTable(["Location", "File Name", "Size", "MIME Type"])
+            headers = ["Location", "File Name", "Size", "MIME Type"]
+            if scan:
+                headers += ["True Type", "Suspicious"]
+            table = PrettyTable(headers)
             table.set_style(TableStyle.SINGLE_BORDER)
             table.align = "l"
             for attachment in attachments:
                 size = attachment["size"]
-                table.add_row(
-                    [
-                        attachment["location"],
-                        attachment["file_name"] or "(unnamed)",
-                        f"{size:,}" if isinstance(size, int) else "-",
-                        attachment["mime_type"] or "-",
+                row = [
+                    attachment["location"],
+                    attachment["file_name"] or "(unnamed)",
+                    f"{size:,}" if isinstance(size, int) else "-",
+                    attachment["mime_type"] or "-",
+                ]
+                if scan:
+                    analysis = attachment["security_analysis"]
+                    row += [
+                        analysis.get("true_file_type") or analysis["status"],
+                        _suspiciousLabel(analysis),
                     ]
-                )
+                table.add_row(row)
             output = str(table)
         else:
             blocks = []
@@ -343,18 +357,56 @@ class PDFConsole(cmd.Cmd):
                 lines.append(f'  MIME type: {attachment["mime_type"] or "unknown"}')
                 if attachment["checksum_md5"]:
                     lines.append(f'  Checksum (MD5): {attachment["checksum_md5"]}')
+                if scan:
+                    lines.extend(self._analysisLines(attachment["security_analysis"]))
                 blocks.append(newLine.join(lines))
             output = (newLine * 2).join(blocks)
         self.log_output("attachments " + argv, output)
 
+    def _analysisLines(self, analysis):
+        lines = ["  Security analysis:"]
+        lines.append(f'    Status: {analysis["status"]}')
+        if analysis.get("error"):
+            lines.append(f'  Error: {analysis["error"]}')
+        if analysis["status"] == "analyzed":
+            lines.append(f'    Decoded size: {analysis["size_bytes"]:,} bytes')
+            lines.append(f'    SHA256: {analysis["sha256"]}')
+            lines.append(f'    MD5: {analysis["md5"]}')
+            lines.append(f'    Entropy: {analysis["entropy"]}')
+            lines.append(f'    True file type: {analysis["true_file_type"]}')
+            yaraLine = f'    YARA: {analysis["local_yara_status"]}'
+            if analysis["local_yara_matches"]:
+                yaraLine += " - " + ", ".join(analysis["local_yara_matches"])
+            lines.append(yaraLine)
+            active = [
+                f"{name}={value}" if not isinstance(value, bool) else name
+                for name, value in analysis["indicators"].items()
+                if value
+            ]
+            lines.append(f'    Indicators: {", ".join(active) or "none"}')
+        if analysis.get("yara_error"):
+            lines.append(f'    YARA error: {analysis["yara_error"]}')
+        for ruleFile, error in (analysis.get("yara_rule_errors") or {}).items():
+            lines.append(f"    YARA rule skipped: {ruleFile} : {error}")
+        lines.append(f"    Suspicious: {_suspiciousLabel(analysis)}")
+        return lines
+
     def help_attachments(self):
-        print(f"{newLine}Usage: attachments [verbose]")
+        print(f"{newLine}Usage: attachments [scan] [verbose]")
         print(
             f"Lists every attachment in the document, via page /FileAttachment "
             f"annotations and the /Names /EmbeddedFiles tree.{newLine}"
         )
         print(
             f"verbose: show full per-attachment detail instead of a summary table{newLine}"
+        )
+        print(
+            f"scan: also run a local static analysis of each embedded file "
+            f"(hashes, entropy, magic bytes, extension and integrity checks, "
+            f"YARA rules in peepdf/rules if yara-python is installed). "
+            f"Nothing is executed and nothing is sent over the network. "
+            f"Suspicious = unknown means no indicator fired but the YARA "
+            f"scan could not run.{newLine}"
         )
 
     def do_bytes(self, argv):

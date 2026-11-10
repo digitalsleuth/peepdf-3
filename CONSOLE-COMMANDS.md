@@ -4,7 +4,7 @@ There are a lot of commands that can be used in the interactive console of peepd
 
 ```
 Showing information
-
+    attachments
     bytes
     case_report
     changelog
@@ -91,6 +91,45 @@ Console
     reset
 ```
 
+## attachments
+
+```
+Usage: attachments [verbose] [scan]
+
+Lists every attachments in the file via page /FileAttachment and the /Names /EmbeddedFiles trees.
+
+verbose: show full per-attachment instead of a summary table. 
+scan: also run local static analysis of each embedded file (hashes, entropy, magic bytes, extension and integrity checks, YARA rules in /peepdf/rules/ if yara-python is installed). Nothing is executed and n othing is sent over the network. Suspicious is YES when at least one indicator fires, NO when non fires and YARA run, Unknown when YARA didn't run.
+
+PPDF> attachments scan
+
+┌───────────────────────┬─────────────┬──────┬───────────┬─────────────────────────────┬────────────┐
+│ Location              │ File Name   │ Size │ MIME Type │ True Type                   │ Suspicious │
+├───────────────────────┼─────────────┼──────┼───────────┼─────────────────────────────┼────────────┤
+│ document (Names tree) │ invoice.pdf │ 270  │ -         │ Windows PE (.exe/.dll/.sys) │ YES        │
+└───────────────────────┴─────────────┴──────┴───────────┴─────────────────────────────┴────────────┘
+
+PPDF> attachments verbose scan
+
+document (Names tree): invoice.pdf
+  Source: Names tree (document-level)
+  Object: 10
+  Embedded file stream: object 11
+  Names tree key: invoice.pdf
+  Size: 270 bytes
+  MIME type: unknown
+  Security analysis:
+    Status: analyzed
+    Decoded size: 270 bytes
+    SHA256: 83bdd75bf9c77b3c49e69b9088fff998f9cf530aa2a84be69ee467b49455cdbe
+    MD5: 72621da9895446908f393994ea8c0196
+    Entropy: 0.25
+    True file type: Windows PE (.exe/.dll/.sys)
+    YARA: scanned
+    Indicators: high_risk_file_type, extension_mismatch
+    Suspicious: YES
+ 
+```
 ## bytes
 
 ```

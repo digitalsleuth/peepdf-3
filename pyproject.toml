@@ -45,7 +45,7 @@ Wiki = "https://github.com/digitalsleuth/peepdf-3/wiki"
 
 [project.optional-dependencies]
 gui = ["PyQt6>=6.4"]
-
+yara = ["yara-python"]
 [project.scripts]
 peepdf = "peepdf.peepdf:main"
 peepdf-gui = "peepdf.gui.app:main"
