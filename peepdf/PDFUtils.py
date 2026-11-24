@@ -46,6 +46,7 @@ except ModuleNotFoundError:
 
 DTFMT = "%Y%m%d-%H%M%S"
 jsErrorsFile = None
+MAX_PASSWORD_LIST_ENTRIES = 1000
 
 
 class StripColors(logging.Formatter):
@@ -351,6 +352,31 @@ def getBytesFromFile(filename: str, offset: int, numBytes: int):
     return (-1, "File does not exist")
 
 
+def loadPasswordList(filename: str, maxEntries: int = MAX_PASSWORD_LIST_ENTRIES):
+    """
+    Reads candidate passwords from a text file, one per line.
+
+    @param filename: Path to the password list file
+    @param maxEntries: Maximum number of non-blank lines to use
+    @return: A tuple (status, statusContent), where statusContent is
+        (passwords, totalCount, truncated) in case status = 0 - passwords is
+        the list to try (at most maxEntries entries, in file order), totalCount
+        is how many non-blank lines the file had, and truncated says whether
+        totalCount exceeds maxEntries - or an error message in case status = -1
+    """
+    if not os.path.exists(filename):
+        return (-1, f"The file {filename} does not exist")
+    try:
+        with open(filename, "r", encoding="utf-8", errors="replace") as listFile:
+            lines = [line.rstrip("\r\n") for line in listFile]
+    except OSError as exc:
+        return (-1, str(exc))
+    allPasswords = [line for line in lines if line != ""]
+    totalCount = len(allPasswords)
+    truncated = totalCount > maxEntries
+    return (0, (allPasswords[:maxEntries], totalCount, truncated))
+
+
 def hexToString(hexString: str):
     """
     Simple method to convert an hexadecimal string to ascii string
@@ -494,7 +520,7 @@ def unescapeString(string: str):
                 unescapedParts.append(chr(int(digits, 8)))
                 i = j - 1
             else:
-                unescapedParts.append(string[i])
+                pass  # an unrecognized escape drops the backslash (PDF spec 7.3.4.2)
         else:
             unescapedParts.append(string[i])
         i += 1

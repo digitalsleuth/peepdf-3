@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-#
 #    peepdf-3 is a tool to analyse and modify PDF files
 #    https://github.com/digitalsleuth/peepdf-3
 #    Original Author: Jose Miguel Esparza <jesparza AT eternal-todo.com>
@@ -65,6 +63,7 @@ try:
     )
     from peepdf.PDFAttachments import getAttachments as _getAttachments
     from peepdf.PDFImageClip import getImageClipping as _getImageClipping
+    from peepdf.PDFImageExtract import extractImage as _extractImage
     from peepdf.PDFFontEncoding import (
         decodeContentStreamText,
         getBaseEncodingTable,
@@ -110,6 +109,7 @@ except ModuleNotFoundError:
     )
     from PDFAttachments import getAttachments as _getAttachments
     from PDFImageClip import getImageClipping as _getImageClipping
+    from PDFImageExtract import extractImage as _extractImage
     from PDFFontEncoding import (
         decodeContentStreamText,
         getBaseEncodingTable,
@@ -132,7 +132,7 @@ MAL_EOBJ = 3
 MAL_ESTREAM = 4
 MAL_XREF = 5
 MAL_BAD_HEAD = 6
-VERSION = "6.0.3"
+VERSION = "6.1.0"
 pdfFile = None
 newLine = os.linesep
 isForceMode = False
@@ -6017,7 +6017,7 @@ class PDFFile:
             ret = objectStream.encrypt(key, algorithm)
             if ret[0] == -1:
                 return (-1, f"[!] Error: {ret[1]}")
-        # Apply. If if fails half-way, the document is put back as it was
+        # Apply. If this fails half-way, the document is put back as it was
         body = self.body[version]
         objectStreamOffset = body.getNextOffset()
         previous = {
@@ -7201,9 +7201,11 @@ class PDFFile:
         return (0, "")
 
     def getBomDecodedValue(self, value):
-        byte_value = value.encode("latin-1")
-        decoded_value = byte_value.decode("utf-16")
-        return decoded_value
+        try:
+            byte_value = value.encode("latin-1")
+            return byte_value.decode("utf-16")
+        except (ValueError, UnicodeDecodeError):
+            return value
 
     @staticmethod
     def hasUtf16Bom(value):
@@ -7338,7 +7340,7 @@ class PDFFile:
         """
         Verifies embedded digital signature(s):
         was the signed byte range altered since signing,
-        and does it verify against the embedded signer certificate).
+        and does it verify against the embedded signer certificate.
         Does not do certificate chain-of-trust or revocation checking.
         """
         return _getSignatures(self, version)
@@ -7354,7 +7356,6 @@ class PDFFile:
     def getSyntaxComments(self, version=None):
         """
         The % comments of the file syntax as read from the file.
-        With 'version', only those up to and including that version.
         """
         if self.commentsMD5 != self.md5 and self.path and os.path.isfile(self.path):
             with open(self.path, "rb") as savedFile:
@@ -7381,6 +7382,9 @@ class PDFFile:
         around it.
         """
         return _getImageClipping(self, version)
+
+    def extractImage(self, objId, version=None):
+        return _extractImage(self, objId, version)
 
     def getChangeLog(self, version=None):
         lastVersionObjects = []
@@ -10326,7 +10330,7 @@ class PDFParser:
     def parseObjectText(self, text, expectedType=None, objectId=None):
         """
         Parses text holding a single array or dictionary, strictly.
-        May be wrapped as an indirect object ("4 0 obj ... endobj"), as rawobject shows.
+        It may be wrapped as an indirect object ("4 0 obj ... endobj"), as rawobject shows.
 
         @param expectedType: "array" or "dictionary", or None for either
         @param objectId: The id the wrapper has to carry, if there is one

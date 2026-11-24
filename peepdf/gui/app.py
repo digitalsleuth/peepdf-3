@@ -232,12 +232,14 @@ QQAArEEAgKxBgACsQYABrEGAAaxBwAOsQeAHrEH6H6xB
 
 
 def main():
+    # A frozen exe can't run 'python -m ...', so it relaunches itself with this.
     if len(sys.argv) > 1 and sys.argv[1] == "--js-subprocess":
         try:
             from peepdf.gui._js_subprocess import main as jsSubprocessMain
         except ModuleNotFoundError:
             from gui._js_subprocess import main as jsSubprocessMain
         sys.exit(jsSubprocessMain(sys.argv[2:]))
+
     try:
         from PyQt6.QtWidgets import QApplication
         from PyQt6.QtGui import QPixmap, QIcon
@@ -264,6 +266,11 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("peepdf-3")
+    # Fusion is the only style that draws every widget from QPalette roles;
+    # the platform's native style ignores most of them, so theme switching
+    # has no visible effect under it. Set once, before any widget exists, so
+    # there is never a live style change to (incompletely) repaint around.
+    app.setStyle("fusion")
     icon = QPixmap()
     icon.loadFromData(base64.b64decode(__fingerprint__))
     app.setWindowIcon(QIcon(icon))
