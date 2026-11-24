@@ -31,8 +31,16 @@ import os
 import sys
 from datetime import datetime as dt, timezone
 
-from PyQt6.QtCore import QEvent, Qt, QProcess, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QFont, QKeySequence, QShortcut
+from PyQt6.QtCore import QEvent, QObject, Qt, QProcess, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import (
+    QAction,
+    QActionGroup,
+    QFont,
+    QKeySequence,
+    QPalette,
+    QShortcut,
+    QTextCursor,
+)
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -48,6 +56,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
+    QProxyStyle,
     QPushButton,
     QSizeGrip,
     QSplitter,
@@ -68,20 +77,22 @@ try:
     import peepdf.PDFCore as pdfCoreModule
     from peepdf.PDFVulns import vulnsDict
     from peepdf.PDFConsole import PDFConsole, OCR_PAGE_WARNING_THRESHOLD
-    from peepdf.PDFUtils import DTFMT
+    from peepdf.PDFUtils import DTFMT, loadPasswordList, MAX_PASSWORD_LIST_ENTRIES
     from peepdf.PDFComments import (
         commentNotes,
         commentObjectTag,
         oneLine,
         printableText,
     )
+    from peepdf.gui import themes
 except ModuleNotFoundError:
     from PDFCore import PDFParser, VERSION
     import PDFCore as pdfCoreModule
     from PDFVulns import vulnsDict
     from PDFConsole import PDFConsole, OCR_PAGE_WARNING_THRESHOLD
-    from PDFUtils import DTFMT
+    from PDFUtils import DTFMT, loadPasswordList, MAX_PASSWORD_LIST_ENTRIES
     from PDFComments import commentNotes, commentObjectTag, oneLine, printableText
+    from gui import themes
 
 
 _ROOT_PATH = os.path.dirname(
@@ -104,16 +115,21 @@ _CONSOLE_MUTATING_COMMANDS = frozenset(
 )
 MONO_FONT = "Consolas" if os.name == "nt" else "Monospace"
 MAX_COMMENT_ROWS = 5000
+_VALUE_VIEW_MAX_CHARS = 500_000
+_NOWRAP_ABOVE_CHARS = 1_000_000
+_EXTRACT_PROGRESS_DELAY_MS = 200
+_PRINTABLE_ASCII = bytes(b if 32 <= b < 127 else 46 for b in range(256))
+_ASYNC_OBJECT_WEIGHT = 1_000_000
 
 
 def _jsSubprocessArguments(*args):
-    # Adding support for pyinstaller exe to run without -m
+    # A frozen exe can't run '-m'; app.py handles --js-subprocess instead.
     if getattr(sys, "frozen", False):
         return ["--js-subprocess", *args]
     return ["-m", "peepdf.gui._js_subprocess", *args]
 
 
-def hexdumpColumns(data, width=16, offsetFormat="hex"):
+def hexdumpColumns(data, width=16, offsetFormat="hex", start=0):
     """
     Hex viewer columns. offsetFormat is "hex" or "decimal".
     """
@@ -121,15 +137,19 @@ def hexdumpColumns(data, width=16, offsetFormat="hex"):
         return "", "", ""
     if isinstance(data, str):
         data = data.encode("latin-1")
-    offsetLines = []
-    hexLines = []
-    asciiLines = []
-    for i in range(0, len(data), width):
-        chunk = data[i : i + width]
-        offsetLines.append(f"{i:08d}" if offsetFormat == "decimal" else f"{i:08x}")
-        hexLines.append(" ".join(f"{b:02x}" for b in chunk))
-        asciiLines.append("".join(chr(b) if 32 <= b < 127 else "." for b in chunk))
+    offsetSpec = "08d" if offsetFormat == "decimal" else "08x"
+    rows = range(0, len(data), width)
+    offsetLines = [f"{start + i:{offsetSpec}}" for i in rows]
+    hexLines = [data[i : i + width].hex(" ") for i in rows]
+    asciiLines = [
+        data[i : i + width].translate(_PRINTABLE_ASCII).decode("latin-1") for i in rows
+    ]
     return "\n".join(offsetLines), "\n".join(hexLines), "\n".join(asciiLines)
+
+
+def hexOffsetColumn(length, width=16, offsetFormat="hex", start=0):
+    offsetSpec = "08d" if offsetFormat == "decimal" else "08x"
+    return "\n".join(f"{start + i:{offsetSpec}}" for i in range(0, length, width))
 
 
 ## UI Start ##
@@ -207,12 +227,227 @@ class _ImageClipWorker(QThread):
             self.resultReady.emit([], str(exc))
 
 
+class _HexColumnsWorker(QThread):
+    """
+    Builds the hex-viewer text of a big object's raw and decoded streams off
+    the GUI thread, in slices so it can be abandoned part way through and doesn't
+    lock-up the GUI.
+    """
+
+    resultReady = pyqtSignal(object)  # {"raw": (offset, hex, ascii), "decoded": (...)}
+    SLICE_BYTES = 4 * 1024 * 1024
+
+    def __init__(
+        self, rawStream, decodedStream, offsetFormat, parent=None, offsetsOnly=False
+    ):
+        super().__init__(parent)
+        self.rawStream = rawStream
+        self.decodedStream = decodedStream
+        self.offsetFormat = offsetFormat
+        self.offsetsOnly = offsetsOnly
+
+    def _columns(self, data):
+        if not data:
+            return "", "", ""
+        if self.offsetsOnly:
+            offsets = []
+            for start in range(0, len(data), self.SLICE_BYTES):
+                if self.isInterruptionRequested():
+                    return None
+                length = min(self.SLICE_BYTES, len(data) - start)
+                offsets.append(
+                    hexOffsetColumn(length, offsetFormat=self.offsetFormat, start=start)
+                )
+            return "\n".join(offsets), "", ""
+        if isinstance(data, str):
+            data = data.encode("latin-1")
+        parts = ([], [], [])
+        for start in range(0, len(data), self.SLICE_BYTES):
+            if self.isInterruptionRequested():
+                return None
+            columns = hexdumpColumns(
+                data[start : start + self.SLICE_BYTES],
+                offsetFormat=self.offsetFormat,
+                start=start,
+            )
+            for part, column in zip(parts, columns):
+                part.append(column)
+        return tuple("\n".join(part) for part in parts)
+
+    def run(self):
+        try:
+            raw = self._columns(self.rawStream)
+            decoded = None if raw is None else self._columns(self.decodedStream)
+            result = None if decoded is None else {"raw": raw, "decoded": decoded}
+        except Exception:
+            result = None
+        if not self.isInterruptionRequested():
+            self.resultReady.emit(result)
+
+
+class _ChunkedTextLoader(QObject):
+    """
+    Puts big text into widgets one step per event-loop turn.
+    """
+
+    progressed = pyqtSignal(int)  # percent
+    done = pyqtSignal()
+    SLICE_CHARS = 512 * 1024
+
+    def __init__(self, targets, parent=None):
+        super().__init__(parent)
+        self._jobs = [[view, text, 0, whole] for view, text, whole in targets if text]
+        self._total = max(1, sum(len(text) for _view, text, _pos, _whole in self._jobs))
+        self._loaded = 0
+        self._timer = QTimer(self)
+        self._timer.setInterval(0)
+        self._timer.timeout.connect(self._step)
+
+    def start(self):
+        self._timer.start()
+
+    def cancel(self):
+        self._timer.stop()
+        self._jobs = []
+
+    def _step(self):
+        if not self._jobs:
+            self._timer.stop()
+            self.done.emit()
+            return
+        job = self._jobs[0]
+        view, text, pos, whole = job
+        if whole:
+            view.setPlainText(text)
+            piece = text
+        else:
+            piece = text[pos : pos + self.SLICE_CHARS]
+            cursor = QTextCursor(view.document())
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.insertText(piece)
+        job[2] = pos + len(piece)
+        self._loaded += len(piece)
+        self.progressed.emit(self._loaded * 100 // self._total)
+        if job[2] >= len(text):
+            self._jobs.pop(0)
+
+
+class _StreamWriteWorker(QThread):
+    """
+    Writes extracted stream bytes to disk in chunks, reporting progress. It
+    writes to "<path>.part" and renames at the end, so a cancel or a failure
+    never leaves a half-written file, nor destroys one it was meant to replace.
+    """
+
+    progressed = pyqtSignal(int)  # percent
+    resultReady = pyqtSignal(str)  # "" on success, "cancelled", or error
+    CHUNK_BYTES = 1024 * 1024
+
+    def __init__(self, data, path, parent=None):
+        super().__init__(parent)
+        self.data = data
+        self.path = path
+
+    def run(self):
+        partPath = f"{self.path}.part"
+        error = ""
+        try:
+            view = memoryview(self.data)
+            total = max(1, len(view))
+            with open(partPath, "wb") as outFile:
+                for pos in range(0, len(view), self.CHUNK_BYTES):
+                    if self.isInterruptionRequested():
+                        error = "cancelled"
+                        break
+                    outFile.write(view[pos : pos + self.CHUNK_BYTES])
+                    self.progressed.emit(
+                        min(100, (pos + self.CHUNK_BYTES) * 100 // total)
+                    )
+            if not error:
+                os.replace(partPath, self.path)
+        except OSError as exc:
+            error = str(exc)
+        if error:
+            try:
+                os.remove(partPath)
+            except OSError:
+                pass
+        self.resultReady.emit(error)
+
+
+class _PasswordListWorker(QThread):
+    """
+    Tries each password in 'passwords' (already loaded via loadPasswordList,
+    so bounded to MAX_PASSWORD_LIST_ENTRIES) against pdf.decrypt(), in order,
+    until one works. Runs off the GUI thread because the AES-256 (/R 6) key
+    derivation the PDF spec requires is deliberately slow (around a second per
+    attempt here, pure Python), so the full list could otherwise freeze the
+    window for minutes. A wrong password leaves pdf's state unchanged (see
+    PDFFile.decrypt), so retrying on the same object is safe.
+    """
+
+    progressed = pyqtSignal(int, int)  # attemptsSoFar, total
+    resultReady = pyqtSignal(
+        bool, bool, str, int
+    )  # found, cancelled, password, attemptsMade
+
+    def __init__(self, pdf, passwords, parent=None):
+        super().__init__(parent)
+        self.pdf = pdf
+        self.passwords = passwords
+
+    def run(self):
+        total = len(self.passwords)
+        for index, candidate in enumerate(self.passwords, start=1):
+            if self.isInterruptionRequested():
+                self.resultReady.emit(False, True, "", index - 1)
+                return
+            ret = self.pdf.decrypt(candidate)
+            self.progressed.emit(index, total)
+            if ret[0] != -1:
+                self.resultReady.emit(True, False, candidate, index)
+                return
+        self.resultReady.emit(False, False, "", total)
+
+
+class _ImageExtractWorker(QThread):
+    resultReady = pyqtSignal(str)  # "" on success, "cancelled", or the error
+
+    def __init__(self, pdf, imageId, path, parent=None):
+        super().__init__(parent)
+        self.pdf = pdf
+        self.imageId = imageId
+        self.path = path
+
+    def run(self):
+        status, result = self.pdf.extractImage(self.imageId)
+        if status == -1:
+            self.resultReady.emit(f"Could not extract image {self.imageId}: {result}")
+            return
+        partPath = f"{self.path}.part"
+        error = ""
+        try:
+            result.save(partPath, format="PNG")
+            if self.isInterruptionRequested():
+                error = "cancelled"
+            else:
+                os.replace(partPath, self.path)
+        except (OSError, ValueError) as exc:
+            error = f"Could not write to {self.path}:\n{exc}"
+        if error:
+            try:
+                os.remove(partPath)
+            except OSError:
+                pass
+        self.resultReady.emit(error)
+
+
 class _LoadingDialog(QDialog):
     canceled = pyqtSignal()
 
-    def __init__(self, labelText, parent=None):
+    def __init__(self, labelText, parent=None, title="Loading PDF"):
         super().__init__(parent)
-        self.setWindowTitle("Loading PDF")
+        self.setWindowTitle(title)
         self.setWindowModality(Qt.WindowModality.WindowModal)
 
         layout = QVBoxLayout(self)
@@ -286,6 +521,22 @@ class _ObjectTreeItem(QTreeWidgetItem):
         return self.text(column).lower() < other.text(column).lower()
 
 
+class _TallerTabBarStyle(QProxyStyle):
+    """Adds a couple of px of vertical room to tab text, whose descenders
+    (g, p, ...) are otherwise clipped by the base style's default metric.
+    Also removes the base style's vertical shift of unselected tab labels
+    (its "recessed" effect), which otherwise eats back into that room and
+    leaves descenders clipped on every tab except the selected one."""
+
+    def pixelMetric(self, metric, option=None, widget=None):
+        value = super().pixelMetric(metric, option, widget)
+        if metric == QStyle.PixelMetric.PM_TabBarTabVSpace:
+            return value + 2
+        if metric == QStyle.PixelMetric.PM_TabBarTabShiftVertical:
+            return 0
+        return value
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -306,17 +557,36 @@ class MainWindow(QMainWindow):
         self._changelogProgress = None
         self._activeImageClipWorker = None
         self._imageClipProgress = None
+        self._fullValueTexts = {}
+        self._noWrapValueViews = []
+        self._objectWorkers = []
+        self._streamWriteWorker = None
+        self._streamWriteProgress = None
+        self._streamWritePercent = 0
+        self._passwordListWorker = None
+        self._passwordListProgress = None
+        self._imageExtractWorker = None
+        self._imageExtractProgress = None
+        self._objectLoadToken = 0
+        self._objectLoadWorker = None
+        self._objectLoader = None
+        self._objectLoadProgress = None
         self._activeObjectJSProcess = None
         self._objectJSProgress = None
         self._lastTreeSnapshot = None
         self._treeExpandedBeforeFilter = None
         self._consoleHistory = []
         self._consoleHistoryIndex = 0
+        self._activeTheme = None
+        self._themedMenus = []
+        self._themeActions = {}
         self.setWindowTitle(f"peepdf-3 v{VERSION}")
         self.resize(1200, 800)
 
         self._buildMenus()
         self._buildLayout()
+        self._applyTheme(themes.savedThemeName(), persist=False)
+        self.resize(self.width() + 40, self.height())
         self.setStyleSheet(
             self.styleSheet() + "QPlainTextEdit { border: 1px solid black; }"
             "QPlainTextEdit:focus { border: 1px solid black; }"
@@ -398,29 +668,9 @@ class MainWindow(QMainWindow):
         self._cornerGrip.raise_()
 
     def _buildMenus(self):
-        menuStylesheet = """
-        QMenu {
-            background-color: white; color: black; border: 1px solid black; margin: 0;
-        }
-        QMenu::item {
-            background-color: white; color: black; margin: 0; padding: 4px 20px 4px 20px;
-        }
-        QMenu::item:selected {
-            background-color: #1644b9; color: white; margin: 0; padding: 4px 20px 4px 20px;
-        }
-        QMenuBar {
-            background-color: white; color: black;
-        }
-        QMenuBar::item {
-            background-color: white; color: black;
-        }
-        QMenuBar::item:selected {
-            background-color: #1644b9; color: white;
-        }
-        """
+        self._themedMenus = []
         fileMenu = self.menuBar().addMenu("&File")
-        if os.name == "nt":
-            fileMenu.setStyleSheet(menuStylesheet)
+        self._themedMenus.append(fileMenu)
         openAction = QAction("&Open...", self)
         openAction.setShortcut("Ctrl+O")
         openAction.triggered.connect(self.promptOpenFile)
@@ -445,8 +695,7 @@ class MainWindow(QMainWindow):
         fileMenu.addAction(exitAction)
 
         analysisMenu = self.menuBar().addMenu("&Analysis")
-        if os.name == "nt":
-            analysisMenu.setStyleSheet(menuStylesheet)
+        self._themedMenus.append(analysisMenu)
         self.analyseJSAction = QAction("Analyse &JS...", self)
         self.analyseJSAction.setEnabled(False)
         self.analyseJSAction.triggered.connect(self._analyseJS)
@@ -462,12 +711,87 @@ class MainWindow(QMainWindow):
         self.verifySignaturesAction.triggered.connect(self._verifySignatures)
         analysisMenu.addAction(self.verifySignaturesAction)
 
+        viewMenu = self.menuBar().addMenu("&View")
+        self._themedMenus.append(viewMenu)
+        self._buildThemeMenu(viewMenu)
+
         helpMenu = self.menuBar().addMenu("&Help")
-        if os.name == "nt":
-            helpMenu.setStyleSheet(menuStylesheet)
+        self._themedMenus.append(helpMenu)
         aboutAction = QAction("&About", self)
         aboutAction.triggered.connect(self.showAbout)
         helpMenu.addAction(aboutAction)
+
+    def _buildThemeMenu(self, viewMenu):
+        themeMenu = viewMenu.addMenu("&Theme")
+        themeGroup = QActionGroup(self)
+        themeGroup.setExclusive(True)
+        self._themeActions = {}
+
+        def addThemeAction(name):
+            action = QAction(name, self)
+            action.setCheckable(True)
+            action.triggered.connect(lambda checked, n=name: self._onThemeSelected(n))
+            themeGroup.addAction(action)
+            themeMenu.addAction(action)
+            self._themeActions[name] = action
+
+        addThemeAction(themes.CLASSIC_NAME)
+        themeMenu.addSeparator()
+        for name in themes.availableThemes():
+            addThemeAction(name)
+
+    def _onThemeSelected(self, name):
+        self._applyTheme(name)
+
+    def _applyTheme(self, name, persist=True):
+        theme = None
+        if name != themes.CLASSIC_NAME:
+            theme = themes.availableThemes().get(name)
+            if theme is None:
+                name = themes.CLASSIC_NAME
+        self._activeTheme = theme
+        application = QApplication.instance()
+        if application is not None:
+            # The app is set to the Fusion style once at startup (app.py) and
+            # never switched at runtime: Fusion is the only style that draws
+            # every widget (tabs included) from QPalette roles, so it must
+            # already be active for a palette change to have any visible
+            # effect, and switching styles on a live app is its own source
+            # of incomplete repaints, on top of the one below.
+            application.setPalette(themes.buildPalette(theme) if theme is not None else QPalette())
+            # A palette change on an app that already has widgets isn't fully
+            # repainted by the ApplicationPaletteChange event alone -- some
+            # widgets (the tab pages) keep showing the previous theme until
+            # something else forces a second pass (e.g. picking the theme
+            # again). Force that pass now, in this same call, before any of
+            # our own per-widget overrides below, which must be the last
+            # word so this doesn't wipe them out again.
+            for widget in application.allWidgets():
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
+                widget.update()
+        if os.name == "nt":
+            stylesheet = themes.menuStylesheet(theme)
+            for menu in self._themedMenus:
+                menu.setStyleSheet(stylesheet)
+        tree = getattr(self, "tree", None)
+        if tree is not None:
+            treePalette = QPalette() if theme is None else QPalette(tree.palette())
+            if theme is not None:
+                # Matches the tab pane's own chrome color (same field the menu
+                # bar and status bar use) instead of the slightly different
+                # shade Fusion otherwise gives "content" widgets like this.
+                treePalette.setColor(QPalette.ColorRole.Base, theme.base)
+                treePalette.setColor(QPalette.ColorRole.AlternateBase, theme.base)
+            tree.setPalette(treePalette)
+            # QTreeWidget's viewport only inherits the tree's palette once;
+            # after that it has its own resolved palette and ignores further
+            # changes to the tree's, so it must be set directly too.
+            tree.viewport().setPalette(treePalette)
+        for actionName, action in self._themeActions.items():
+            action.setChecked(actionName == name)
+        if persist:
+            themes.saveThemeName(name)
 
     def _buildLayout(self):
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -484,10 +808,9 @@ class MainWindow(QMainWindow):
         treeHeader.sortIndicatorChanged.connect(self._onTreeSortChanged)
         objectColumnWidth = treeHeader.fontMetrics().horizontalAdvance("Object") + 24
         typeColumnWidth = treeHeader.fontMetrics().horizontalAdvance("Type") + 24
-        treeHeader.setStretchLastSection(False)
+        treeHeader.setStretchLastSection(True)
         treeHeader.setMinimumSectionSize(min(objectColumnWidth, typeColumnWidth))
         self.tree.setColumnWidth(0, objectColumnWidth)
-        self.tree.setColumnWidth(1, typeColumnWidth)
 
         self.treeFilterEdit = QLineEdit()
         self.treeFilterEdit.setPlaceholderText(
@@ -508,7 +831,7 @@ class MainWindow(QMainWindow):
 
         treePane = QWidget()
         treeLayout = QVBoxLayout(treePane)
-        treeLayout.setContentsMargins(0, 0, 0, 0)
+        treeLayout.setContentsMargins(3, 2, 0, 0)
         treeLayout.setSpacing(2)
         treeLayout.addWidget(self.treeFilterEdit)
         treeLayout.addWidget(self.tree)
@@ -516,6 +839,8 @@ class MainWindow(QMainWindow):
         splitter.addWidget(treePane)
 
         self.tabs = QTabWidget()
+        self._tabBarStyle = _TallerTabBarStyle(QApplication.instance().style())
+        self.tabs.tabBar().setStyle(self._tabBarStyle)
         self._buildInfoTab()
         self._buildMetadataTab()
         self._buildVersionInfoTab()
@@ -533,7 +858,7 @@ class MainWindow(QMainWindow):
         rightFrame.setFrameShape(QFrame.Shape.StyledPanel)
         rightFrame.setMinimumWidth(420)
         rightLayout = QVBoxLayout(rightFrame)
-        rightLayout.setContentsMargins(0, 0, 0, 0)
+        rightLayout.setContentsMargins(0, 0, 1, 0)
         rightLayout.addWidget(self.tabs)
         splitter.addWidget(rightFrame)
         self.rightFrame = rightFrame
@@ -660,17 +985,22 @@ class MainWindow(QMainWindow):
 
         monoFont = QFont(MONO_FONT, 10)
 
+        self._valueBanners = {}
         self.decodedValueView = QPlainTextEdit()
         self.decodedValueView.setReadOnly(True)
         self.decodedValueView.setFont(monoFont)
-        self.objSubTabs.addTab(self.decodedValueView, "Decoded Value")
+        self.objSubTabs.addTab(
+            self._makeValueTab("decoded", self.decodedValueView), "Decoded Value"
+        )
 
         self._buildDecodedHexTab(monoFont)
 
         self.rawValueView = QPlainTextEdit()
         self.rawValueView.setReadOnly(True)
         self.rawValueView.setFont(monoFont)
-        self.objSubTabs.addTab(self.rawValueView, "Raw Value")
+        self.objSubTabs.addTab(
+            self._makeValueTab("raw", self.rawValueView), "Raw Value"
+        )
 
         self._buildHexTab(monoFont)
 
@@ -682,6 +1012,28 @@ class MainWindow(QMainWindow):
 
         self.tabs.addTab(container, "Object")
         self.objectTabContainer = container
+
+    def _makeValueTab(self, key, view):
+        """A value view with a hidden banner above it, for when its text is cut short."""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        banner = QWidget()
+        row = QHBoxLayout(banner)
+        row.setContentsMargins(4, 2, 4, 2)
+        note = QLabel()
+        showAllButton = QPushButton("Show all")
+        showAllButton.clicked.connect(
+            lambda checked=False, k=key: self._showFullValue(k)
+        )
+        row.addWidget(note, 1)
+        row.addWidget(showAllButton)
+        banner.hide()
+        layout.addWidget(banner)
+        layout.addWidget(view)
+        self._valueBanners[key] = (banner, note, showAllButton)
+        return container
 
     def _buildHexTab(self, monoFont):
         (
@@ -823,6 +1175,12 @@ class MainWindow(QMainWindow):
         headerText = self._hexOffsetHeaderText()
         self.hexOffsetHeaderButton.setText(headerText)
         self.decodedHexOffsetHeaderButton.setText(headerText)
+        streamBytes = len(self._currentRawStream or "") + len(
+            self._currentDecodedStream or ""
+        )
+        if streamBytes > _ASYNC_OBJECT_WEIGHT:
+            self._reloadOffsetsInBackground()
+            return
         self._refreshHexOffsetColumn(
             self.hexOffsetView, self.hexBytesView, self._currentRawStream
         )
@@ -835,14 +1193,91 @@ class MainWindow(QMainWindow):
     def _refreshHexOffsetColumn(self, offsetView, bytesView, data):
         if not data:
             return
-        offsetText, _hexText, _asciiText = hexdumpColumns(
-            data, offsetFormat=self._hexOffsetFormat
-        )
+        offsetText = hexOffsetColumn(len(data), offsetFormat=self._hexOffsetFormat)
         # Make sure the hex offsets realign with the scroll position because
         # setPlainText resets the position to 0 when the hex/dec view changes.
         currentScrollValue = bytesView.verticalScrollBar().value()
         offsetView.setPlainText(offsetText)
         offsetView.verticalScrollBar().setValue(currentScrollValue)
+
+    def _offsetColumnPairs(self):
+        return (
+            (self.hexOffsetView, self.hexBytesView, self.hexAsciiView),
+            (
+                self.decodedHexOffsetView,
+                self.decodedHexBytesView,
+                self.decodedHexAsciiView,
+            ),
+        )
+
+    def _reloadOffsetsInBackground(self):
+        self._cancelObjectLoad()
+        token = self._objectLoadToken
+        scrollValues = [
+            bytesView.verticalScrollBar().value()
+            for _o, bytesView, _a in self._offsetColumnPairs()
+        ]
+        progress = _LoadingDialog(
+            "Updating the offset column, please wait...", self, title="Updating offsets"
+        )
+        for cancelButton in progress.findChildren(QPushButton):
+            cancelButton.setEnabled(False)
+        self._objectLoadProgress = progress
+
+        worker = _HexColumnsWorker(
+            self._currentRawStream,
+            self._currentDecodedStream,
+            self._hexOffsetFormat,
+            self,
+            offsetsOnly=True,
+        )
+        worker.resultReady.connect(
+            lambda columns, t=token, s=scrollValues: self._onOffsetColumnsReady(
+                t, columns, s
+            )
+        )
+        self._trackObjectWorker(worker)
+        self._objectLoadWorker = worker
+
+        progress.show()
+        QApplication.processEvents()
+        worker.start()
+
+    def _onOffsetColumnsReady(self, token, columns, scrollValues):
+        if token != self._objectLoadToken:
+            return
+        self._objectLoadWorker = None
+        if columns is None:
+            self._finishObjectLoad()
+            QMessageBox.critical(
+                self, "Error", "Could not build the offset column of this stream."
+            )
+            return
+        targets = []
+        for (offsetView, _b, _a), key in zip(
+            self._offsetColumnPairs(), ("raw", "decoded")
+        ):
+            offsetView.verticalScrollBar().blockSignals(True)
+            offsetView.clear()
+            targets.append((offsetView, columns[key][0], False))
+        loader = _ChunkedTextLoader(targets, self)
+        loader.progressed.connect(self._onObjectLoadProgress)
+        loader.done.connect(lambda t=token, s=scrollValues: self._onOffsetsLoaded(t, s))
+        self._objectLoader = loader
+        if self._objectLoadProgress is not None:
+            self._objectLoadProgress.progressBar.setRange(0, 100)
+        loader.start()
+
+    def _onOffsetsLoaded(self, token, scrollValues):
+        if token != self._objectLoadToken:
+            return
+        for (offsetView, bytesView, asciiView), value in zip(
+            self._offsetColumnPairs(), scrollValues
+        ):
+            offsetView.verticalScrollBar().blockSignals(False)
+            for view in (offsetView, bytesView, asciiView):
+                view.verticalScrollBar().setValue(value)
+        self._finishObjectLoad()
 
     def _buildErrorsTab(self):
         self.errorsView = QPlainTextEdit()
@@ -854,6 +1289,10 @@ class MainWindow(QMainWindow):
         self.suspiciousTree.setHeaderLabels(["Item"])
         self.suspiciousTree.setHeaderHidden(True)
         self.suspiciousTree.itemDoubleClicked.connect(self._onSuspiciousItemActivated)
+        self.suspiciousTree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.suspiciousTree.customContextMenuRequested.connect(
+            self._onSuspiciousContextMenu
+        )
         self.suspiciousTabIndex = self.tabs.addTab(self.suspiciousTree, "Suspicious")
 
     def _buildCommentsTab(self):
@@ -905,6 +1344,10 @@ class MainWindow(QMainWindow):
         self.imageClipTree.setColumnWidth(0, 90)
         self.imageClipTree.setColumnWidth(1, 240)
         self.imageClipTree.itemDoubleClicked.connect(self._onImageClipItemActivated)
+        self.imageClipTree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.imageClipTree.customContextMenuRequested.connect(
+            self._onImageClipContextMenu
+        )
         imageClipHeader = self.imageClipTree.header()
         imageClipHeader.setSectionsClickable(True)
         imageClipHeader.setSortIndicatorShown(True)
@@ -1178,6 +1621,33 @@ class MainWindow(QMainWindow):
     def _decryptDocument(self):
         if self.pdf is None or not self.pdf.isEncrypted():
             return
+        if self._passwordListWorker is not None:
+            return  # the action is disabled while running; this is just a guard
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Decrypt Document")
+        box.setText("This PDF is encrypted.")
+        box.setInformativeText(
+            "Try a single password, or a list of candidate passwords from a "
+            f"text file (one per line; the first {MAX_PASSWORD_LIST_ENTRIES:,} "
+            "are tried, in order, until one works)."
+        )
+        singleButton = box.addButton(
+            "Single Password...", QMessageBox.ButtonRole.AcceptRole
+        )
+        listButton = box.addButton(
+            "Password List...", QMessageBox.ButtonRole.ActionRole
+        )
+        box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(singleButton)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is singleButton:
+            self._decryptWithSinglePassword()
+        elif clicked is listButton:
+            self._decryptWithPasswordListFile()
+
+    def _decryptWithSinglePassword(self):
         password, ok = QInputDialog.getText(
             self,
             "Decrypt Document",
@@ -1206,6 +1676,97 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self, "Decryption succeeded", "The document has been decrypted."
         )
+
+    def _decryptWithPasswordListFile(self):
+        path, _selectedFilter = QFileDialog.getOpenFileName(
+            self, "Select Password List", "", "Text Files (*.txt);;All Files (*)"
+        )
+        if not path:
+            return
+        ret = loadPasswordList(path)
+        if ret[0] == -1:
+            QMessageBox.warning(
+                self, "Password List", f"Could not read {path}:\n{ret[1]}"
+            )
+            return
+        passwords, totalCount, truncated = ret[1]
+        if not passwords:
+            QMessageBox.warning(
+                self, "Password List", "That file does not contain any passwords."
+            )
+            return
+        if truncated:
+            proceed = QMessageBox.question(
+                self,
+                "Password List",
+                f"This file lists {totalCount:,} passwords. Only the first "
+                f"{MAX_PASSWORD_LIST_ENTRIES:,} will be tried.\n\nContinue?",
+            )
+            if proceed != QMessageBox.StandardButton.Yes:
+                return
+        self._startPasswordListWorker(passwords)
+
+    def _startPasswordListWorker(self, passwords):
+        worker = _PasswordListWorker(self.pdf, passwords, self)
+        self._trackObjectWorker(worker)
+        self._passwordListWorker = worker
+        self.decryptAction.setEnabled(False)
+        worker.progressed.connect(self._onPasswordListProgress)
+        worker.resultReady.connect(
+            lambda found, cancelled, password, attempts, w=worker: self._onPasswordListDone(
+                w, found, cancelled, password, attempts
+            )
+        )
+        worker.start()
+        QTimer.singleShot(
+            _EXTRACT_PROGRESS_DELAY_MS,
+            lambda w=worker: self._showPasswordListProgress(w),
+        )
+
+    def _showPasswordListProgress(self, worker):
+        if (
+            self._passwordListWorker is not worker
+            or self._passwordListProgress is not None
+        ):
+            return  # already finished, or already showing
+        progress = _LoadingDialog(
+            "Trying passwords, please wait...", self, title="Decrypt Document"
+        )
+        progress.progressBar.setRange(0, len(worker.passwords))
+        progress.progressBar.setFormat("Password %v of %m")
+        progress.canceled.connect(worker.requestInterruption)
+        self._passwordListProgress = progress
+        progress.show()
+
+    def _onPasswordListProgress(self, current, total):
+        if self._passwordListProgress is not None:
+            self._passwordListProgress.progressBar.setValue(current)
+
+    def _onPasswordListDone(self, worker, found, cancelled, password, attempts):
+        if self._passwordListWorker is not worker:
+            return  # superseded (the file was closed/reopened meanwhile)
+        self._passwordListWorker = None
+        if self._passwordListProgress is not None:
+            progress, self._passwordListProgress = self._passwordListProgress, None
+            progress.close()
+        self._updateDecryptActionState()
+        if cancelled:
+            self.statusBar().showMessage("Password list attempt cancelled", 5000)
+        elif found:
+            self._refreshViews()
+            QMessageBox.information(
+                self,
+                "Decryption succeeded",
+                f"The document has been decrypted.\n\nMatching password "
+                f"(entry {attempts} of the list): {password!r}",
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "Decryption failed",
+                f"None of the {attempts} password(s) tried worked.\n\n"
+                "Content will continue to be shown in its original state where possible.",
+            )
 
     def _exportCaseReport(self):
         """
@@ -1354,7 +1915,7 @@ class MainWindow(QMainWindow):
 
         process = QProcess(self)
         process.setProgram(sys.executable)
-        process.setArguments(_jsSubProcessArguments("probe", absFileName, jsErrFile))
+        process.setArguments(_jsSubprocessArguments("probe", absFileName, jsErrFile))
         process.setWorkingDirectory(_ROOT_PATH)
         self._activeJSAnalysisProcess = process
         process.finished.connect(
@@ -2113,7 +2674,11 @@ class MainWindow(QMainWindow):
                 item.setData(
                     0,
                     Qt.ItemDataRole.UserRole,
-                    {"id": image["nav_id"], "version": image["nav_version"]},
+                    {
+                        "id": image["nav_id"],
+                        "version": image["nav_version"],
+                        "imageId": image["image_id"],
+                    },
                 )
             self.imageClipTree.addTopLevelItem(item)
         if not images:
@@ -2128,6 +2693,78 @@ class MainWindow(QMainWindow):
         if not data:
             return
         self._selectTreeObject(data["id"], data["version"])
+
+    def _onImageClipContextMenu(self, pos):
+        item = self.imageClipTree.itemAt(pos)
+        data = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
+        if not data:
+            return
+        menu = QMenu(self)
+        if data["imageId"] is None:
+            menu.addAction(
+                "Extract Image (not available for inline images)"
+            ).setEnabled(False)
+        else:
+            menu.addAction("Extract Image...").triggered.connect(
+                lambda checked=False, i=data["imageId"]: self._extractImage(i)
+            )
+        menu.exec(self.imageClipTree.viewport().mapToGlobal(pos))
+
+    def _extractImage(self, imageId):
+        if self.pdf is None or self.fileName is None:
+            return
+        if self._imageExtractWorker is not None:
+            self.statusBar().showMessage("An image is still being extracted", 5000)
+            return
+        saveName, _selectedFilter = QFileDialog.getSaveFileName(
+            self,
+            "Extract Image",
+            os.path.join(
+                os.path.dirname(self.fileName),
+                f"image_{imageId}_{os.path.splitext(os.path.basename(self.fileName))[0]}.png",
+            ),
+            "PNG Images (*.png);;All Files (*)",
+        )
+        if not saveName:
+            return
+        worker = _ImageExtractWorker(self.pdf, imageId, saveName, self)
+        self._trackObjectWorker(worker)
+        self._imageExtractWorker = worker
+        worker.resultReady.connect(
+            lambda error, w=worker, p=saveName: self._onImageExtractDone(w, p, error)
+        )
+        worker.start()
+        QTimer.singleShot(
+            _EXTRACT_PROGRESS_DELAY_MS,
+            lambda w=worker: self._showImageExtractProgress(w),
+        )
+
+    def _showImageExtractProgress(self, worker):
+        if (
+            self._imageExtractWorker is not worker
+            or self._imageExtractProgress is not None
+        ):
+            return
+        progress = _LoadingDialog(
+            "Extracting the image, please wait...", self, title="Extract Image"
+        )
+        progress.canceled.connect(worker.requestInterruption)
+        self._imageExtractProgress = progress
+        progress.show()
+
+    def _onImageExtractDone(self, worker, saveName, error):
+        if self._imageExtractWorker is not worker:
+            return
+        self._imageExtractWorker = None
+        if self._imageExtractProgress is not None:
+            progress, self._imageExtractProgress = self._imageExtractProgress, None
+            progress.close()
+        if error == "cancelled":
+            self.statusBar().showMessage("Extract cancelled", 5000)
+        elif error:
+            QMessageBox.critical(self, "Extract Image", error)
+        else:
+            self.statusBar().showMessage(f"Image extracted to {saveName}", 5000)
 
     def _showVersionInfo(self, version):
         stats = self.pdf.getStats()
@@ -2267,8 +2904,15 @@ class MainWindow(QMainWindow):
             stats = self.pdf.getStats()
         self.suspiciousTree.clear()
         totalCount = 0
+        expandedLeaves = []
+        urisByVersion = []
+        for pairs in self.pdf.getURIs(perObject=True):
+            urisById = {}
+            for uriObjId, uri in pairs:
+                urisById.setdefault(uriObjId, []).append(uri)
+            urisByVersion.append(urisById)
 
-        def addCategory(parentItems, label, objIds):
+        def addCategory(parentItems, label, objIds, details=None):
             nonlocal totalCount
             if not objIds:
                 return
@@ -2276,9 +2920,15 @@ class MainWindow(QMainWindow):
             catItem = QTreeWidgetItem([f"{label} ({len(distinctIds)})", ""])
             for objId in distinctIds:
                 leaf = QTreeWidgetItem([f"Object {objId}", str(version)])
-                leaf.setData(
-                    0, Qt.ItemDataRole.UserRole, {"id": objId, "version": version}
-                )
+                data = {"id": objId, "version": version}
+                leaf.setData(0, Qt.ItemDataRole.UserRole, data)
+                for text in (details or {}).get(objId, []):
+                    detailItem = QTreeWidgetItem([str(text)])
+                    detailItem.setToolTip(0, str(text))
+                    detailItem.setData(0, Qt.ItemDataRole.UserRole, data)
+                    leaf.addChild(detailItem)
+                if details is not None:
+                    expandedLeaves.append(leaf)
                 catItem.addChild(leaf)
             parentItems.append(catItem)
             totalCount += len(distinctIds)
@@ -2299,7 +2949,12 @@ class MainWindow(QMainWindow):
 
             uriEntry = statsVersion.get("URIs")
             if uriEntry:
-                addCategory(versionItems, "Objects with URIs", uriEntry[1])
+                addCategory(
+                    versionItems,
+                    "Objects with URIs",
+                    uriEntry[1],
+                    urisByVersion[version] if version < len(urisByVersion) else {},
+                )
 
             for label, sourceKey, describe in (
                 ("Action", "Actions", lambda n: n),
@@ -2319,6 +2974,9 @@ class MainWindow(QMainWindow):
                     versionRoot.addChild(item)
                 self.suspiciousTree.addTopLevelItem(versionRoot)
                 versionRoot.setExpanded(True)
+                for leaf in expandedLeaves:
+                    leaf.setExpanded(True)
+                expandedLeaves.clear()
 
         self.tabs.setTabText(self.suspiciousTabIndex, f"Suspicious ({totalCount})")
         if totalCount == 0:
@@ -2331,6 +2989,39 @@ class MainWindow(QMainWindow):
         if not data:
             return
         self._selectTreeObject(data["id"], data["version"])
+
+    def _onSuspiciousContextMenu(self, pos):
+        item = self.suspiciousTree.itemAt(pos)
+        if item is None:
+            return
+        menu = QMenu(self)
+        for text, expanded in (("Expand All", True), ("Collapse All", False)):
+            action = menu.addAction(text)
+            action.setEnabled(item.childCount() > 0)
+            action.triggered.connect(
+                lambda checked=False, i=item, e=expanded: self._setSubtreeExpanded(
+                    self.suspiciousTree, i, e
+                )
+            )
+        menu.exec(self.suspiciousTree.viewport().mapToGlobal(pos))
+
+    @staticmethod
+    def _setSubtreeExpanded(tree, item, expanded):
+        def apply(node):
+            node.setExpanded(expanded)
+            for index in range(node.childCount()):
+                apply(node.child(index))
+
+        # A category can hold thousands of rows; repaint once, not per row.
+        tree.setUpdatesEnabled(False)
+        try:
+            # Collapse All closes what is under the row, not the row itself
+            for index in range(item.childCount()):
+                apply(item.child(index))
+            if expanded:
+                item.setExpanded(True)
+        finally:
+            tree.setUpdatesEnabled(True)
 
     def _populateCommentsTab(self):
         """
@@ -2628,6 +3319,9 @@ class MainWindow(QMainWindow):
         """
         if self.pdf is None or self.fileName is None:
             return
+        if self._streamWriteWorker is not None:
+            self.statusBar().showMessage("A stream is still being extracted", 5000)
+            return
         obj = self.pdf.getObject(objId, version)
         if obj is None or obj.getType() != "stream":
             return
@@ -2656,6 +3350,9 @@ class MainWindow(QMainWindow):
         )
         if not saveName:
             return
+        if len(value) > _ASYNC_OBJECT_WEIGHT:
+            self._extractStreamInBackground(value, saveName)
+            return
         try:
             with open(saveName, "wb") as outFile:
                 outFile.write(value)
@@ -2665,6 +3362,57 @@ class MainWindow(QMainWindow):
             )
             return
         self.statusBar().showMessage(f"Stream extracted to {saveName}", 5000)
+
+    def _extractStreamInBackground(self, value, saveName):
+        worker = _StreamWriteWorker(value, saveName, self)
+        self._trackObjectWorker(worker)
+        self._streamWriteWorker = worker
+        self._streamWritePercent = 0
+        worker.progressed.connect(self._onStreamWriteProgress)
+        worker.resultReady.connect(
+            lambda error, w=worker, p=saveName: self._onStreamWriteDone(w, p, error)
+        )
+        worker.start()
+        QTimer.singleShot(
+            _EXTRACT_PROGRESS_DELAY_MS,
+            lambda w=worker: self._showStreamWriteProgress(w),
+        )
+
+    def _showStreamWriteProgress(self, worker):
+        if (
+            self._streamWriteWorker is not worker
+            or self._streamWriteProgress is not None
+        ):
+            return
+        progress = _LoadingDialog(
+            "Extracting the stream, please wait...", self, title="Extract Stream"
+        )
+        progress.progressBar.setRange(0, 100)
+        progress.progressBar.setValue(self._streamWritePercent)
+        progress.canceled.connect(worker.requestInterruption)
+        self._streamWriteProgress = progress
+        progress.show()
+
+    def _onStreamWriteProgress(self, percent):
+        self._streamWritePercent = percent
+        if self._streamWriteProgress is not None:
+            self._streamWriteProgress.progressBar.setValue(percent)
+
+    def _onStreamWriteDone(self, worker, saveName, error):
+        if self._streamWriteWorker is not worker:
+            return
+        self._streamWriteWorker = None
+        if self._streamWriteProgress is not None:
+            progress, self._streamWriteProgress = self._streamWriteProgress, None
+            progress.close()
+        if error == "cancelled":
+            self.statusBar().showMessage("Extract cancelled", 5000)
+        elif error:
+            QMessageBox.critical(
+                self, "Extract Stream", f"Could not write to {saveName}:\n{error}"
+            )
+        else:
+            self.statusBar().showMessage(f"Stream extracted to {saveName}", 5000)
 
     def _analyseObjectJS(self, objId, version):
         """
@@ -2775,6 +3523,7 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentWidget(self.objectTabContainer)
 
     def _clearObjectView(self):
+        self._cancelObjectLoad()
         self.objHeaderLabel.setText("No object selected")
         self.decodedValueView.clear()
         self.rawValueView.clear()
@@ -2789,6 +3538,7 @@ class MainWindow(QMainWindow):
         self.objStatsTable.setRowCount(0)
 
     def _showObject(self, objId, version):
+        self._cancelObjectLoad()
         obj = self.pdf.getObject(objId, version)
         if obj is None:
             self._clearObjectView()
@@ -2811,48 +3561,25 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             rawValue = f"[!] Error getting raw value: {exc}"
 
-        self.decodedValueView.setPlainText(str(decodedValue))
-        self.rawValueView.setPlainText(str(rawValue))
+        decodedText = str(decodedValue)
+        rawText = str(rawValue)
 
+        rawStream = decodedStream = None
         if objType == "stream":
             try:
                 rawStream = obj.getRawStream()
             except Exception:
                 rawStream = None
-            self._currentRawStream = rawStream
-            self._setHexColumns(
-                self.hexOffsetView, self.hexBytesView, self.hexAsciiView, rawStream
-            )
-            self.objSubTabs.setTabEnabled(self.rawHexTabIndex, True)
-
             try:
                 decodedStream = obj.getStream()
             except Exception:
                 decodedStream = None
             if decodedStream in (-1, ""):
                 decodedStream = None
-            self._currentDecodedStream = decodedStream
-            self._setHexColumns(
-                self.decodedHexOffsetView,
-                self.decodedHexBytesView,
-                self.decodedHexAsciiView,
-                decodedStream,
-            )
-            self.objSubTabs.setTabEnabled(self.decodedHexTabIndex, True)
-        else:
-            self._currentRawStream = None
-            self._currentDecodedStream = None
-            self._setHexColumns(
-                self.hexOffsetView, self.hexBytesView, self.hexAsciiView, None
-            )
-            self._setHexColumns(
-                self.decodedHexOffsetView,
-                self.decodedHexBytesView,
-                self.decodedHexAsciiView,
-                None,
-            )
-            self.objSubTabs.setTabEnabled(self.rawHexTabIndex, False)
-            self.objSubTabs.setTabEnabled(self.decodedHexTabIndex, False)
+        self._currentRawStream = rawStream
+        self._currentDecodedStream = decodedStream
+        self.objSubTabs.setTabEnabled(self.rawHexTabIndex, objType == "stream")
+        self.objSubTabs.setTabEnabled(self.decodedHexTabIndex, objType == "stream")
 
         try:
             stats = obj.getStats()
@@ -2865,3 +3592,221 @@ class MainWindow(QMainWindow):
                 row, 1, QTableWidgetItem("" if value is None else str(value))
             )
         self.objStatsTable.resizeColumnsToContents()
+
+        weight = (
+            len(decodedText)
+            + len(rawText)
+            + len(rawStream or "")
+            + len(decodedStream or "")
+        )
+        if weight > _ASYNC_OBJECT_WEIGHT:
+            self._loadObjectInBackground(
+                objId, version, decodedText, rawText, rawStream, decodedStream
+            )
+            return
+
+        self.decodedValueView.setPlainText(decodedText)
+        self.rawValueView.setPlainText(rawText)
+        self._setHexColumns(
+            self.hexOffsetView, self.hexBytesView, self.hexAsciiView, rawStream
+        )
+        self._setHexColumns(
+            self.decodedHexOffsetView,
+            self.decodedHexBytesView,
+            self.decodedHexAsciiView,
+            decodedStream,
+        )
+
+    def _objectTextViews(self):
+        return (
+            self.decodedValueView,
+            self.rawValueView,
+            self.hexOffsetView,
+            self.hexBytesView,
+            self.hexAsciiView,
+            self.decodedHexOffsetView,
+            self.decodedHexBytesView,
+            self.decodedHexAsciiView,
+        )
+
+    def _loadObjectInBackground(
+        self, objId, version, decodedText, rawText, rawStream, decodedStream
+    ):
+        for view in self._objectTextViews():
+            view.clear()
+        decodedText, decodedFull = self._limitedForValueView(decodedText)
+        rawText, rawFull = self._limitedForValueView(rawText)
+        for key, full in (("decoded", decodedFull), ("raw", rawFull)):
+            if full is not None:
+                self._fullValueTexts[key] = full
+                self._showValueBanner(key, len(full))
+        token = self._objectLoadToken
+        progress = _LoadingDialog(
+            f"Loading object {objId} (version {version}), please wait...",
+            self,
+            title="Loading object",
+        )
+        progress.canceled.connect(lambda t=token: self._onObjectLoadCanceled(t))
+        self._objectLoadProgress = progress
+
+        worker = _HexColumnsWorker(
+            rawStream, decodedStream, self._hexOffsetFormat, self
+        )
+        worker.resultReady.connect(
+            lambda columns, t=token: self._onObjectColumnsReady(
+                t, columns, decodedText, rawText
+            )
+        )
+        self._trackObjectWorker(worker)
+        self._objectLoadWorker = worker
+
+        progress.show()
+        QApplication.processEvents()
+        worker.start()
+
+    @staticmethod
+    def _limitedForValueView(text):
+        """
+        Returns text to show (full text if it was cut short else None).
+        """
+        if len(text) <= _VALUE_VIEW_MAX_CHARS:
+            return text, None
+        shown = (
+            f"{text[:_VALUE_VIEW_MAX_CHARS]}\n\n"
+            f"[peepdf: display truncated - showing the first {_VALUE_VIEW_MAX_CHARS:,} "
+            f"of {len(text):,} characters. Use Show all to load the rest; the hex "
+            f"views already show the whole stream.]"
+        )
+        return shown, text
+
+    def _showValueBanner(self, key, totalChars):
+        banner, note, button = self._valueBanners[key]
+        note.setText(
+            f"Showing the first {_VALUE_VIEW_MAX_CHARS:,} of {totalChars:,} characters."
+        )
+        button.setEnabled(True)
+        banner.show()
+
+    def _showFullValue(self, key):
+        text = self._fullValueTexts.pop(key, None)
+        if text is None:
+            return
+        view = self.decodedValueView if key == "decoded" else self.rawValueView
+        banner, _note, button = self._valueBanners[key]
+        button.setEnabled(False)
+        dialog = _LoadingDialog(
+            f"Loading all {len(text):,} characters, please wait...\n"
+            "The window will not respond until this is done.",
+            self,
+            title="Loading full text",
+        )
+        for cancelButton in dialog.findChildren(QPushButton):
+            cancelButton.setEnabled(False)
+        dialog.show()
+        QApplication.processEvents()
+        try:
+            if len(text) > _NOWRAP_ABOVE_CHARS:
+                view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+                self._noWrapValueViews.append(view)
+            view.setPlainText(text)
+        finally:
+            dialog.close()
+        banner.hide()
+
+    def _resetValueTruncation(self):
+        self._fullValueTexts = {}
+        for banner, _note, _button in self._valueBanners.values():
+            banner.hide()
+        for view in self._noWrapValueViews:
+            view.clear()
+            view.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self._noWrapValueViews = []
+
+    def _onObjectColumnsReady(self, token, columns, decodedText, rawText):
+        if token != self._objectLoadToken:
+            return
+        self._objectLoadWorker = None
+        if columns is None:
+            self._finishObjectLoad()
+            QMessageBox.critical(
+                self, "Error", "Could not build the hex view of this object."
+            )
+            return
+        targets = [
+            (self.decodedValueView, decodedText, True),
+            (self.rawValueView, rawText, True),
+            (self.hexOffsetView, columns["raw"][0], False),
+            (self.hexBytesView, columns["raw"][1], False),
+            (self.hexAsciiView, columns["raw"][2], False),
+            (self.decodedHexOffsetView, columns["decoded"][0], False),
+            (self.decodedHexBytesView, columns["decoded"][1], False),
+            (self.decodedHexAsciiView, columns["decoded"][2], False),
+        ]
+        loader = _ChunkedTextLoader(targets, self)
+        loader.progressed.connect(self._onObjectLoadProgress)
+        loader.done.connect(lambda t=token: self._onObjectLoaded(t))
+        self._objectLoader = loader
+        if self._objectLoadProgress is not None:
+            self._objectLoadProgress.progressBar.setRange(0, 100)
+        loader.start()
+
+    def _onObjectLoadProgress(self, percent):
+        if self._objectLoadProgress is not None:
+            self._objectLoadProgress.progressBar.setValue(percent)
+
+    def _onObjectLoaded(self, token):
+        if token == self._objectLoadToken:
+            self._finishObjectLoad()
+
+    def _onObjectLoadCanceled(self, token):
+        if token != self._objectLoadToken:
+            return
+        self._cancelObjectLoad()
+        for view in self._objectTextViews():
+            view.clear()
+        self.objHeaderLabel.setText(
+            f"{self.objHeaderLabel.text()}  |  (loading cancelled)"
+        )
+
+    def _finishObjectLoad(self):
+        if self._objectLoadProgress is not None:
+            progress, self._objectLoadProgress = self._objectLoadProgress, None
+            progress.close()
+        loader, self._objectLoader = self._objectLoader, None
+        if loader is not None:
+            loader.deleteLater()
+
+    def _trackObjectWorker(self, worker):
+        self._objectWorkers.append(worker)
+        worker.finished.connect(lambda w=worker: self._onObjectWorkerFinished(w))
+
+    def _onObjectWorkerFinished(self, worker):
+        if worker in self._objectWorkers:
+            self._objectWorkers.remove(worker)
+        worker.deleteLater()
+
+    def closeEvent(self, event):
+        self._cancelObjectLoad()
+        for worker in list(self._objectWorkers):
+            worker.requestInterruption()
+            worker.wait(5000)
+        super().closeEvent(event)
+
+    def _cancelObjectLoad(self):
+        """
+        Abandons any object load.
+        """
+        self._resetValueTruncation()
+        for offsetView, _bytes, _ascii in self._offsetColumnPairs():
+            offsetView.verticalScrollBar().blockSignals(False)
+        self._objectLoadToken += 1
+        worker, self._objectLoadWorker = self._objectLoadWorker, None
+        if worker is not None:
+            worker.requestInterruption()
+        loader, self._objectLoader = self._objectLoader, None
+        if loader is not None:
+            loader.cancel()
+            loader.deleteLater()
+        if self._objectLoadProgress is not None:
+            progress, self._objectLoadProgress = self._objectLoadProgress, None
+            progress.close()

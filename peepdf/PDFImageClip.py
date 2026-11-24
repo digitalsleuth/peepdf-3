@@ -42,7 +42,18 @@ MAX_FORM_DEPTH = 12
 MAX_IMAGES = 20000
 CLIPPED_BELOW = 0.999
 IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)  ## Translation and scaling
-_PAINT_OPERATORS = {"S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "n"}  ## Tables 50 and 59 - Operator Categories
+_PAINT_OPERATORS = {
+    "S",
+    "s",
+    "f",
+    "F",
+    "f*",
+    "B",
+    "B*",
+    "b",
+    "b*",
+    "n",
+}  ## Tables 50 and 59 - Operator Categories
 _UNIT_SQUARE = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
 
 
@@ -103,7 +114,9 @@ def _clipConvex(subject, clipper):
             currentSide, previousSide = side(current), side(previous)
             if currentSide >= 0:
                 if previousSide < 0:
-                    output.append(_crossing(previous, current, previousSide, currentSide))
+                    output.append(
+                        _crossing(previous, current, previousSide, currentSide)
+                    )
                 output.append(current)
             elif previousSide >= 0:
                 output.append(_crossing(previous, current, previousSide, currentSide))
@@ -219,6 +232,7 @@ class _Walker:
     """
     Walking through XObjects and patterns
     """
+
     def __init__(self, pdfFile, version, pageNumber, results, printBoxes=None):
         self.pdfFile = pdfFile
         self.version = version
@@ -240,13 +254,17 @@ class _Walker:
     def _lookup(self, resources, category, name):
         if resources is None or resources.getType() != "dictionary":
             return None, None
-        group, _id = _resolve(self.pdfFile, resources.getElementByName(category), self.version)
+        group, _id = _resolve(
+            self.pdfFile, resources.getElementByName(category), self.version
+        )
         if group is None or group.getType() != "dictionary":
             return None, None
         return _resolve(self.pdfFile, group.getElementByName(name), self.version)
 
     def run(self, content, resources, state, location, formStack, owner=None):
-        if not any(marker in content for marker in ("Do", "BI", "scn", "SCN", "gs")):  ## Table 50 - Operator categories
+        if not any(
+            marker in content for marker in ("Do", "BI", "scn", "SCN", "gs")
+        ):  ## Table 50 - Operator categories
             return
         xobjects = self._xobjects(resources)
         stack = []
@@ -282,7 +300,12 @@ class _Walker:
                 pass
             elif operator == "re" and len(numbers) >= 4:
                 x, y, w, h = numbers[-4:]
-                path.rectangle([_apply(state.ctm, p) for p in ((x, y), (x + w, y), (x + w, y + h), (x, y + h))])
+                path.rectangle(
+                    [
+                        _apply(state.ctm, p)
+                        for p in ((x, y), (x + w, y), (x + w, y + h), (x, y + h))
+                    ]
+                )
             elif operator in ("W", "W*"):
                 pendingClip = True
             elif operator in _PAINT_OPERATORS:
@@ -290,12 +313,29 @@ class _Walker:
                     self._applyClip(state, path)
                 pendingClip = None
                 path = _Path()
-            elif operator == "Do" and operands and operands[-1][0] == "name" and xobjects is not None:
-                self._draw(operands[-1][1], xobjects, resources, state, location, formStack, owner)
+            elif (
+                operator == "Do"
+                and operands
+                and operands[-1][0] == "name"
+                and xobjects is not None
+            ):
+                self._draw(
+                    operands[-1][1],
+                    xobjects,
+                    resources,
+                    state,
+                    location,
+                    formStack,
+                    owner,
+                )
             elif operator in ("scn", "SCN") and operands and operands[-1][0] == "name":
-                self._pattern(operands[-1][1], resources, state, location, formStack, owner)
+                self._pattern(
+                    operands[-1][1], resources, state, location, formStack, owner
+                )
             elif operator == "gs" and operands and operands[-1][0] == "name":
-                self._softMask(operands[-1][1], resources, state, location, formStack, owner)
+                self._softMask(
+                    operands[-1][1], resources, state, location, formStack, owner
+                )
             operands = []
 
     def _applyClip(self, state, path):
@@ -334,15 +374,27 @@ class _Walker:
             return
         self.seen.add(marker)
         matrix = _numbers(pattern.getElementByName("/Matrix"))
-        patternCtm = _multiply(tuple(matrix) if matrix and len(matrix) == 6 else IDENTITY, state.base)
+        patternCtm = _multiply(
+            tuple(matrix) if matrix and len(matrix) == 6 else IDENTITY, state.base
+        )
         inner = state.copy()
         inner.ctm = inner.base = patternCtm
         bbox = _normalRect(_numbers(pattern.getElementByName("/BBox")))
         if bbox is not None:
-            label = f"pattern object {patternId} /BBox" if patternId is not None else "pattern /BBox"
+            label = (
+                f"pattern object {patternId} /BBox"
+                if patternId is not None
+                else "pattern /BBox"
+            )
             inner.clips = inner.clips + ((label, _rectPolygon(bbox, patternCtm)),)
-        patternResources, _id = _resolve(self.pdfFile, pattern.getElementByName("/Resources"), self.version)
-        where = f"{location}, pattern object {patternId}" if patternId is not None else f"{location}, pattern"
+        patternResources, _id = _resolve(
+            self.pdfFile, pattern.getElementByName("/Resources"), self.version
+        )
+        where = (
+            f"{location}, pattern object {patternId}"
+            if patternId is not None
+            else f"{location}, pattern"
+        )
         self.run(
             _streamText(pattern),
             patternResources if patternResources is not None else resources,
@@ -359,10 +411,14 @@ class _Walker:
         gstate, _id = self._lookup(resources, "/ExtGState", name)
         if gstate is None or gstate.getType() != "dictionary":
             return
-        mask, _id = _resolve(self.pdfFile, gstate.getElementByName("/SMask"), self.version)
+        mask, _id = _resolve(
+            self.pdfFile, gstate.getElementByName("/SMask"), self.version
+        )
         if mask is None or mask.getType() != "dictionary":
             return
-        group, groupId = _resolve(self.pdfFile, mask.getElementByName("/G"), self.version)
+        group, groupId = _resolve(
+            self.pdfFile, mask.getElementByName("/G"), self.version
+        )
         if group is None or group.getType() != "stream":
             return
         key = groupId if groupId is not None else id(group)
@@ -370,9 +426,13 @@ class _Walker:
         if marker in self.seen:
             return
         self.seen.add(marker)
-        self.form(group, groupId, resources, state, f"{location}, soft mask", formStack, owner)
+        self.form(
+            group, groupId, resources, state, f"{location}, soft mask", formStack, owner
+        )
 
-    def form(self, form, formId, parentResources, state, location, formStack, owner=None):
+    def form(
+        self, form, formId, parentResources, state, location, formStack, owner=None
+    ):
         key = formId if formId is not None else id(form)
         if key in formStack or len(formStack) >= MAX_FORM_DEPTH:
             return
@@ -385,10 +445,16 @@ class _Walker:
         label = f"form object {formId} /BBox" if formId is not None else "form /BBox"
         if bbox is not None:
             inner.clips = inner.clips + ((label, _rectPolygon(bbox, inner.ctm)),)
-        resources, _id = _resolve(self.pdfFile, form.getElementByName("/Resources"), self.version)
+        resources, _id = _resolve(
+            self.pdfFile, form.getElementByName("/Resources"), self.version
+        )
         if resources is None:
             resources = parentResources
-        where = f"{location}, form object {formId}" if formId is not None else f"{location}, form"
+        where = (
+            f"{location}, form object {formId}"
+            if formId is not None
+            else f"{location}, form"
+        )
         self.run(
             _streamText(form),
             resources,
@@ -405,8 +471,16 @@ class _Walker:
         self._record(
             "image",
             imageId,
-            int(width.getRawValue()) if width and width.getType() == "integer" else None,
-            int(height.getRawValue()) if height and height.getType() == "integer" else None,
+            (
+                int(width.getRawValue())
+                if width and width.getType() == "integer"
+                else None
+            ),
+            (
+                int(height.getRawValue())
+                if height and height.getType() == "integer"
+                else None
+            ),
             filters.getValue() if filters and filters.getType() == "name" else None,
             state,
             location,
@@ -426,7 +500,9 @@ class _Walker:
             owner,
         )
 
-    def _record(self, kind, imageId, widthPx, heightPx, filterName, state, location, navId):
+    def _record(
+        self, kind, imageId, widthPx, heightPx, filterName, state, location, navId
+    ):
         if len(self.results) >= MAX_IMAGES:
             return
         quad = [_apply(state.ctm, corner) for corner in _UNIT_SQUARE]
@@ -451,7 +527,9 @@ class _Walker:
         if visibleArea > 1e-9:
             for boxName, polygon in self.printBoxes.items():
                 inside = _clipConvex(visible, polygon)
-                insideFraction = abs(_area(inside)) / visibleArea if len(inside) >= 3 else 0.0
+                insideFraction = (
+                    abs(_area(inside)) / visibleArea if len(inside) >= 3 else 0.0
+                )
                 if insideFraction < CLIPPED_BELOW:
                     printBoxes[boxName] = round(insideFraction, 4)
         self.results.append(
@@ -466,7 +544,9 @@ class _Walker:
                 "print_boxes": printBoxes,
                 "placed_width_pt": round(math.hypot(a, b), 2),
                 "placed_height_pt": round(math.hypot(c, d), 2),
-                "visible_fraction": None if fraction is None else round(min(fraction, 1.0), 4),
+                "visible_fraction": (
+                    None if fraction is None else round(min(fraction, 1.0), 4)
+                ),
                 "clipped": fraction is not None and fraction < CLIPPED_BELOW,
                 "clipped_by": clippedBy,
                 "unmeasured_clips": list(state.unmeasured),
@@ -534,7 +614,7 @@ class _Path:
 
     def asClip(self):
         """
-       Label and polygon
+        Label and polygon
         """
         if self.curved:
             return "clip path with curves", None
@@ -568,7 +648,9 @@ def _annotationImages(walker, page):
             names = [chosen.getValue()] if chosen else list(states.getElements())
             normal, normalId = None, None
             for stateName in names:
-                candidate, candidateId = _resolve(pdfFile, states.getElementByName(stateName), version)
+                candidate, candidateId = _resolve(
+                    pdfFile, states.getElementByName(stateName), version
+                )
                 if candidate is not None and candidate.getType() == "stream":
                     normal, normalId = candidate, candidateId
                     break
@@ -584,9 +666,15 @@ def _annotationImages(walker, page):
         sx = (rect[2] - rect[0]) / spanX if spanX > 1e-9 else 1.0
         sy = (rect[3] - rect[1]) / spanY if spanY > 1e-9 else 1.0
         placement = (sx, 0.0, 0.0, sy, rect[0] - min(xs) * sx, rect[1] - min(ys) * sy)
-        where = f"page {pageNumber}, annotation object {annotId}" if annotId is not None else f"page {pageNumber}, annotation"
+        where = (
+            f"page {pageNumber}, annotation object {annotId}"
+            if annotId is not None
+            else f"page {pageNumber}, annotation"
+        )
         state = _State(placement)
-        resources, _id = _resolve(pdfFile, normal.getElementByName("/Resources"), version)
+        resources, _id = _resolve(
+            pdfFile, normal.getElementByName("/Resources"), version
+        )
         walker.form(normal, normalId, resources, state, where, (), normalId)
 
 
@@ -614,7 +702,14 @@ def getImageClipping(pdfFile, version=None):
             if box is not None:
                 printBoxes[boxName] = _rectPolygon(box)
         walker = _Walker(pdfFile, last, number, results, printBoxes)
-        walker.run(_pageContent(pdfFile, page, last), resources, state, f"page {number}", (), pageId)
+        walker.run(
+            _pageContent(pdfFile, page, last),
+            resources,
+            state,
+            f"page {number}",
+            (),
+            pageId,
+        )
         _annotationImages(walker, page)
         if len(results) >= MAX_IMAGES:
             break
