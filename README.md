@@ -35,7 +35,7 @@ The main functionalities of peepdf are the following:
   * Checking hashes on **VirusTotal**
   * Detection of common encryption methods
   * Output of XML and JSON data
-
+  * Static security analysis of embedded files
 
 **Creation/Modification:**
 
@@ -62,7 +62,7 @@ The main functionalities of peepdf are the following:
 
 **TODO:**
 
-  * Embedded PDFs analysis
+  * Embedded PDFs analysis - Work in progress
   * Improving automatic Javascript analysis
   * GUI
 
@@ -91,7 +91,7 @@ You can install / use peepdf-3 via these methods:
   * From PyPI via pip - `python3 -m pip install peepdf-3`
   * From GitHub via pip and git - `python3 -m pip install git+https://github.com/digitalsleuth/peepdf-3.git`
   * Clone the GitHub repo, cd into the `peepdf-3` folder, `chmod +x peepdf.py` and `./peepdf.py`
-
+  * To use YARA, cd into the `peepdf-3` folder, `pip install "peepdf-3[yara]"`
 # Current Known Limitations
 
   * As of version 3.0.0, there are no limitations with the installation and usage of peepdf-3, as the hard requirement for pylibemu has been lifted. The functionality still remains for Linux systems.
