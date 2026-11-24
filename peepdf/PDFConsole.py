@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-#
 #    peepdf-3 is a tool to analyse and modify PDF files
 #    https://github.com/digitalsleuth/peepdf-3
 #    Original Author: Jose Miguel Esparza <jesparza AT eternal-todo.com>
@@ -52,6 +50,8 @@ try:
         getPeepCaseReport,
         getPeepCaseReportHTML,
         DTFMT,
+        loadPasswordList,
+        MAX_PASSWORD_LIST_ENTRIES,
     )
     from peepdf.PDFCrypto import xor
     from peepdf.JSAnalysis import isJavascript, analyseJS, unescape, JS_MODULE, STPyV8
@@ -99,6 +99,8 @@ except ModuleNotFoundError:
         getPeepCaseReport,
         getPeepCaseReportHTML,
         DTFMT,
+        loadPasswordList,
+        MAX_PASSWORD_LIST_ENTRIES,
     )
     from PDFCrypto import xor
     from JSAnalysis import isJavascript, analyseJS, unescape, JS_MODULE, STPyV8
@@ -278,6 +280,23 @@ class PDFConsole(cmd.Cmd):
             print(f"{newLine}[+] Exiting the interactive console{newLine}")
         self.leaving = True
 
+    @staticmethod
+    def _tableStyle():
+        """
+        SINGLE_BORDER, or the plain ASCII DEFAULT style when stdout's encoding
+        can't represent SINGLE_BORDER's box-drawing border: printing it then
+        would raise UnicodeEncodeError and take the whole console down with it.
+        """
+        probe = PrettyTable(["a"])
+        probe.set_style(TableStyle.SINGLE_BORDER)
+        probe.add_row(["a"])
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        try:
+            str(probe).encode(encoding)
+        except (UnicodeEncodeError, LookupError):
+            return TableStyle.DEFAULT
+        return TableStyle.SINGLE_BORDER
+
     def do_attachments(self, argv):
         if self.pdfFile is None:
             message = "[!] Error: You must open a file"
@@ -308,7 +327,7 @@ class PDFConsole(cmd.Cmd):
             if scan:
                 headers += ["True Type", "Suspicious"]
             table = PrettyTable(headers)
-            table.set_style(TableStyle.SINGLE_BORDER)
+            table.set_style(self._tableStyle())
             table.align = "l"
             for attachment in attachments:
                 size = attachment["size"]
@@ -929,7 +948,7 @@ class PDFConsole(cmd.Cmd):
             output = (newLine * 2).join(blocks)
         else:
             table = PrettyTable(["Offset", "Version", "Location", "Length", "Text"])
-            table.set_style(TableStyle.SINGLE_BORDER)
+            table.set_style(self._tableStyle())
             table.align = "l"
             for c in comments:
                 table.add_row(
@@ -1007,7 +1026,7 @@ class PDFConsole(cmd.Cmd):
             table = PrettyTable(
                 ["Page", "Object", "Type", "Author", "Modified", "Contents", "Notes"]
             )
-            table.set_style(TableStyle.SINGLE_BORDER)
+            table.set_style(self._tableStyle())
             table.align = "l"
             for c in comments:
                 contents = self._oneLine(c["contents"], 60)
@@ -1122,7 +1141,7 @@ class PDFConsole(cmd.Cmd):
                     "Print boxes",
                 ]
             )
-            table.set_style(TableStyle.SINGLE_BORDER)
+            table.set_style(self._tableStyle())
             table.align = "l"
             for image in images:
                 table.add_row(
@@ -1443,6 +1462,32 @@ class PDFConsole(cmd.Cmd):
         print("\tdct: /DCTDecode")
         print(f"\tjpx: /JPXDecode{newLine}")
 
+    def _decryptWithPasswordList(self, listFile):
+        """
+        Tries each password in listFile (one per line, in order) against
+        self.pdfFile.decrypt(), stopping at the first that works.
+        """
+        ret = loadPasswordList(listFile)
+        if ret[0] == -1:
+            return f"[!] Error: {ret[1]}"
+        passwords, totalCount, truncated = ret[1]
+        if not passwords:
+            return "[!] Error: The password list file contains no passwords"
+        message = f"[*] Trying {len(passwords)} password(s) from {listFile}"
+        if truncated:
+            message += (
+                f"{newLine}[*] The file has {totalCount} passwords; only the "
+                f"first {MAX_PASSWORD_LIST_ENTRIES} were tried"
+            )
+        for index, candidate in enumerate(passwords, start=1):
+            decryptRet = self.pdfFile.decrypt(candidate)
+            if decryptRet[0] != -1:
+                return (
+                    f"{message}{newLine}[+] File decrypted successfully with "
+                    f"password #{index} of the list: {candidate!r}"
+                )
+        return f"{message}{newLine}[!] None of the {len(passwords)} password(s) worked"
+
     def do_decrypt(self, argv):
         if self.pdfFile is None:
             message = "[!] Error: You must open a file"
@@ -1457,6 +1502,13 @@ class PDFConsole(cmd.Cmd):
             self.help_decrypt()
             return False
         numArgs = len(args)
+        if args[0] == "-l":
+            if numArgs != 2:
+                self.help_decrypt()
+                return False
+            message = self._decryptWithPasswordList(args[1])
+            self.log_output("decrypt " + argv, message)
+            return
         if numArgs == 1:
             password = args[0]
         else:
@@ -1471,7 +1523,12 @@ class PDFConsole(cmd.Cmd):
 
     def help_decrypt(self):
         print(f"{newLine}Usage: decrypt $password")
-        print(f"Decrypts the file with the specified password {newLine}")
+        print("       decrypt -l $listFile")
+        print(
+            f"Decrypts the file with the specified password, or tries each "
+            f"password from a text file (one per line, first "
+            f"{MAX_PASSWORD_LIST_ENTRIES} lines only) in order until one works {newLine}"
+        )
 
     def do_embed(self, argv):
         fileType = "application#2Fpdf"
@@ -4099,7 +4156,7 @@ class PDFConsole(cmd.Cmd):
             if xmp["history"]:
                 output += f"{newLine}  XMP edit history:{newLine}"
                 table = PrettyTable(["Action", "When", "Software Agent", "Changed"])
-                table.set_style(TableStyle.SINGLE_BORDER)
+                table.set_style(self._tableStyle())
                 table.align = "l"
                 for event in xmp["history"]:
                     table.add_row(
@@ -4164,7 +4221,7 @@ class PDFConsole(cmd.Cmd):
                     "LastModified",
                 ]
             )
-            table.set_style(TableStyle.SINGLE_BORDER)
+            table.set_style(self._tableStyle())
             table.align = "l"
             for entry in pieceInfoEntries:
                 table.add_row(
@@ -4504,7 +4561,7 @@ class PDFConsole(cmd.Cmd):
             if version is None:
                 offsetsOutput += f"{newLine}Version {str(k)}: {newLine}"
             table = PrettyTable(["Start (d)", "End (d)", "Size (d)", "Type and Id"])
-            table.set_style(TableStyle.SINGLE_BORDER)
+            table.set_style(self._tableStyle())
             table.align = "l"
             if "header" in offsets:
                 offset, size = offsets["header"]
@@ -4647,7 +4704,7 @@ class PDFConsole(cmd.Cmd):
                 "LastModified",
             ]
         )
-        table.set_style(TableStyle.SINGLE_BORDER)
+        table.set_style(self._tableStyle())
         table.align = "l"
         for entry in entries:
             table.add_row(
@@ -5423,7 +5480,7 @@ class PDFConsole(cmd.Cmd):
             table = PrettyTable(
                 ["Field", "Version", "SubFilter", "Integrity", "Authenticity", "Signer"]
             )
-            table.set_style(TableStyle.SINGLE_BORDER)
+            table.set_style(self._tableStyle())
             table.align = "l"
             for sig in signatures:
                 signerSubject = sig["signer"]["subject"] if sig["signer"] else ""
@@ -5896,7 +5953,7 @@ class PDFConsole(cmd.Cmd):
                             ]
                         )
                 table = PrettyTable(scan_list[0])
-                table.set_style(TableStyle.SINGLE_BORDER)
+                table.set_style(self._tableStyle())
                 table.align = "l"
                 table.sortby = f"{self.staticColor}Engine{self.resetColor}"
                 if len(scan_list) > 1:
@@ -6343,7 +6400,7 @@ class PDFConsole(cmd.Cmd):
                     location = f"offset {section.getOffset()}"
                 output += f"{newLine}  {label} ({location}):{newLine}"
                 table = PrettyTable(["Object", "Gen", "Type", "Details"])
-                table.set_style(TableStyle.SINGLE_BORDER)
+                table.set_style(self._tableStyle())
                 table.align = "l"
                 for subsection in section.getSubsectionsArray():
                     for i, entry in enumerate(subsection.getEntries()):
